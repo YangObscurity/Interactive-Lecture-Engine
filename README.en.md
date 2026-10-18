@@ -1,10 +1,12 @@
 # Interactive Lecture Rendering Engine
 
+> 🌐 **Live Demo / 在线演示**: [https://interactive-lecture-engine.vercel.app/](https://interactive-lecture-engine.vercel.app/)  
 > **Language / 语言**: English ｜ [中文](./README.md)
 
 > A production-ready open-source rendering engine designed to transform **modern engineering and technical lecture notes** into **high-quality interactive web courses and publication-grade export documents**: native interactive diagrams (ECharts, Mermaid, WaveDrom), build-time KaTeX mathematical typesetting, SimpleMindMap closed geometric projection mind maps, oscilloscope and hardware timing simulations, collapsible quiz drawers, publication-grade export suite (A4 smart page-break avoidance / ultra-HD canvas slice images), immersive reading mode, raw-link-free `.cite` citation chips, and a pluggable AI study sidecar — fully componentised, zero-hardcoding single source of truth, and physical decoupling between content and engine.
 
 <p>
+  <a href="https://interactive-lecture-engine.vercel.app/"><img alt="Demo" src="https://img.shields.io/badge/Demo-Vercel-black?logo=vercel&style=flat-square"></a>
   <img alt="VitePress" src="https://img.shields.io/badge/VitePress-1.6.4-3451b2?style=flat-square">
   <img alt="Vue" src="https://img.shields.io/badge/Vue-3.5-42b883?style=flat-square">
   <img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-strict-3178c6?style=flat-square">
@@ -89,6 +91,9 @@ Chart toolbars adhere strictly to a **100% pure SVG vector contract**, eliminati
 ---
 
 ## I. Quick Start
+
+> [!TIP]
+> **Instant Live Preview**: The project is live-deployed on Vercel. Test all interactive features without local setup: [https://interactive-lecture-engine.vercel.app/](https://interactive-lecture-engine.vercel.app/).
 
 ### 1. Prerequisites
 - **Node.js**: `≥ 18.0.0` (Node.js 20 LTS recommended)
