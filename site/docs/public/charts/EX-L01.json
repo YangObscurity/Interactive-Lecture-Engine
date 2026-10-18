@@ -1,0 +1,14 @@
+{
+  "c1": {
+    "type": "mermaid",
+    "code": "flowchart TB\n  subgraph SYS [\"电路回路四要素：谁决定电流？\"]\n    direction TB\n    V[\"电源 U_supply（3.3V）<br/>提供电压驱动\"]\n    R[\"限流电阻 R<br/>控制回路电流\"]\n    LED[\"LED 负载<br/>维持正向压降 V_f\"]\n    G[\"地 GND<br/>回路闭合\"]\n    V --> R --> LED --> G\n  end\n  subgraph RULE [\"设计计算法则\"]\n    Q1[\"电压分配: U_R = U_supply - V_f\"]\n    Q2[\"阻值计算: R = U_R / I_target\"]\n    Q3[\"标称选择: 向上取标准 E24 阻值\"]\n  end\n  R -.-> Q1\n  R -.-> Q2\n  R -.-> Q3"
+  },
+  "c2": {
+    "type": "echarts",
+    "code": "{\n  \"title\": { \"text\": \"限流电阻扫描（U=3.3V, Vf=2.0V）：电流与功耗响应曲线\" },\n  \"tooltip\": { \"trigger\": \"axis\" },\n  \"legend\": { \"data\": [\"回路电流 (mA)\", \"电阻功耗 (mW)\"] },\n  \"xAxis\": { \"type\": \"category\", \"name\": \"电阻阻值 (Ω)\", \"data\": [\"100\", \"120\", \"150\", \"180\", \"220\", \"270\", \"330\", \"390\", \"470\", \"560\"] },\n  \"yAxis\": [\n    { \"type\": \"value\", \"name\": \"电流 (mA)\", \"max\": 15 },\n    { \"type\": \"value\", \"name\": \"功耗 (mW)\", \"max\": 18 }\n  ],\n  \"series\": [\n    {\n      \"name\": \"回路电流 (mA)\",\n      \"type\": \"line\",\n      \"smooth\": true,\n      \"data\": [13.0, 10.8, 8.7, 7.2, 5.9, 4.8, 3.9, 3.3, 2.8, 2.3]\n    },\n    {\n      \"name\": \"电阻功耗 (mW)\",\n      \"type\": \"line\",\n      \"smooth\": true,\n      \"yAxisIndex\": 1,\n      \"data\": [16.9, 14.1, 11.3, 9.4, 7.7, 6.3, 5.1, 4.3, 3.6, 3.0]\n    }\n  ]\n}"
+  },
+  "c3": {
+    "type": "wavedrom",
+    "code": "{\n  \"signal\": [\n    { \"name\": \"GPIO 控制\", \"wave\": \"0.1..0.1..\" },\n    { \"name\": \"总线使能\", \"wave\": \"x.2.x.2.x\", \"data\": [\"写入\", \"读取\"] },\n    { \"name\": \"负载状态\", \"wave\": \"0.3..0.3..\", \"data\": [\"导通\", \"导通\"] }\n  ],\n  \"config\": { \"hscale\": 2 }\n}"
+  }
+}

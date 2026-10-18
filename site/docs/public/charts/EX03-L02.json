@@ -1,0 +1,6 @@
+{
+  "c1": {
+    "type": "wavedrom",
+    "code": "{\n  \"signal\": [\n    { \"name\": \"BBR 状态机\", \"wave\": \"2.3.4.5.\", \"data\": [\"Startup\", \"Drain\", \"ProbeBW\", \"ProbeRTT\"] },\n    { \"name\": \"充盈度\", \"wave\": \"1.0.1.0.\" },\n    { \"name\": \"PacingRate\", \"wave\": \"3.2.4.2.\", \"data\": [\"2.88x\", \"0.75x\", \"1.25x\", \"1.0x\"] }\n  ],\n  \"config\": { \"hscale\": 2 }\n}"
+  }
+}

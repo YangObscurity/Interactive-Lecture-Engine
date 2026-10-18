@@ -1,0 +1,87 @@
+# .gitattributes —— 行尾与文本/二进制归档策略
+#
+# 背景（已在仓库中实测核实，勿凭直觉修改）：
+#   · 开发机为 Windows，且 git core.autocrlf = true。
+#   · 但索引里现存的所有 blob **已经是 LF 存储**（README.md / AGENTS.md /
+#     site/package.json 经 `git cat-file -p HEAD:<file>` 验证均不含 CR）。
+#   · 因此下面的 text=auto eol=lf 策略与既有存储格式**完全一致**：
+#     不会触发全仓库重写，也不会制造 diff 噪声。
+#
+# 目标：无论贡献者在 Windows / macOS / Linux 上克隆，仓库内部一律以 LF 归档，
+#       消除跨平台协作的行尾抖动。
+
+# ── 默认：交由 git 自动判定文本，文本统一以 LF 入库 ────────────────
+* text=auto eol=lf
+
+# ── 明确声明为文本的文件类型（统一 LF）────────────────────────────
+*.md        text eol=lf
+*.markdown  text eol=lf
+*.mdown     text eol=lf
+*.mdx       text eol=lf
+
+*.json      text eol=lf
+*.jsonc     text eol=lf
+*.yml       text eol=lf
+*.yaml      text eol=lf
+*.toml      text eol=lf
+*.ini       text eol=lf
+*.cfg       text eol=lf
+*.editorconfig text eol=lf
+
+*.py        text eol=lf
+*.pyi       text eol=lf
+*.js        text eol=lf
+*.mjs       text eol=lf
+*.cjs       text eol=lf
+*.ts        text eol=lf
+*.mts       text eol=lf
+*.cts       text eol=lf
+*.jsx       text eol=lf
+*.tsx       text eol=lf
+*.vue       text eol=lf
+*.css       text eol=lf
+*.scss      text eol=lf
+*.less      text eol=lf
+*.html      text eol=lf
+*.svg       text eol=lf
+*.txt       text eol=lf
+*.sh        text eol=lf
+
+# ── Windows 专属脚本：检出为 CRLF，便于 cmd.exe / PowerShell 直接执行 ──
+*.bat       text eol=crlf
+*.cmd       text eol=crlf
+*.ps1       text eol=crlf
+
+# ── 图片等二进制资源：禁止任何行尾转换与 diff 渲染 ─────────────────
+*.png       binary
+*.jpg       binary
+*.jpeg      binary
+*.gif       binary
+*.webp      binary
+*.avif      binary
+*.ico       binary
+*.icns      binary
+
+*.pdf       binary
+*.zip       binary
+*.gz        binary
+*.7z        binary
+*.woff      binary
+*.woff2     binary
+*.ttf       binary
+*.otf       binary
+*.eot       binary
+
+# ── 锁文件：必须是文本（便于 review 与自动合并），但排除在语言统计外 ──
+package-lock.json   text eol=lf -diff linguist-generated
+pnpm-lock.yaml      text eol=lf -diff linguist-generated
+yarn.lock           text eol=lf -diff linguist-generated
+
+# ── 构建产物与生成文件：标记为 generated，折叠进 GitHub 的 diff ────
+site/docs/.vitepress/dist/**    export-ignore linguist-generated
+site/docs/public/charts/**      linguist-generated
+
+# ── 归档排除：git archive / GitHub 源码包不包含开发期目录 ──────────
+.github/            export-ignore
+.gitattributes      export-ignore
+.editorconfig       export-ignore

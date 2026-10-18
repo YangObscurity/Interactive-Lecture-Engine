@@ -1,0 +1,134 @@
+{
+  "_comment": "功能不变量基线快照 —— 判断『是否功能损失』的唯一客观标尺。由 scripts/audit_all.py --write-baseline 生成；请勿手工调低任何数字。",
+  "established_at": "2026-10-15T00:05:00+08:00",
+  "repo": "<REPO_ROOT>",
+  "git_head_note": "基线建立于并发构建竞争排除后的首次干净全站构建",
+  "build_command": "cd site && npm run build",
+  "build_success_marker": "✓ rendering pages",
+  "dist": "site/docs/.vitepress/dist",
+  "key_counts": {
+    "dist_html_total": 309,
+    "dist_L_html": 293,
+    "lecture_md_total": 305,
+    "lecture_md_per_group": {
+      "dt": 14,
+      "g01": 21,
+      "g02": 13,
+      "g03": 54,
+      "g04": 56,
+      "g05": 30,
+      "g06": 5,
+      "g07": 20,
+      "g08": 20,
+      "g09": 13,
+      "g10": 27,
+      "g11": 20,
+      "g12": 12
+    },
+    "cite_chips_total": 2833,
+    "figure_anchors_total": 1257,
+    "figure_pages_scanned": 279,
+    "figure_groups": 12,
+    "chart_type_dist": {
+      "mermaid": 779,
+      "echarts": 392,
+      "wavedrom": 86
+    },
+    "angle_tests": {
+      "passed": 15,
+      "total": 15
+    }
+  },
+  "gates": [
+    {
+      "name": "build",
+      "skipped": true,
+      "ok": true,
+      "note": "基线时已单独跑过全站构建并成功；audit_all.py 默认不重复构建"
+    },
+    {
+      "name": "pages",
+      "ok": true,
+      "html_count": 309,
+      "baseline": 307,
+      "delta": 2,
+      "note": "页数 309（Lead 所述 307 为并发构建前的旧值；本次干净构建为 309，页数只增不减，无功能损失）"
+    },
+    {
+      "name": "links",
+      "ok": true,
+      "exit_code": 0,
+      "a_http": 0,
+      "cite_total": 2833,
+      "pages_scanned": 293,
+      "conclusion": "PASS（无外链 <a>）"
+    },
+    {
+      "name": "angle",
+      "ok": true,
+      "exit_code": 0,
+      "passed": 15,
+      "total": 15,
+      "conclusion": "15/15 通过"
+    },
+    {
+      "name": "figs",
+      "ok": true,
+      "exit_code": 0,
+      "inconsistent": 0,
+      "pages": 279,
+      "figure_anchors": 1257,
+      "groups": 12,
+      "md_type_dist": {
+        "mermaid": 779,
+        "echarts": 392,
+        "wavedrom": 86
+      },
+      "conclusion": "不一致数: 0"
+    },
+    {
+      "name": "format",
+      "ok": true,
+      "exit_code": 0,
+      "high_severity": 0,
+      "warnings": 0,
+      "hot_pages": [],
+      "conclusion": "PASS（排版合规，无高危超长段落）"
+    },
+    {
+      "name": "bare_urls",
+      "ok": true,
+      "exit_code": 0,
+      "total": 0,
+      "kinds": {
+        "md-link": 0,
+        "bare-http": 0,
+        "schemeless": 0
+      },
+      "conclusion": "PASS（正文无裸 URL/链接）"
+    }
+  ],
+  "all_ok": true,
+  "baseline_verdict": {
+    "green_gates": [
+      "build",
+      "pages",
+      "links",
+      "angle",
+      "figs",
+      "format",
+      "bare_urls"
+    ],
+    "red_gates": [],
+    "no_regression_evidence": "所有质量门禁项全部通过：构建产物完整、正文无裸外链、figure 锚点与图表 JSON 严格 1:1 对齐、尖括号转义安全单测通过、正文排版格式合规。未发现任何功能损失迹象。",
+    "only_failure": null
+  },
+  "environment_warning": {
+    "id": "ENV-CONCURRENT-BUILD",
+    "observed_at": "2026-10-14T23:50 ~ 2026-10-15T00:03",
+    "issue": "同一 site/docs/.vitepress/dist 上曾同时存在 3~4 个 vitepress build 进程，互相清空 .vitepress/.temp 与 dist，导致 ERR_MODULE_NOT_FOUND: '.vitepress/.temp/app.js'，dist 一度 html=0，三进程各占 2.6~3.0GB 内存陷入僵局。",
+    "impact": "并发窗口内任何 dist 审计（check_body_links / audit_all 的 pages、links）都会得到假 FAIL 或假数字。",
+    "resolution": "等待并发构建自行退出后，在仅 1 个 build 进程时重新构建成功（309 html）。",
+    "rule_for_future": "运行构建与 dist 审计前，必须先确认 `vitepress build` 进程数为 0 或 1；构建必须串行。"
+  }
+}

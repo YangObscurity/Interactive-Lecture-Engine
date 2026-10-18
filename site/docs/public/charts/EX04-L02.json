@@ -1,0 +1,6 @@
+{
+  "c1": {
+    "type": "mermaid",
+    "code": "flowchart TD\n  subgraph PHASE1 [\"阶段一：准备阶段 (Prepare Phase)\"]\n    TC[\"事务协调者 (Coordinator)\"]\n    P1[\"参与节点 A (Participant)\"]\n    P2[\"参与节点 B (Participant)\"]\n    TC -->|Prepare| P1\n    TC -->|Prepare| P2\n    P1 -->|Vote Commit| TC\n    P2 -->|Vote Commit| TC\n  end\n  subgraph PHASE2 [\"阶段二：提交阶段 (Commit Phase)\"]\n    TC2[\"协调者决策\"]\n    TC2 -->|全局提交 Global Commit| P1\n    TC2 -->|全局提交 Global Commit| P2\n  end"
+  }
+}
