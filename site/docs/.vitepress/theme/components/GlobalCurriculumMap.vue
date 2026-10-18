@@ -936,24 +936,24 @@ function autoCalibrateLayout(instance: MindMapInstance, opt?: CalibrateOptions):
 
       const availableWidth = vpRect.width - 64
       let scaleAdjusted = false
-      if (availableWidth > 0 && renderedWidth > availableWidth) {
-        const mm = instance as unknown as {
-          view: { scale: number; transform: () => void }
-        }
-        const currScale = mm.view.scale || 1
-        const unscaledW = renderedWidth / currScale
-        const targetScale = Math.min(1.0, availableWidth / unscaledW)
-        if (targetScale < currScale) {
-          mm.view.scale = targetScale
-          mm.view.transform()
-          scaleAdjusted = true
-        }
+      const mm = instance as unknown as {
+        view: { scale: number; transform: () => void }
+        resize: () => void
+      }
+      const currScale = mm.view?.scale || 1
+      const unscaledW = renderedWidth / currScale
+      let targetScale = 1.0
+      if (availableWidth > 0 && unscaledW > availableWidth) {
+        targetScale = Math.min(1.0, Math.max(0.82, availableWidth / unscaledW))
+      }
+      // 双向自适应：收回时恢复至 1.0，展开受限时微调缩放
+      if (Math.abs(targetScale - currScale) > 0.015) {
+        mm.view.scale = targetScale
+        mm.view.transform()
+        scaleAdjusted = true
       }
 
       const deltaH = clampedHeight - viewportHeight.value
-      const mm = instance as unknown as {
-        resize: () => void
-      }
 
       if (Math.abs(deltaH) > 16) {
         isCalibrating = true
@@ -964,11 +964,11 @@ function autoCalibrateLayout(instance: MindMapInstance, opt?: CalibrateOptions):
             mm.resize?.()
           } finally {
             isCalibrating = false
-            calibratePosition(instance, { reCenterHorizontal: opt?.reCenterHorizontal || scaleAdjusted, smooth: true })
+            calibratePosition(instance, { reCenterHorizontal: opt?.reCenterHorizontal !== false, smooth: true })
           }
         }, 360)
       } else {
-        calibratePosition(instance, { reCenterHorizontal: opt?.reCenterHorizontal || scaleAdjusted, smooth: true })
+        calibratePosition(instance, { reCenterHorizontal: opt?.reCenterHorizontal !== false, smooth: true })
       }
     } catch {}
   })
@@ -976,9 +976,9 @@ function autoCalibrateLayout(instance: MindMapInstance, opt?: CalibrateOptions):
 
 /**
  * 黄金中心对齐与防切顶硬性断言：
- * 1. 当 reCenterHorizontal 为 true 时（首次入场 / 一键全展开 / 复位），整幅脑图水平居中；
- * 2. 局部讲义展开/收起时（用户点击）：绝不平移 X 方向（driftX = 0），若触碰边界则微移防溢出；
- * 3. 纵向仅在触碰顶部禁区（currentTop < MIN_SAFE_TOP）时向下平滑补足留白，平时保持绝对稳定。
+ * 1. 当 reCenterHorizontal 为 true 时（默认）：整幅脑图水平黄金居中，顶部锁定 56px 呼吸留白；
+ * 2. 局部讲义展开/收起时（用户点击）：平滑自适应位移，收回时自动上浮归位，展开时防切顶与居中；
+ * 3. 彻底根除“折叠收回后画布陷在下方回不来”与“多分支展开偏置横溢”的病灶。
  */
 function calibratePosition(instance: MindMapInstance, opt?: CalibrateOptions): void {
   try {
@@ -1008,22 +1008,21 @@ function calibratePosition(instance: MindMapInstance, opt?: CalibrateOptions): v
     const renderedHeight = maxB - minT
     const renderedWidth = maxR - minL
     const currentTop = minT - vpRect.top
+    const currentLeft = minL - vpRect.left
 
     let driftX = 0
     let driftY = 0
 
-    if (opt?.reCenterHorizontal) {
-      // 首次加载、一键全展开/折叠、或复位时全量居中
+    if (opt?.reCenterHorizontal !== false) {
+      // 全量与局部自适应居中：整体包围盒始终水平居中，展开/收回均平滑微调
       const idealLeft = Math.round((vpRect.width - renderedWidth) / 2)
-      const currentLeft = minL - vpRect.left
       driftX = idealLeft - currentLeft
 
-      // 顶部严格锁定在 SAFE_TOP_MARGIN (56px) 呼吸留白
+      // 顶部始终锁定在 SAFE_TOP_MARGIN (56px) 呼吸留白处，折叠收回自动上浮归位，绝不下沉偏置
       const idealTop = SAFE_TOP_MARGIN
       driftY = idealTop - currentTop
     } else {
-      // 局部点击展开/收起时：
-      // 默认锁定 driftX = 0，但若展开后边缘触碰视口边界，微调位移确保完全展示不被裁切
+      // 边界微调保底
       if (minL < vpRect.left + 24) {
         driftX = Math.round(vpRect.left + 24 - minL)
       } else if (maxR > vpRect.right - 24) {
@@ -1032,7 +1031,6 @@ function calibratePosition(instance: MindMapInstance, opt?: CalibrateOptions): v
         driftX = 0
       }
 
-      // 纵向位移仅作为防切顶保底：若向上伸展触碰顶部禁区 (< MIN_SAFE_TOP)，平滑下推补齐呼吸留白
       if (currentTop < MIN_SAFE_TOP) {
         driftY = SAFE_TOP_MARGIN - currentTop
       } else {
@@ -1068,6 +1066,37 @@ async function mountMap(kind: 'inline' | 'modal'): Promise<void> {
   }
   const instance = new MindMap({ el, data: buildMindMapData(), ...createOptions(kind) })
   instance.on('node_click', handleNodeClick)
+
+  // 手风琴互斥收回与自适应对齐（Accordion Mutual Exclusion）：
+  // 当展开某一大系或阶段分支时，自动收回同级兄弟分支，杜绝屏幕无限膨胀失焦；
+  // 节点展开/折叠后触发自适应居中与高度调整
+  instance.on('expand_btn_click', (node: any) => {
+    try {
+      if (isAllExpanded.value) {
+        isAllExpanded.value = false
+      }
+      const isExpanded = node?.getData?.('expand') !== false
+      if (isExpanded && node?.parent?.children) {
+        // 大系节点（layerIndex === 1）或 阶段节点（layerIndex === 2）：互斥手风琴收回
+        if (node.layerIndex === 1 || node.layerIndex === 2) {
+          let hasCollapsed = false
+          for (const sibling of node.parent.children) {
+            if (sibling !== node && sibling.getData?.('expand') !== false) {
+              if (sibling.nodeData?.data) {
+                sibling.nodeData.data.expand = false
+                hasCollapsed = true
+              }
+            }
+          }
+          if (hasCollapsed) {
+            instance.render()
+          }
+        }
+      }
+      needsRecenterOnNextRender = true
+    } catch {}
+  })
+
   // 导航委托兜底：挂在 Vue 稳定容器上，DOM 改写（GT 克隆）后仍可跳转
   attachDelegatedNav(el)
 
@@ -1081,7 +1110,7 @@ async function mountMap(kind: 'inline' | 'modal'): Promise<void> {
 
   // 视角与骨架高度自适应：
   // 首次渲染执行 performInitialFit 闭合几何映射，锁定水平居中与 56px 呼吸留白；
-  // 用户后续局部展开/折叠，横向锁定 driftX = 0，纵向由容器高度平滑自适应容纳无抖动；
+  // 用户局部展开/折叠，自动手风琴收回兄弟分支，并自适应调整位置与高度；
   // 用户全量展开/折叠/复位，经防抖等全量节点排版稳定后执行 performInitialFit 重新铺满与居中
   instance.on('node_tree_render_end', () => {
     if (kind === 'modal') {
@@ -1101,7 +1130,7 @@ async function mountMap(kind: 'inline' | 'modal'): Promise<void> {
         needsRecenterOnNextRender = false
         performInitialFit(instance)
       } else {
-        autoCalibrateLayout(instance, { reCenterHorizontal: false, smooth: true })
+        autoCalibrateLayout(instance, { reCenterHorizontal: true, smooth: true })
       }
     }, 120)
   })
