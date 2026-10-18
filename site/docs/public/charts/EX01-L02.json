@@ -1,0 +1,10 @@
+{
+  "c1": {
+    "type": "mermaid",
+    "code": "stateDiagram-v2\n  [*] --> Invalid : 系统复位\n  Invalid --> Shared : 本地读 (PrRd) / 发起 BusRd\n  Invalid --> Modified : 本地写 (PrWr) / 发起 BusRdX\n  Shared --> Modified : 本地写 (PrWr) / 发起 BusUpgr\n  Shared --> Invalid : 收到远端写 (BusRdX / BusUpgr)\n  Modified --> Shared : 收到远端读 (BusRd) / 写回内存\n  Modified --> Invalid : 收到远端写 (BusRdX) / 写回内存\n  Shared --> Exclusive : 独占读命中\n  Exclusive --> Modified : 本地写 (PrWr)"
+  },
+  "c2": {
+    "type": "echarts",
+    "code": "{\n  \"title\": { \"text\": \"多核并发竞争下的缓存行失效与延迟阶梯 (Latency Scaling)\" },\n  \"tooltip\": { \"trigger\": \"axis\" },\n  \"legend\": { \"data\": [\"MESI Invalidation Spike\"] },\n  \"xAxis\": { \"type\": \"category\", \"name\": \"核心并发数\", \"data\": [\"1 Core\", \"2 Cores\", \"4 Cores\", \"8 Cores\", \"16 Cores\", \"32 Cores\", \"64 Cores\"] },\n  \"yAxis\": { \"type\": \"value\", \"name\": \"平均访问延迟 (ns)\" },\n  \"series\": [\n    {\n      \"name\": \"MESI Invalidation Spike\",\n      \"type\": \"line\",\n      \"smooth\": true,\n      \"itemStyle\": { \"color\": \"#ef4444\" },\n      \"data\": [1.2, 4.8, 12.5, 28.4, 52.1, 84.6, 128.0]\n    }\n  ]\n}"
+  }
+}

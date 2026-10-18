@@ -1,0 +1,165 @@
+# ==============================================================================
+# Git Ignore Rules (.gitignore)
+# Purpose: Decouple content from engine, isolate credentials, build artifacts, 
+#          runtime mount states, and temporary local files.
+# ==============================================================================
+
+# ------------------------------------------------------------------------------
+# 1. Runtime Mount State, Build Locks & Temporary Markers
+# ------------------------------------------------------------------------------
+.content-mount.json
+.content-mount.json.tmp
+*.mount.tmp
+*.tmp
+*.bak
+*.backup
+*.old
+*.orig
+.build.lock
+*.lock.tmp
+
+# ------------------------------------------------------------------------------
+# 2. External Content Mount Targets (Mounted via scripts/mount_content.py)
+# ------------------------------------------------------------------------------
+# Custom lecture groups dynamically mounted into site/docs/
+site/docs/courses/
+site/docs/lectures/
+site/docs/custom/
+site/docs/g[0-9]*/
+site/docs/c[0-9]*/
+site/docs/dt/
+site/docs/demo/
+site/docs/test_*/
+site/docs/content-*/
+site/docs/private*/
+
+# Dynamic group definitions (only the example structure groups.example.mts is tracked)
+site/docs/.vitepress/content-groups.mts
+site/docs/.vitepress/groups.mts
+!site/docs/.vitepress/groups.example.mts
+
+# Runtime chart JSON sidecars (only example/demo sidecars and .keep are tracked)
+site/docs/public/charts/*
+!site/docs/public/charts/.keep
+!site/docs/public/charts/EX*.json
+!site/docs/public/charts/DEMO*.json
+
+# External knowledge graph and catalog cache files
+site/docs/public/*knowledge_graph.json
+site/docs/public/lecture_catalog.json
+site/docs/public/notion_*.json
+
+# ------------------------------------------------------------------------------
+# 3. Custom Content Sources (Only the built-in demo/ package is distributed)
+# ------------------------------------------------------------------------------
+content-sources/*
+!content-sources/README.md
+!content-sources/demo/
+
+# ------------------------------------------------------------------------------
+# 4. Local Backups, Internal Audits & Temporary Archives
+# ------------------------------------------------------------------------------
+*CONTRACT*.md
+*CHECK*.md
+*contract*.md
+*check*.md
+*BUFFER*.md
+*buffer*.md
+OSS_*.md
+*privacy*report*.md
+*leak*.md
+.refactor-backup/
+backups/
+backup/
+
+# ------------------------------------------------------------------------------
+# 5. Environment Configurations, Credentials & Secrets
+# ------------------------------------------------------------------------------
+.env
+.env.*
+!.env.example
+*.token
+*.key
+*.pem
+*.id_rsa
+*.id_ed25519
+*.pfx
+*.p12
+*.kdbx
+*.secret
+*.secrets
+*credentials*.py
+notion_credentials.py
+private_*
+secrets.*
+google_*.json
+client_secret*.json
+
+# ------------------------------------------------------------------------------
+# 6. Build Outputs, Package Dependencies & VitePress Caches
+# ------------------------------------------------------------------------------
+node_modules/
+dist/
+.vitepress/dist/
+.vitepress/cache/
+site/docs/.vitepress/dist/
+site/docs/.vitepress/cache/
+/package-lock.json
+!site/package-lock.json
+pnpm-lock.yaml
+yarn.lock
+
+# ------------------------------------------------------------------------------
+# 7. Document Exports, Canvas Screenshots & Audit Reports
+# ------------------------------------------------------------------------------
+exports/
+screenshots/
+screenshot_*.png
+screenshot_*.jpg
+*.pdf
+*.epub
+*.docx
+*.zip
+*.tar.gz
+audit_report.*
+!site/docs/public/showcase/*.png
+
+# ------------------------------------------------------------------------------
+# 8. Python Bytecode, Virtual Environments & Coverage Reports
+# ------------------------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.coverage
+htmlcov/
+.venv/
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+.python-version
+
+# ------------------------------------------------------------------------------
+# 9. Operating System Artifacts, Editor Configs & Debug Logs
+# ------------------------------------------------------------------------------
+.DS_Store
+Thumbs.db
+desktop.ini
+ehthumbs.db
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+tmp/
+temp/
+scratch/
+scratch_*.py
+tmp_*.py

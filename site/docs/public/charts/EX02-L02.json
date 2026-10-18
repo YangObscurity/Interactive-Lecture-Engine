@@ -1,0 +1,6 @@
+{
+  "c1": {
+    "type": "mermaid",
+    "code": "flowchart LR\n  subgraph WHITE [\"白色集合 (未访问/垃圾候选)\"]\n    W1[\"对象 A\"]\n    W2[\"对象 B\"]\n    W3[\"对象 C\"]\n  end\n  subgraph GREY [\"灰色集合 (正在扫描引用的对象)\"]\n    G1[\"根对象 Root\"]\n  end\n  subgraph BLACK [\"黑色集合 (自身及引用已确定存活)\"]\n    B1[\"全局存活对象\"]\n  end\n  G1 -->|扫描指针| W1\n  B1 --> W2\n  style WHITE fill:#f8fafc,stroke:#94a3b8,color:#334155\n  style GREY fill:#fef08a,stroke:#eab308,color:#854d0e\n  style BLACK fill:#1e293b,stroke:#0f172a,color:#ffffff"
+  }
+}

@@ -1,0 +1,35 @@
+{
+  "name": "lecture-site",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "可交互工程讲义渲染引擎（VitePress 站点）",
+  "scripts": {
+    "dev": "vitepress dev docs",
+    "build": "vitepress build docs",
+    "preview": "vitepress preview docs"
+  },
+  "devDependencies": {
+    "vitepress": "^1.6.4"
+  },
+  "dependencies": {
+    "dompurify": "^3.4.17",
+    "echarts": "^5.6.0",
+    "esbuild": "^0.21.5",
+    "html-to-image": "^1.11.13",
+    "katex": "^0.16.47",
+    "marked": "^18.1.1",
+    "markmap-view": "^0.18.12",
+    "mermaid": "^11.4.1",
+    "shiki": "^4.5.0",
+    "simple-mind-map": "^0.14.0-fix.3",
+    "vue": "^3.5.43",
+    "wavedrom": "^3.7.0"
+  },
+  "allowScripts": {
+    "esbuild@0.21.5": true
+  },
+  "optionalDependencies": {
+    "puppeteer": "^25.14.0"
+  }
+}

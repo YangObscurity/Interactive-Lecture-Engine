@@ -1,0 +1,150 @@
+# ci.yml —— 持续集成质量闸门
+#
+# ⚠️ 设计前提（务必读懂再改）
+#   本仓库开源的是核心框架与渲染引擎，业务讲义正文通过内容源独立挂载。
+
+name: CI
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+    branches: ['**']
+  workflow_dispatch:
+
+# 同一分支的新推送取消掉仍在跑的旧任务，节省额度。
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # ── 闸门 1：尖括号规则单测（与讲义内容无关，任何仓库状态都必须通过）────
+  gate-angle:
+    name: 闸门 · 尖括号规则单测
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: 运行 test_angle.py
+        run: python scripts/test_angle.py
+
+  # ── 闸门 2：站点生产构建 ────────────────────────────────────────────
+  build:
+    name: 站点生产构建
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装 Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: site/package-lock.json
+
+      - name: 安装依赖（严格按 lockfile）
+        working-directory: site
+        run: npm ci
+
+      - name: 生产构建
+        working-directory: site
+        run: npm run build
+
+      - name: 上传构建产物（供后续闸门复用）
+        uses: actions/upload-artifact@v4
+        with:
+          name: vitepress-dist
+          path: site/docs/.vitepress/dist
+          retention-days: 1
+
+  # ── 闸门 3：内容契约校验（依赖构建产物；讲义为空时自动跳过）──────────
+  gate-content:
+    name: 闸门 · 内容契约
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: 下载构建产物
+        uses: actions/download-artifact@v4
+        with:
+          name: vitepress-dist
+          path: site/docs/.vitepress/dist
+
+      # 探测本仓库是否挂载了外部讲义内容。
+      #
+      # 探测模式采用递归查找 `site/docs/**/L*.md`，以兼容任意命名模式的自定义课程组
+      # 以及引擎自带的 `examples/`。
+      - name: 探测讲义是否存在
+        id: probe
+        run: |
+          set -euo pipefail
+          if compgen -G "site/docs/**/L*.md" > /dev/null 2>&1 \
+             || find site/docs -mindepth 2 -name 'L*.md' -print -quit | grep -q .; then
+            echo "has_lectures=true" >> "$GITHUB_OUTPUT"
+            echo "::notice title=讲义探测::检测到讲义源码，内容闸门将全量执行。"
+          else
+            echo "has_lectures=false" >> "$GITHUB_OUTPUT"
+            echo "::warning title=讲义缺失::未检测到 site/docs 下的 L*.md —— 本仓库为引擎/框架形态，跳过内容契约闸门（不计为失败）。"
+          fi
+
+      # ── 以下两条闸门仅在“有讲义”时执行 ──────────────────────────
+
+      - name: '闸门 · figure 锚点 ↔ sidecar JSON 契约 (check_figs2.py)'
+        if: steps.probe.outputs.has_lectures == 'true'
+        run: python scripts/check_figs2.py
+
+      # 注意：断言输出出现 `结论: PASS` 是**双保险**。
+      # 2026-10-15 起 check_body_links.py 的退出码已正确反映结论
+      # （`return 0 if passed else 1` 且内建真空自检），因此退出码本身已可信；
+      # 这里额外 grep 输出，防的是「未来有人改坏退出码」的回归，
+      # 也保留了历史上该脚本"只打印不返回"时期的兼容意图。
+      # 新增闸门（2026-10-15）：依赖声明一致性 + 编码完整性。
+      # 二者都**不需要讲义**，任何仓库状态都必须通过。
+      - name: '闸门 · 依赖声明一致性 (check_deps.py)'
+        run: python scripts/check_deps.py
+
+      - name: '闸门 · 编码完整性 (check_encoding.py)'
+        run: python scripts/check_encoding.py
+
+      - name: '闸门 · 文档完整性 (doc_audit.py)'
+        run: python scripts/doc_audit.py
+
+      - name: '闸门 · 密钥与隐私扫描 (scan_secrets.py)'
+        run: python scripts/scan_secrets.py
+
+      # ── 以下三道补齐 CI 与本地 audit_all.py 的覆盖差（2026-10-15）─────────
+      # 起因：审计发现「闸门清单三方不一致」—— README 5 项 / audit_all.py 12 项 /
+      # CI 7 项。三道闸门本地会跑、CI 却不跑，意味着**本地能发现的问题会漏到线上**。
+      # 这三道都已实测可独立运行且不需要讲义。
+      - name: '闸门 · 示例内容源契约 (check_example.py)'
+        run: python scripts/check_example.py
+
+      - name: '闸门 · 裸 URL 审计 (audit_bare_urls.py)'
+        run: python scripts/audit_bare_urls.py
+
+      - name: '闸门 · LaTeX 与排版规范 (format_audit.py)'
+        run: python scripts/format_audit.py --src site/docs
+
+      - name: '闸门 · 正文外链硬判据 (check_body_links.py)'
+        if: steps.probe.outputs.has_lectures == 'true'
+        run: |
+          set -euo pipefail
+          python scripts/check_body_links.py | tee /tmp/body_links.log
+          if ! grep -q "结论: PASS" /tmp/body_links.log; then
+            echo "::error title=正文外链闸门失败::check_body_links.py 未给出 PASS 结论；详见上方日志。"
+            exit 1
+          fi

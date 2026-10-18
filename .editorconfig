@@ -1,0 +1,49 @@
+# .editorconfig —— 跨编辑器统一基础排版
+# 说明：本仓库是中文项目，源码与文档统一使用 UTF-8 编码。
+# 行尾策略见 .gitattributes（本文件只负责编辑器内的默认行为）。
+
+root = true
+
+# ── 全仓库通用默认 ────────────────────────────────────────────────
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 2
+
+# ── Markdown：讲义正文，禁止自动去尾随空格 ────────────────────────
+# 两个及以上尾随空格在 Markdown 里是「硬换行」，被自动清理会改变渲染结果。
+[*.md]
+trim_trailing_whitespace = false
+indent_size = 2
+
+[*.{markdown,mdown,mkd}]
+trim_trailing_whitespace = false
+
+# ── Python：脚本工具链，遵循 PEP 8 四空格 ─────────────────────────
+[*.{py,pyi}]
+indent_size = 4
+
+# ── 前端与配置 ────────────────────────────────────────────────────
+[*.{ts,mts,cts,js,mjs,cjs,jsx,tsx,vue,json,jsonc,yml,yaml,css,scss,less,html}]
+indent_size = 2
+
+# ── 特殊文件：不要动 ─────────────────────────────────────────────
+# 依赖锁文件由包管理器生成，手工改动会破坏完整性校验。
+[{package-lock.json,pnpm-lock.yaml,yarn.lock}]
+insert_final_newline = false
+indent_size = 2
+
+# 补丁与 diff 内容必须逐字节保持原样。
+[*.{patch,diff}]
+trim_trailing_whitespace = false
+insert_final_newline = false
+
+# Windows 批处理与 PowerShell 脚本。
+[*.{bat,cmd}]
+end_of_line = crlf
+
+[*.ps1]
+indent_size = 4

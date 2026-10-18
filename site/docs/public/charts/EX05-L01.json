@@ -1,0 +1,10 @@
+{
+  "c1": {
+    "type": "mermaid",
+    "code": "flowchart LR\n  subgraph WRITE [\"写入路径 (Write Path)\"]\n    REQ[\"写请求 Put(K, V)\"] --> WAL[(\"WAL 顺序追加写磁盘\")]\n    REQ --> MEM[\"MemTable 内存跳表\"]\n  end\n  subgraph FLUSH [\"刷盘与压缩 (Compaction)\"]\n    MEM -->|内存阈值冻结| IMM[\"Immutable MemTable\"]\n    IMM -->|后台刷盘 Flush| L0[\"SSTable Level 0\"]\n    L0 -->|Leveled Compaction| L1[\"SSTable Level 1\"]\n    L1 -->|归并排序压缩| L2[\"SSTable Level 2\"]\n  end"
+  },
+  "c2": {
+    "type": "echarts",
+    "code": "{\n  \"title\": { \"text\": \"LSM-Tree 分层压缩写放大系数与读取延迟权衡\" },\n  \"tooltip\": { \"trigger\": \"axis\" },\n  \"legend\": { \"data\": [\"写放大系数 (Write Amplification)\", \"点查延迟 (P99 Read Latency ms)\"] },\n  \"xAxis\": { \"type\": \"category\", \"data\": [\"Size-Tiered\", \"Level-0\", \"Level-1\", \"Level-2\", \"Level-3\"] },\n  \"yAxis\": [\n    { \"type\": \"value\", \"name\": \"写放大倍数\", \"max\": 40 },\n    { \"type\": \"value\", \"name\": \"P99 读取延迟 (ms)\", \"max\": 15 }\n  ],\n  \"series\": [\n    {\n      \"name\": \"写放大系数 (Write Amplification)\",\n      \"type\": \"bar\",\n      \"itemStyle\": { \"color\": \"#dc2626\" },\n      \"data\": [4.2, 8.5, 14.1, 22.8, 32.5]\n    },\n    {\n      \"name\": \"点查延迟 (P99 Read Latency ms)\",\n      \"type\": \"line\",\n      \"yAxisIndex\": 1,\n      \"itemStyle\": { \"color\": \"#3b82f6\" },\n      \"data\": [12.4, 6.2, 3.1, 1.8, 1.2]\n    }\n  ]\n}"
+  }
+}

@@ -1,0 +1,84 @@
+{
+  "tool": "scripts/audit_all.py",
+  "generated_at": "2026-10-15T00:04:40+08:00",
+  "repo": "<REPO_ROOT>",
+  "all_ok": true,
+  "gates": [
+    {
+      "name": "build",
+      "skipped": true,
+      "ok": true,
+      "note": "未加 --build，跳过构建（读现有 dist）"
+    },
+    {
+      "name": "pages",
+      "ok": true,
+      "html_count": 309,
+      "baseline": 307,
+      "delta": 2,
+      "note": "页数 309（基线 307，+2）"
+    },
+    {
+      "name": "links",
+      "ok": true,
+      "exit_code": 0,
+      "seconds": 0.41,
+      "a_http": 0,
+      "cite_total": 2833,
+      "pages_scanned": 293,
+      "conclusion": "PASS（无外链 <a>）"
+    },
+    {
+      "name": "angle",
+      "ok": true,
+      "exit_code": 0,
+      "seconds": 0.08,
+      "passed": 15,
+      "total": 15,
+      "conclusion": "15/15 通过"
+    },
+    {
+      "name": "figs",
+      "ok": true,
+      "exit_code": 0,
+      "seconds": 0.21,
+      "inconsistent": 0,
+      "pages": 279,
+      "figure_anchors": 1257,
+      "groups": 12,
+      "md_type_dist": {
+        "mermaid": 779,
+        "echarts": 392,
+        "wavedrom": 86
+      },
+      "conclusion": "不一致数: 0"
+    },
+    {
+      "name": "format",
+      "ok": true,
+      "exit_code": 0,
+      "seconds": 1.8,
+      "high_severity": 0,
+      "warnings": 0,
+      "hot_pages": [],
+      "conclusion": "PASS（无高危）"
+    },
+    {
+      "name": "bare_urls",
+      "ok": true,
+      "exit_code": 0,
+      "seconds": 0.31,
+      "total": 0,
+      "kinds": {
+        "md-link": 0,
+        "bare-http": 0,
+        "schemeless": 0
+      },
+      "conclusion": "PASS（正文无裸 URL/链接）"
+    }
+  ],
+  "baseline_compare": {
+    "baseline_file": "ops\\audit_baseline.json",
+    "alerts": []
+  }
+}

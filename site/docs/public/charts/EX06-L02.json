@@ -1,0 +1,6 @@
+{
+  "c1": {
+    "type": "mermaid",
+    "code": "sequenceDiagram\n  autonumber\n  participant GW as API 网关 Gateway\n  participant ORD as 订单服务 OrderService\n  participant PAY as 支付服务 PaymentService\n  Note over GW: 生成 trace-id: 4bf92f3577b34da6a3ce929d0e0e4736\n  GW->>ORD: HTTP POST /orders (Header: traceparent)\n  activate ORD\n  Note over ORD: 继承 trace-id，生成 span-id: 00f067aa0ba902b7\n  ORD->>PAY: gRPC ProcessPayment (Context Propagation)\n  activate PAY\n  Note over PAY: 跨进程传播成功，记录支付耗时\n  PAY-->>ORD: gRPC Response OK\n  deactivate PAY\n  ORD-->>GW: HTTP Response 201 Created\n  deactivate ORD"
+  }
+}

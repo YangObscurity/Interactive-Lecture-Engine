@@ -1,0 +1,10 @@
+{
+  "c1": {
+    "type": "mermaid",
+    "code": "flowchart TD\n  subgraph USER [\"用户态 User Space\"]\n    APP[\"业务应用 Application\"]\n    LOADER[\"eBPF 采集器 / 控制器\"]\n    MAP_USER[\"用户态读取 BPF Maps / RingBuffer\"]\n  end\n  subgraph KERNEL [\"Linux 内核态 Kernel Space\"]\n    SYS[\"系统调用 sys_enter_write\"]\n    BPF_PROG[\"eBPF 字节码探针 (kprobe/tracepoint)\"]\n    VERIFIER[\"内核静态验证器 (Verifier)\"]\n    JIT[\"JIT 即时编译成机器码\"]\n    MAPS[(\"高效共享内存 BPF Map\")]\n  end\n  LOADER -->|bpf 系统调用载入| VERIFIER\n  VERIFIER --> JIT --> BPF_PROG\n  SYS -->|触发 Hook| BPF_PROG\n  BPF_PROG -->|无锁更新计数| MAPS\n  MAPS --> MAP_USER"
+  },
+  "c2": {
+    "type": "echarts",
+    "code": "{\n  \"title\": { \"text\": \"传统 APM 探针 vs eBPF 内核探针 CPU 开销对比 (%)\" },\n  \"tooltip\": { \"trigger\": \"axis\" },\n  \"legend\": { \"data\": [\"传统 JVM/Node Agent 探针 (5.8%)\", \"eBPF 内核探测器 (0.4%)\"] },\n  \"xAxis\": { \"type\": \"category\", \"data\": [\"10k QPS\", \"20k QPS\", \"50k QPS\", \"100k QPS\", \"200k QPS\"] },\n  \"yAxis\": { \"type\": \"value\", \"name\": \"额外 CPU 消耗百分比 (%)\" },\n  \"series\": [\n    {\n      \"name\": \"传统 JVM/Node Agent 探针 (5.8%)\",\n      \"type\": \"line\",\n      \"smooth\": true,\n      \"itemStyle\": { \"color\": \"#f43f5e\" },\n      \"data\": [1.8, 3.2, 5.8, 9.4, 15.6]\n    },\n    {\n      \"name\": \"eBPF 内核探测器 (0.4%)\",\n      \"type\": \"line\",\n      \"smooth\": true,\n      \"itemStyle\": { \"color\": \"#0891b2\" },\n      \"data\": [0.2, 0.3, 0.4, 0.7, 1.1]\n    }\n  ]\n}"
+  }
+}

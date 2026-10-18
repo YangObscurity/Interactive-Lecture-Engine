@@ -1,0 +1,10 @@
+{
+  "c1": {
+    "type": "mermaid",
+    "code": "flowchart TD\n  subgraph OS [\"操作系统内核空间\"]\n    M1[\"物理线程 M1\"]\n    M2[\"物理线程 M2\"]\n  end\n  subgraph RUNTIME [\"用户态运行时 GMP 拓扑\"]\n    P1[\"逻辑处理器 P1 (本地队列 LRQ)\"]\n    P2[\"逻辑处理器 P2 (本地队列 LRQ)\"]\n    GRQ[(\"全局运行队列 GRQ\")]\n    G1[\"Goroutine G1\"]\n    G2[\"Goroutine G2\"]\n    G3[\"Goroutine G3 (空闲)\"]\n    P1 --> G1\n    P1 --> G2\n    P2 -.->|任务窃取 50%| P1\n  end\n  M1 --> P1\n  M2 --> P2\n  P2 --> GRQ"
+  },
+  "c2": {
+    "type": "echarts",
+    "code": "{\n  \"title\": { \"text\": \"Work-Stealing 与全局锁调度器吞吐对比 (kOps/s)\" },\n  \"tooltip\": { \"trigger\": \"axis\" },\n  \"legend\": { \"data\": [\"Work-Stealing 架构\", \"传统全局锁队列\"] },\n  \"xAxis\": { \"type\": \"category\", \"data\": [\"2核\", \"4核\", \"8核\", \"16核\", \"32核\", \"64核\"] },\n  \"yAxis\": { \"type\": \"value\", \"name\": \"调度吞吐 (kOps/s)\" },\n  \"series\": [\n    {\n      \"name\": \"Work-Stealing 架构\",\n      \"type\": \"line\",\n      \"smooth\": true,\n      \"itemStyle\": { \"color\": \"#7c3aed\" },\n      \"data\": [420, 810, 1560, 2980, 5600, 10200]\n    },\n    {\n      \"name\": \"传统全局锁队列\",\n      \"type\": \"line\",\n      \"smooth\": true,\n      \"itemStyle\": { \"color\": \"#94a3b8\" },\n      \"data\": [380, 520, 610, 580, 510, 420]\n    }\n  ]\n}"
+  }
+}

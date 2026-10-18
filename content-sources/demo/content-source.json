@@ -1,0 +1,21 @@
+{
+  "name": "demo",
+  "title": "交互式讲义通用演示课程 (Demo Curriculum)",
+  "version": "1.0.0",
+  "description": "专为开源缓冲与引擎解耦架构设计的官方参考演示内容包，展示 ECharts、Mermaid、LaTeX 公式与 .cite 胶囊等特性。",
+  "author": "Interactive Lecture Engine Contributors",
+  "license": "MIT",
+  "groups": [
+    {
+      "id": "demo",
+      "name": "演示课程组",
+      "prefix": "DEMO",
+      "lectures": [
+        "L01",
+        "L02"
+      ]
+    }
+  ],
+  "charts_dir": "charts",
+  "docs_dir": "."
+}

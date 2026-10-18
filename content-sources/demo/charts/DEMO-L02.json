@@ -1,0 +1,8 @@
+{
+  "c1": {
+    "type": "mermaid",
+    "title": "内容源插拔架构状态迁移拓扑",
+    "caption": "图 2.1：从外部讲义源到引擎渲染与发布的完整流转闭环",
+    "code": "graph LR\n    A[外部讲义源\\nExternal Sources] -->|--mount| B(挂载开发态\\nMounted Engine)\n    B -->|npm run dev| C[实时渲染走查\\nVitePress Dev]\n    B -->|--verify| D{契约双向校验}\n    D -->|PASS| E[生产构建打包\\nProduction Build]\n    D -->|FAIL| B\n    B -->|--unmount / --clean| F[重置基准态\\nReset Baseline]\n    F -->|git push| G[开源公开发布\\nPublic Release]"
+  }
+}

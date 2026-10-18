@@ -1,0 +1,71 @@
+{
+  "c1": {
+    "type": "echarts",
+    "title": "RC 瞬态充电电压与电流响应曲线",
+    "caption": "图 1.1：时间常数 τ 对充放电速率的决定性影响（实测与理论对比）",
+    "option": {
+      "title": {
+        "text": "RC 电路阶跃响应",
+        "left": "center",
+        "textStyle": {
+          "fontSize": 14,
+          "fontWeight": "normal"
+        }
+      },
+      "tooltip": {
+        "trigger": "axis"
+      },
+      "legend": {
+        "data": ["电容电压 Vc(t)", "充电电流 i(t)"],
+        "bottom": 0
+      },
+      "grid": {
+        "left": "3%",
+        "right": "4%",
+        "bottom": "10%",
+        "containLabel": true
+      },
+      "xAxis": {
+        "type": "category",
+        "boundaryGap": false,
+        "data": ["0τ", "1τ", "2τ", "3τ", "4τ", "5τ"],
+        "name": "时间"
+      },
+      "yAxis": [
+        {
+          "type": "value",
+          "name": "电压 (V)",
+          "min": 0,
+          "max": 5
+        },
+        {
+          "type": "value",
+          "name": "电流 (mA)",
+          "min": 0,
+          "max": 10
+        }
+      ],
+      "series": [
+        {
+          "name": "电容电压 Vc(t)",
+          "type": "line",
+          "smooth": true,
+          "data": [0.0, 3.16, 4.32, 4.75, 4.91, 5.0],
+          "itemStyle": {
+            "color": "#3eaf7c"
+          }
+        },
+        {
+          "name": "充电电流 i(t)",
+          "type": "line",
+          "yAxisIndex": 1,
+          "smooth": true,
+          "data": [10.0, 3.68, 1.35, 0.50, 0.18, 0.05],
+          "itemStyle": {
+            "color": "#e06c75"
+          }
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "c1": {
+    "type": "mermaid",
+    "code": "sequenceDiagram\n  autonumber\n  participant C as 客户端 Client\n  participant S as 服务端 Server\n  Note over C,S: 传统 TCP + TLS 1.3 需要 2-RTT\n  C->>S: 1. Initial [Client Hello + TLS KeyShare]\n  activate S\n  S-->>C: 2. Handshake [Server Hello + Finished]\n  deactivate S\n  Note over C: 已完成对称密钥协商，立即发送应用加密数据\n  C->>S: 3. 1-RTT Application Data [HTTP/3 GET /api]\n  S-->>C: 4. 1-RTT Application Data [HTTP/3 Response 200 OK]"
+  },
+  "c2": {
+    "type": "echarts",
+    "code": "{\n  \"title\": { \"text\": \"网络丢包率下 HTTP/2 (TCP) 与 HTTP/3 (QUIC) 首屏加载耗时 (ms)\" },\n  \"tooltip\": { \"trigger\": \"axis\" },\n  \"legend\": { \"data\": [\"HTTP/2 (TCP Head-of-Line Blocking)\", \"HTTP/3 (QUIC Independent Streams)\"] },\n  \"xAxis\": { \"type\": \"category\", \"name\": \"网络丢包率\", \"data\": [\"0%\", \"1%\", \"2%\", \"5%\", \"10%\", \"15%\"] },\n  \"yAxis\": { \"type\": \"value\", \"name\": \"页面首屏耗时 (ms)\" },\n  \"series\": [\n    {\n      \"name\": \"HTTP/2 (TCP Head-of-Line Blocking)\",\n      \"type\": \"line\",\n      \"smooth\": true,\n      \"itemStyle\": { \"color\": \"#f97316\" },\n      \"data\": [320, 540, 890, 1650, 3400, 5800]\n    },\n    {\n      \"name\": \"HTTP/3 (QUIC Independent Streams)\",\n      \"type\": \"line\",\n      \"smooth\": true,\n      \"itemStyle\": { \"color\": \"#059669\" },\n      \"data\": [280, 310, 340, 420, 680, 950]\n    }\n  ]\n}"
+  }
+}

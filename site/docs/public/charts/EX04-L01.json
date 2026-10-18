@@ -1,0 +1,10 @@
+{
+  "c1": {
+    "type": "mermaid",
+    "code": "sequenceDiagram\n  autonumber\n  participant L as 领导者 Leader (S1)\n  participant F1 as 跟随者 Follower (S2)\n  participant F2 as 跟随者 Follower (S3)\n  Note over L: 接收客户端写入请求 (cmd=SET k v)\n  L->>F1: 1. AppendEntries RPC [Term: 2, LogIndex: 101]\n  L->>F2: 2. AppendEntries RPC [Term: 2, LogIndex: 101]\n  activate F1\n  activate F2\n  F1-->>L: 3. AppendEntries OK (Success)\n  F2-->>L: 4. AppendEntries OK (Success)\n  deactivate F1\n  deactivate F2\n  Note over L: 达到半数以上确认 (Quorum=2/3) -> 提交日志\n  L-->>L: 5. 提交状态机 commitIndex=101\n  L->>F1: 6. 下次心跳同步 commitIndex=101\n  L->>F2: 7. 下次心跳同步 commitIndex=101"
+  },
+  "c2": {
+    "type": "echarts",
+    "code": "{\n  \"title\": { \"text\": \"不同集群节点规模下 Raft 选主收敛时间分布 (ms)\" },\n  \"tooltip\": { \"trigger\": \"axis\" },\n  \"xAxis\": { \"type\": \"category\", \"data\": [\"3 节点\", \"5 节点\", \"7 节点\", \"9 节点\"] },\n  \"yAxis\": { \"type\": \"value\", \"name\": \"选主耗时 (ms)\" },\n  \"series\": [\n    {\n      \"name\": \"平均选主耗时\",\n      \"type\": \"bar\",\n      \"barWidth\": \"40%\",\n      \"itemStyle\": { \"color\": \"#d97706\", \"borderRadius\": [6, 6, 0, 0] },\n      \"data\": [142, 185, 230, 310]\n    }\n  ]\n}"
+  }
+}

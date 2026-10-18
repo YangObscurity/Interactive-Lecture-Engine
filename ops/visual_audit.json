@@ -1,0 +1,525 @@
+{
+ "timestamp": "2026-10-15T00:14:57+0800",
+ "dist": "ops\\_dist_snapshot",
+ "contract": {
+  "--lec-prose-line-height": "2.35",
+  "--lec-cite-size": "0.6em",
+  "--lec-math-inline-size": "0.86em",
+  "--lec-chart-line-height": "1.5"
+ },
+ "static": {
+  "counts": {
+   "cite": 2833,
+   "figure_chart": 1260,
+   "katex": 21912,
+   "math_node": 7038,
+   "math_inline": 6240,
+   "katex_display": 798,
+   "a_http": 0,
+   "bad_figure": 0
+  },
+  "html_total": 309,
+  "lecture_html_total": 307,
+  "vacuum": false
+ },
+ "css_vars": {
+  "--lec-prose-line-height": "2.35",
+  "--lec-cite-size": "0.6em",
+  "--lec-math-inline-size": "0.86em",
+  "--lec-chart-line-height": "1.5"
+ },
+ "cdp": {
+  "screenshots": {
+   "g01/L01.html": "ops\\visual_audit_g01_L01.html.png",
+   "g01/L08.html": "ops\\visual_audit_g01_L08.html.png",
+   "index.html": "ops\\visual_audit_index.html.png"
+  }
+ },
+ "cdp_pages": {
+  "g01/L01.html": {
+   "url": "/g01/L01.html",
+   "cssVars": {
+    "--lec-prose-line-height": "2.35",
+    "--lec-cite-size": ".6em",
+    "--lec-math-inline-size": ".86em",
+    "--lec-chart-line-height": "1.5"
+   },
+   "inlineCount": 73,
+   "inlineMinGap": 2.71,
+   "inlineMaxH": 32.19,
+   "inlineLineHeight": 37.6,
+   "inlineWorst": [
+    {
+     "tex": "X_C = \\dfrac{1}{2\\pi f C_p}",
+     "h": 32.19,
+     "lh": 37.6,
+     "gap": 2.71,
+     "host": "P"
+    },
+    {
+     "tex": "X_C = \\dfrac{1}{\\omega C}",
+     "h": 28.17,
+     "lh": 37.6,
+     "gap": 4.71,
+     "host": "P"
+    },
+    {
+     "tex": "\\omega \\cdot \\mathrm{ESL} = \\dfrac{1}{\\omega C}",
+     "h": 28.17,
+     "lh": 37.6,
+     "gap": 4.71,
+     "host": "P"
+    }
+   ],
+   "tableInlineCount": 79,
+   "tableInlineMinGap": -8.02,
+   "tableInlineWorst": [
+    {
+     "tex": "f_{knee} \\approx \\dfrac{0.35}{t_r} = 350\\,\\mathrm{",
+     "h": 41.53,
+     "lh": 25.5,
+     "gap": -8.02,
+     "host": "TD"
+    },
+    {
+     "tex": "i(t) = C\\,\\dfrac{\\mathrm{d}v(t)}{\\mathrm{d}t}",
+     "h": 27.8,
+     "lh": 25.5,
+     "gap": -1.15,
+     "host": "TD"
+    }
+   ],
+   "paraCount": 58,
+   "paraInsideFigure": 40,
+   "paraComponent": 0,
+   "paraLineHeights": [
+    "37.6px"
+   ],
+   "paraInsideFigureLineHeights": [
+    "24px"
+   ],
+   "paraComponentLineHeights": [],
+   "figureCount": 4,
+   "figureStatus": [
+    "ok",
+    "ok",
+    "ok",
+    "ok"
+   ],
+   "charts": [
+    {
+     "type": "mermaid",
+     "status": "ok",
+     "labels": 24,
+     "worstRatioDev": 0,
+     "avg": 0
+    },
+    {
+     "type": "mermaid",
+     "status": "ok",
+     "labels": 11,
+     "worstRatioDev": 0,
+     "avg": 0
+    },
+    {
+     "type": "echarts",
+     "status": "ok",
+     "labels": 0,
+     "worstRatioDev": 0,
+     "avg": 0
+    },
+    {
+     "type": "echarts",
+     "status": "ok",
+     "labels": 0,
+     "worstRatioDev": 0,
+     "avg": 0
+    }
+   ],
+   "foreignObjectP": 40,
+   "foreignObjectPolluted": 0,
+   "cite": {
+    "fontSize": "9.6px",
+    "parentFontSize": "16px",
+    "ratio": 0.6
+   },
+   "citeCount": 4,
+   "katexCount": 169,
+   "gridMaxDev": 0.0007,
+   "gridSamples": [
+    {
+     "h": 150.38,
+     "lh": 37.6,
+     "lines": 3.9993,
+     "dev": 0.0007
+    },
+    {
+     "h": 150.38,
+     "lh": 37.6,
+     "lines": 3.9993,
+     "dev": 0.0007
+    },
+    {
+     "h": 112.78,
+     "lh": 37.6,
+     "lines": 2.9995,
+     "dev": 0.0005
+    }
+   ]
+  },
+  "g01/L08.html": {
+   "url": "/g01/L08.html",
+   "cssVars": {
+    "--lec-prose-line-height": "2.35",
+    "--lec-cite-size": ".6em",
+    "--lec-math-inline-size": ".86em",
+    "--lec-chart-line-height": "1.5"
+   },
+   "inlineCount": 11,
+   "inlineMinGap": 3.39,
+   "inlineMaxH": 30.81,
+   "inlineLineHeight": 37.6,
+   "inlineWorst": [
+    {
+     "tex": "R_{p,\\min} = \\dfrac{V_{\\mathrm{DD}} - V_{\\mathrm{O",
+     "h": 30.81,
+     "lh": 37.6,
+     "gap": 3.39,
+     "host": "LI"
+    },
+    {
+     "tex": "R_{p,\\max} \\approx \\dfrac{t_r}{0.8473 \\cdot C_b}",
+     "h": 29.86,
+     "lh": 37.6,
+     "gap": 3.87,
+     "host": "LI"
+    },
+    {
+     "tex": "2.2\\,\\mathrm{k}\\Omega \\sim 3.3\\,\\mathrm{k}\\Omega",
+     "h": 13.16,
+     "lh": 25.5,
+     "gap": 6.17,
+     "host": "STRONG"
+    }
+   ],
+   "tableInlineCount": 18,
+   "tableInlineMinGap": -0.91,
+   "tableInlineWorst": [
+    {
+     "tex": "R_{p,\\max} \\ge 1.0\\,\\mathrm{k}\\Omega",
+     "h": 27.31,
+     "lh": 25.5,
+     "gap": -0.91,
+     "host": "TD"
+    },
+    {
+     "tex": "R_{p,\\max} \\ge 1.0\\,\\mathrm{k}\\Omega",
+     "h": 27.31,
+     "lh": 25.5,
+     "gap": -0.91,
+     "host": "TD"
+    }
+   ],
+   "paraCount": 64,
+   "paraInsideFigure": 23,
+   "paraComponent": 0,
+   "paraLineHeights": [
+    "37.6px"
+   ],
+   "paraInsideFigureLineHeights": [
+    "24px"
+   ],
+   "paraComponentLineHeights": [],
+   "figureCount": 3,
+   "figureStatus": [
+    "ok",
+    "ok",
+    "ok"
+   ],
+   "charts": [
+    {
+     "type": "mermaid",
+     "status": "ok",
+     "labels": 16,
+     "worstRatioDev": 0,
+     "avg": 0
+    },
+    {
+     "type": "wavedrom",
+     "status": "ok",
+     "labels": 0,
+     "worstRatioDev": 0,
+     "avg": 0
+    },
+    {
+     "type": "echarts",
+     "status": "ok",
+     "labels": 0,
+     "worstRatioDev": 0,
+     "avg": 0
+    }
+   ],
+   "foreignObjectP": 23,
+   "foreignObjectPolluted": 0,
+   "citeCount": 0,
+   "katexCount": 29,
+   "gridMaxDev": 0.0003,
+   "gridSamples": [
+    {
+     "h": 75.19,
+     "lh": 37.6,
+     "lines": 1.9997,
+     "dev": 0.0003
+    },
+    {
+     "h": 75.19,
+     "lh": 37.6,
+     "lines": 1.9997,
+     "dev": 0.0003
+    }
+   ]
+  },
+  "index.html": {
+   "url": "/index.html",
+   "cssVars": {
+    "--lec-prose-line-height": "2.35",
+    "--lec-cite-size": ".6em",
+    "--lec-math-inline-size": ".86em",
+    "--lec-chart-line-height": "1.5"
+   },
+   "inlineCount": 0,
+   "inlineMinGap": null,
+   "inlineMaxH": null,
+   "inlineLineHeight": null,
+   "inlineWorst": [],
+   "tableInlineCount": 0,
+   "tableInlineMinGap": null,
+   "tableInlineWorst": [],
+   "paraCount": 4,
+   "paraInsideFigure": 0,
+   "paraComponent": 26,
+   "paraLineHeights": [
+    "31.725px"
+   ],
+   "paraInsideFigureLineHeights": [],
+   "paraComponentLineHeights": [
+    "30.55px",
+    "31.725px"
+   ],
+   "figureCount": 0,
+   "figureStatus": [],
+   "charts": [],
+   "foreignObjectP": 0,
+   "foreignObjectPolluted": 0,
+   "citeCount": 0,
+   "katexCount": 0,
+   "gridMaxDev": null,
+   "gridSamples": []
+  }
+ },
+ "results": [
+  {
+   "name": "dist 存在",
+   "status": "PASS",
+   "detail": "共 309 个 .html",
+   "value": null
+  },
+  {
+   "name": ".cite 胶囊",
+   "status": "INFO",
+   "detail": "全站 2833 个",
+   "value": 2833
+  },
+  {
+   "name": "figure.chart 锚点",
+   "status": "INFO",
+   "detail": "全站 1260 个",
+   "value": 1260
+  },
+  {
+   "name": "KaTeX 渲染节点",
+   "status": "INFO",
+   "detail": "全站 21912 个",
+   "value": 21912
+  },
+  {
+   "name": ".math-node",
+   "status": "INFO",
+   "detail": "全站 7038（其中行内 6240）",
+   "value": 7038
+  },
+  {
+   "name": "外链 <a href=\"http\"> = 0",
+   "status": "PASS",
+   "detail": "无裸外链",
+   "value": null
+  },
+  {
+   "name": "figure.chart 属性齐备",
+   "status": "PASS",
+   "detail": "data-lecture/data-id/data-type 全齐",
+   "value": null
+  },
+  {
+   "name": "图表锚点非空",
+   "status": "PASS",
+   "detail": "1260 个",
+   "value": null
+  },
+  {
+   "name": ".cite 胶囊非空",
+   "status": "PASS",
+   "detail": "2833 个",
+   "value": null
+  },
+  {
+   "name": "CSS 变量 --lec-prose-line-height",
+   "status": "PASS",
+   "detail": "2.35（契约 2.35）",
+   "value": "2.35"
+  },
+  {
+   "name": "CSS 变量 --lec-cite-size",
+   "status": "PASS",
+   "detail": "0.6em（契约 0.6em）",
+   "value": "0.6em"
+  },
+  {
+   "name": "CSS 变量 --lec-math-inline-size",
+   "status": "PASS",
+   "detail": "0.86em（契约 0.86em）",
+   "value": "0.86em"
+  },
+  {
+   "name": "CSS 变量 --lec-chart-line-height",
+   "status": "PASS",
+   "detail": "1.5（契约 1.5）",
+   "value": "1.5"
+  },
+  {
+   "name": "行距栅格 · g01/L01.html",
+   "status": "PASS",
+   "detail": "含公式段落步进严格 = 行高整数倍（最大偏差 0.0007 行）",
+   "value": 0.0007
+  },
+  {
+   "name": "散文行内公式 minGap · g01/L01.html",
+   "status": "INFO",
+   "detail": "2.71 px < 3.0px 标定目标，但行距栅格完好（未撑破行高）：[{'tex': 'X_C = \\\\dfrac{1}{2\\\\pi f C_p}', 'h': 32.19, 'lh': 37.6, 'gap': 2.71, 'host': 'P'}, {'tex': 'X_C = \\\\dfrac{1}{\\\\omega C}', 'h': 28.17, 'lh': 37.6, 'gap': 4.71, 'host': 'P'}, {'tex': '\\\\omega \\\\cdot \\\\mathrm{ESL} = \\\\dfrac{1}{\\\\omega C}', 'h': 28.17, 'lh': 37.6, 'gap': 4.71, 'host': 'P'}]",
+   "value": 2.71
+  },
+  {
+   "name": "表格行内公式 minGap（参考，非契约）· g01/L01.html",
+   "status": "INFO",
+   "detail": "-8.02 px（79 个；表格 td/th 行盒 = 1.7×15px = 25.5px，与散文 37.6px 契约无关）",
+   "value": -8.02
+  },
+  {
+   "name": "正文行高 · g01/L01.html",
+   "status": "PASS",
+   "detail": "['37.6px'] = 37.6px（契约 2.35×16）；图表内 40 个 <p> 另有 1.5 行高豁免",
+   "value": [
+    "37.6px"
+   ]
+  },
+  {
+   "name": "图表文字行高未污染 · g01/L01.html",
+   "status": "PASS",
+   "detail": "40 个 foreignObject p 行高比均 = 1.5（居中偏差 = 0）",
+   "value": null
+  },
+  {
+   "name": "图表标签居中 · g01/L01.html/mermaid",
+   "status": "PASS",
+   "detail": "24 个标签行高比偏差 0",
+   "value": null
+  },
+  {
+   "name": "图表标签居中 · g01/L01.html/mermaid",
+   "status": "PASS",
+   "detail": "11 个标签行高比偏差 0",
+   "value": null
+  },
+  {
+   "name": ".cite 字号 · g01/L01.html",
+   "status": "PASS",
+   "detail": "9.6px/16px = 0.6（契约 0.6）",
+   "value": 0.6
+  },
+  {
+   "name": "图表渲染状态 · g01/L01.html",
+   "status": "PASS",
+   "detail": "4 张图表 data-chart-status = ok",
+   "value": null
+  },
+  {
+   "name": "行距栅格 · g01/L08.html",
+   "status": "PASS",
+   "detail": "含公式段落步进严格 = 行高整数倍（最大偏差 0.0003 行）",
+   "value": 0.0003
+  },
+  {
+   "name": "散文行内公式 minGap · g01/L08.html",
+   "status": "PASS",
+   "detail": "3.39 px ≥ 3.0（11 个行内公式，最高 30.81px，行盒 37.6px）",
+   "value": 3.39
+  },
+  {
+   "name": "表格行内公式 minGap（参考，非契约）· g01/L08.html",
+   "status": "INFO",
+   "detail": "-0.91 px（18 个；表格 td/th 行盒 = 1.7×15px = 25.5px，与散文 37.6px 契约无关）",
+   "value": -0.91
+  },
+  {
+   "name": "正文行高 · g01/L08.html",
+   "status": "PASS",
+   "detail": "['37.6px'] = 37.6px（契约 2.35×16）；图表内 23 个 <p> 另有 1.5 行高豁免",
+   "value": [
+    "37.6px"
+   ]
+  },
+  {
+   "name": "图表文字行高未污染 · g01/L08.html",
+   "status": "PASS",
+   "detail": "23 个 foreignObject p 行高比均 = 1.5（居中偏差 = 0）",
+   "value": null
+  },
+  {
+   "name": "图表标签居中 · g01/L08.html/mermaid",
+   "status": "PASS",
+   "detail": "16 个标签行高比偏差 0",
+   "value": null
+  },
+  {
+   "name": "图表渲染状态 · g01/L08.html",
+   "status": "PASS",
+   "detail": "3 张图表 data-chart-status = ok",
+   "value": null
+  },
+  {
+   "name": "正文行高 · index.html",
+   "status": "INFO",
+   "detail": "讲义散文段落仅 4 个（组件 <p> 26 个，图表内 0 个），跳过行高断言",
+   "value": null
+  },
+  {
+   "name": "全站行内公式 minGap 最小值",
+   "status": "INFO",
+   "detail": "2.71 px（g01/L01.html）",
+   "value": 2.71
+  },
+  {
+   "name": "视觉不变量未下降",
+   "status": "PASS",
+   "detail": "cite: 2833；figure_chart: 1260；katex: 21912；math_node: 7038；math_inline: 6240",
+   "value": null
+  },
+  {
+   "name": "讲义页面总数",
+   "status": "PASS",
+   "detail": "307 → 307",
+   "value": null
+  }
+ ],
+ "elapsed_sec": 16.8
+}

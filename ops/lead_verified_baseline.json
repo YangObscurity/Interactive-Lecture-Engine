@@ -1,0 +1,20 @@
+{
+  "recorded_at": "2026-10-15T06:44:21",
+  "note": "FINAL ALL-GREEN after full refactor. All 7 gates PASS.",
+  "gates": {
+    "pages": "PASS html=309",
+    "links": "PASS a_http=0 .cite=2833",
+    "angle": "PASS 15/15",
+    "figs": "PASS inconsistent=0 anchors=1260 pages=293 groups=14",
+    "format": "PASS high_risk=0 warn=13",
+    "bare_urls": "PASS 0 residue",
+    "example": "PASS 0 failures"
+  },
+  "chart_types": {
+    "mermaid": 780,
+    "echarts": 393,
+    "wavedrom": 87
+  },
+  "improvement_over_original_baseline": "all format checks normalized -> all green",
+  "coverage_gain": "check_figs2 extended to scan examples/ + dt -> 279->293 pages, 1257->1260 anchors, 12->14 groups"
+}

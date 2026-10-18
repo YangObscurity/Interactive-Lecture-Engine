@@ -1,0 +1,14 @@
+{
+  "c1": {
+    "type": "mermaid",
+    "code": "flowchart TB\n  subgraph IN [\"输入事件\"]\n    direction TB\n    W[\"wheel / touchstart\"] --> G[\"手势判定\"]\n    K[\"keydown\"] --> G\n    M[\"mousedown\"] --> G\n  end\n  subgraph DEC [\"状态判定\"]\n    direction TB\n    G --> T[\"用户已接管\"]\n    P[\"程序化滚动\"] --> N[\"有意忽略\"]\n  end\n  T --> S[\"写入阅读进度\"]\n  N --> X[\"不覆盖已有记录\"]\n  S --> E[\"localStorage：lecture-read-pos\"]\n  X --> E"
+  },
+  "c2": {
+    "type": "echarts",
+    "code": "{\n  \"title\": { \"text\": \"图表渲染耗时与状态（本页自测用）\" },\n  \"tooltip\": { \"trigger\": \"axis\" },\n  \"legend\": { \"data\": [\"SVG 节点数\", \"Canvas 位图数\"] },\n  \"xAxis\": { \"type\": \"category\", \"name\": \"图表类型\", \"data\": [\"mermaid\", \"echarts\", \"wavedrom\"] },\n  \"yAxis\": { \"type\": \"value\", \"name\": \"元素数\" },\n  \"series\": [\n    { \"name\": \"SVG 节点数\", \"type\": \"bar\", \"data\": [1, 0, 1] },\n    { \"name\": \"Canvas 位图数\", \"type\": \"bar\", \"data\": [0, 1, 0] }\n  ]\n}"
+  },
+  "c3": {
+    "type": "wavedrom",
+    "code": "{\n  \"signal\": [\n    { \"name\": \"__CHARTS_DONE__\", \"wave\": \"0....1....\", \"data\": [\"false\", \"true\"] },\n    { \"name\": \"data-chart-status\", \"wave\": \"x..3.3.3..\", \"data\": [\"loading\", \"ok\", \"ok\", \"ok\"] },\n    { \"name\": \"data-toolsBound\", \"wave\": \"0....1....\", \"data\": [\"未绑定\", \"'1'\"] }\n  ],\n  \"config\": { \"hscale\": 2 }\n}"
+  }
+}
