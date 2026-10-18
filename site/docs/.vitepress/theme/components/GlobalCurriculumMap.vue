@@ -713,26 +713,29 @@ let calibrateRaf: number | null = null
 
 /**
  * 防切顶与呼吸留白物理常数：
- * 1. 顶部呼吸留白必须严格维持在 48px ~ 64px 舒适区间；
- * 2. 测量全部节点包围盒时，断言最顶端节点 minT 与视口顶部绝对距离不得小于 MIN_SAFE_TOP (48px)；
- * 3. 无论默认展开多少大系，整幅脑图的垂直中心与水平中心始终自适应黄金居中。
+ * 1. 顶部呼吸留白严格维持在 SAFE_TOP_MARGIN (64px) 舒适黄金区间；
+ * 2. 测量全部节点包围盒时，断言最顶端节点 minT 与视口顶部绝对距离不得小于 MIN_SAFE_TOP (56px)；
+ * 3. 左右两侧保留 SAFE_SIDE_MARGIN (36px) 呼吸边界，杜绝任何节点被卡片边框切断；
+ * 4. 无论默认展开多少大系，整幅脑图的垂直中心与水平中心始终自适应黄金居中。
  */
-const SAFE_TOP_MARGIN = 56
-const SAFE_BOTTOM_MARGIN = 56
-const MIN_SAFE_TOP = 48
+const SAFE_TOP_MARGIN = 64
+const SAFE_BOTTOM_MARGIN = 64
+const MIN_SAFE_TOP = 56
+const SAFE_SIDE_MARGIN = 36
 let isCalibrating = false
 
 let initialFitPhase = 0
-let needsRecenterOnNextRender = false
+let chartNeedsRecenter = false
+let modalNeedsRecenter = false
 
 /**
  * 首次自适应布局与视口测量（闭合几何映射定理）：
  * 绝不使用 view.fit() 将脑图暴力缩小！
  * 守住字号不变契约（根 22px、大系 18px、阶段 15.5px、叶子 14.5px）：
- * 1. scale 保持黄金比例 1.0（仅当视口宽度受限时按宽度轻微自适应，底线 >= 0.85，高度绝不压缩 scale）；
- * 2. 测量节点树真实未缩放物理渲染高度，上下保留 SAFE_TOP_MARGIN (56px) 与 SAFE_BOTTOM_MARGIN (56px) 呼吸留白；
+ * 1. scale 保持黄金比例 1.0（仅当视口宽度受限时按宽度轻微自适应，底线 >= 0.75，高度绝不压缩 scale）；
+ * 2. 测量节点树真实未缩放物理渲染高度，上下保留 SAFE_TOP_MARGIN (64px) 与 SAFE_BOTTOM_MARGIN (64px) 呼吸留白；
  * 3. 动态赋予容器对应的 viewportHeight，展开越多向下延展越长，展开少自适应收缩；
- * 4. 确保顶部最顶端节点 minT 严格锁定在 56px 安全呼吸距离，左右绝对对称居中。
+ * 4. 确保顶部最顶端节点 minT 严格锁定在 64px 安全呼吸距离，左右绝对对称居中。
  */
 function performInitialFit(instance: MindMapInstance): void {
   if (isFullscreen.value) {
@@ -791,8 +794,8 @@ function performInitialFit(instance: MindMapInstance): void {
     const unscaledWidth = maxR_svg - minL_svg
     const unscaledHeight = maxB_svg - minT_svg
 
-    // 左右各预留 32px 留白
-    const availableWidth = vpRect.width - 64
+    // 左右各预留 SAFE_SIDE_MARGIN 36px 留白
+    const availableWidth = vpRect.width - (SAFE_SIDE_MARGIN * 2)
 
     // 宽度受限时精准自适应缩放，彻底消除横向溢出与裁切，保证脑图展开时 100% 完整展示！
     let targetScale = 1.0
@@ -800,7 +803,7 @@ function performInitialFit(instance: MindMapInstance): void {
       targetScale = Math.min(1.0, availableWidth / unscaledWidth)
     }
 
-    // 容器高度动态自适应：真实渲染高度 + 上下安全呼吸留白 (56px + 56px)
+    // 容器高度动态自适应：真实渲染高度 + 上下安全呼吸留白 (64px + 64px)
     const targetRenderedHeight = Math.round(unscaledHeight * targetScale)
     const targetRenderedWidth = Math.round(unscaledWidth * targetScale)
     const targetHeight = Math.round(targetRenderedHeight + SAFE_TOP_MARGIN + SAFE_BOTTOM_MARGIN)
@@ -813,7 +816,7 @@ function performInitialFit(instance: MindMapInstance): void {
     const idealLeft = Math.round((vpRect.width - targetRenderedWidth) / 2)
     const newX = Math.round(idealLeft - targetScale * minL_svg)
 
-    // 2. 顶部严格锁定在 SAFE_TOP_MARGIN (56px) 呼吸留白
+    // 2. 顶部严格锁定在 SAFE_TOP_MARGIN (64px) 呼吸留白
     const idealTop = SAFE_TOP_MARGIN
     const newY = Math.round(idealTop - targetScale * minT_svg)
 
@@ -830,7 +833,7 @@ function performInitialFit(instance: MindMapInstance): void {
     if (heightChanged) {
       setTimeout(() => {
         try {
-          needsRecenterOnNextRender = true
+          chartNeedsRecenter = true
           mm.resize?.()
           mm.getElRectInfo?.()
         } catch {}
@@ -842,63 +845,100 @@ function performInitialFit(instance: MindMapInstance): void {
 interface CalibrateOptions {
   reCenterHorizontal?: boolean
   smooth?: boolean
+  duration?: number
 }
 
-let activeTranslateRaf: number | null = null
+let activeViewRaf: number | null = null
 
 /**
- * 平滑平移视图（easeOutCubic 缓动曲线，杜绝瞬移突变与视觉抖动）
+ * 平滑变换视图（easeOutCubic 缓动曲线，x / y / scale 三位一体同步过渡，杜绝二次抖动与边界冲突）
  */
-function smoothTranslate(
+function smoothViewTransition(
   instance: MindMapInstance,
-  dx: number,
-  dy: number,
-  duration = 260
+  targetX: number,
+  targetY: number,
+  targetScale: number,
+  duration = 300
 ): void {
-  if (Math.abs(dx) < 1 && Math.abs(dy) < 1) return
-  if (activeTranslateRaf) cancelAnimationFrame(activeTranslateRaf)
-
   const mm = instance as unknown as {
     view?: {
-      translateXY?: (x: number, y: number) => void
+      x: number
+      y: number
+      scale: number
+      transform: () => void
+      emitEvent?: (type: string) => void
     }
   }
-  if (!mm.view?.translateXY) return
+  if (!mm.view) return
+
+  if (activeViewRaf) {
+    cancelAnimationFrame(activeViewRaf)
+    activeViewRaf = null
+  }
+
+  const startX = mm.view.x || 0
+  const startY = mm.view.y || 0
+  const startScale = mm.view.scale || 1
+
+  const dx = targetX - startX
+  const dy = targetY - startY
+  const dScale = targetScale - startScale
+
+  if (Math.abs(dx) < 1 && Math.abs(dy) < 1 && Math.abs(dScale) < 0.005) {
+    return
+  }
 
   const startTime = performance.now()
-  let prevProgress = 0
 
   function step(now: number) {
+    if (unmounted) return
     const elapsed = now - startTime
     const progress = Math.min(1, elapsed / duration)
     // easeOutCubic: 1 - (1 - t)^3
     const ease = 1 - Math.pow(1 - progress, 3)
-    const delta = ease - prevProgress
-    prevProgress = ease
 
-    mm.view?.translateXY?.(dx * delta, dy * delta)
+    if (mm.view) {
+      mm.view.x = Math.round(startX + dx * ease)
+      mm.view.y = Math.round(startY + dy * ease)
+      mm.view.scale = Number((startScale + dScale * ease).toFixed(4))
+      mm.view.transform()
+    }
 
     if (progress < 1) {
-      activeTranslateRaf = requestAnimationFrame(step)
+      activeViewRaf = requestAnimationFrame(step)
     } else {
-      activeTranslateRaf = null
+      activeViewRaf = null
+      mm.view?.emitEvent?.('scale')
+      mm.view?.emitEvent?.('translate')
     }
   }
 
-  activeTranslateRaf = requestAnimationFrame(step)
+  activeViewRaf = requestAnimationFrame(step)
+}
+
+let lastInteractedDir: 'left' | 'right' | 'center' = 'center'
+
+function getNodeDir(node: any): 'left' | 'right' | 'center' {
+  let curr = node
+  while (curr) {
+    const d = curr.nodeData?.data?.dir || curr.getData?.('dir')
+    if (d === 'left' || d === 'right') return d
+    curr = curr.parent
+  }
+  return 'center'
 }
 
 /**
- * 视口骨架高度与内容对称对齐自动校准（防抖动与零横向漂移核心引擎）：
- * 1. 基于真实 DOM 节点盒精确物理测量，展开越多向下延展越长（最大 3600px），展开少自适应收缩变短（最小 620px）；
- * 2. 测量全部节点包围盒时，断言最顶端节点 minT 必须与视口顶部保持至少 48px~64px 舒适的呼吸安全距离（绝对防切顶）；
- * 3. 局部讲义展开时坚决不横向重置（driftX = 0），保证用户点击的节点稳如泰山、不脱离光标；
- * 4. 配合 CSS 视口高度 0.38s 平滑过渡，彻底消灭展开讲义细节时的布局剧烈晃动。
+ * 视口骨架高度、自适应缩放与四向防截断校准引擎（闭式几何映射）：
+ * 1. 深度展开自适应缩放：当单翼或全局展开导致宽度超过可用宽度时，自动按比例缩放，保证边界永不被遮挡；
+ * 2. 折叠收缩平滑恢复：当分支折叠收起时，scale 平滑恢复至 1.0 高清字号；
+ * 3. 定向防截断（Asymmetric Boundary Guard）：左翼操作优先锁定左边界 >= 36px，右翼操作优先锁定右边界 <= 视口右 - 36px，杜绝对翼拉扯造成本翼切字；
+ * 4. 纵向展开防切顶：最顶端节点距顶锁定在 SAFE_TOP_MARGIN (64px) 呼吸留白处，< MIN_SAFE_TOP (56px) 立即柔和下推；
+ * 5. 容器高度动态延展：随展开节点高度实时调整 viewportHeight，平滑过渡（0.3s）。
  */
 function autoCalibrateLayout(instance: MindMapInstance, opt?: CalibrateOptions): void {
   if (isFullscreen.value) return
   if (typeof window === 'undefined') return
-  if (isCalibrating) return
 
   if (calibrateRaf) cancelAnimationFrame(calibrateRaf)
   calibrateRaf = requestAnimationFrame(() => {
@@ -907,6 +947,18 @@ function autoCalibrateLayout(instance: MindMapInstance, opt?: CalibrateOptions):
       if (!el) return
       const nodes = [...el.querySelectorAll('g.smm-node')]
       if (nodes.length === 0) return
+
+      const mm = instance as unknown as {
+        view?: {
+          scale: number
+          x: number
+          y: number
+          transform: () => void
+          emitEvent?: (type: string) => void
+        }
+        resize?: () => void
+      }
+      if (!mm.view) return
 
       let minT = Infinity
       let maxB = -Infinity
@@ -926,130 +978,131 @@ function autoCalibrateLayout(instance: MindMapInstance, opt?: CalibrateOptions):
       if (!isFinite(minT) || !isFinite(maxB) || !isFinite(minL) || !isFinite(maxR)) return
 
       const vpRect = el.getBoundingClientRect()
-      const renderedHeight = maxB - minT
-      const renderedWidth = maxR - minL
-      const targetHeight = Math.round(renderedHeight + SAFE_TOP_MARGIN + SAFE_BOTTOM_MARGIN)
+      const currScale = mm.view.scale || 1
+      const currX = mm.view.x || 0
+      const currY = mm.view.y || 0
+
+      // 脱离当前变换，换算至 SVG 绝对未缩放坐标空间
+      const minL_svg = (minL - vpRect.left - currX) / currScale
+      const maxR_svg = (maxR - vpRect.left - currX) / currScale
+      const minT_svg = (minT - vpRect.top - currY) / currScale
+      const maxB_svg = (maxB - vpRect.top - currY) / currScale
+
+      const unscaledWidth = maxR_svg - minL_svg
+      const unscaledHeight = maxB_svg - minT_svg
+
+      // 获取根节点在 SVG 坐标系下的中心 x
+      const rootNodeEl = el.querySelector('g.smm-node')
+      let rootCenterX_svg = (minL_svg + maxR_svg) / 2
+      if (rootNodeEl) {
+        const rootR = rootNodeEl.getBoundingClientRect()
+        const rootCenterScreen = rootR.left + (rootR.width / 2)
+        rootCenterX_svg = (rootCenterScreen - vpRect.left - currX) / currScale
+      }
+
+      // 计算左右单翼的最大未缩放宽度
+      const leftWingUnscaled = Math.max(0, rootCenterX_svg - minL_svg)
+      const rightWingUnscaled = Math.max(0, maxR_svg - rootCenterX_svg)
+      const maxSingleWingUnscaled = Math.max(leftWingUnscaled, rightWingUnscaled)
+
+      // 可用视口宽度（左右各保留 SAFE_SIDE_MARGIN 36px 呼吸留白）
+      const availableWidth = vpRect.width - (SAFE_SIDE_MARGIN * 2)
+
+      // 1. 动态自适应缩放（防止单翼深度展开或双翼展开导致边界截断）
+      let targetScale = 1.0
+      if (availableWidth > 0) {
+        if (opt?.reCenterHorizontal && unscaledWidth > availableWidth) {
+          // 全局展开/复位：按全宽自适应，底线 0.70
+          targetScale = Math.min(1.0, Math.max(0.70, availableWidth / unscaledWidth))
+        } else if (maxSingleWingUnscaled > availableWidth - 120) {
+          // 单翼深度展开：确保单翼从根节点延伸出去能在视口内完全展现
+          targetScale = Math.min(1.0, Math.max(0.76, (availableWidth - 120) / maxSingleWingUnscaled))
+        }
+      }
+
+      // 2. 目标渲染尺寸与容器高度
+      const targetRenderedHeight = Math.round(unscaledHeight * targetScale)
+      const targetRenderedWidth = Math.round(unscaledWidth * targetScale)
+      const targetHeight = Math.round(targetRenderedHeight + SAFE_TOP_MARGIN + SAFE_BOTTOM_MARGIN)
       const clampedHeight = Math.min(
         MAX_VIEWPORT_HEIGHT,
         Math.max(MIN_VIEWPORT_HEIGHT, targetHeight)
       )
 
-      const availableWidth = vpRect.width - 64
-      let scaleAdjusted = false
-      const mm = instance as unknown as {
-        view: { scale: number; transform: () => void }
-        resize: () => void
+      // 同步更新容器高度（CSS 0.3s ease）
+      if (Math.abs(clampedHeight - viewportHeight.value) > 8) {
+        viewportHeight.value = clampedHeight
       }
-      const currScale = mm.view?.scale || 1
-      const unscaledW = renderedWidth / currScale
-      let targetScale = 1.0
-      if (availableWidth > 0 && unscaledW > availableWidth) {
-        targetScale = Math.min(1.0, Math.max(0.82, availableWidth / unscaledW))
+
+      // 3. 计算目标位移 targetX 与 targetY
+      let targetX = currX
+      let targetY = currY
+
+      if (opt?.reCenterHorizontal) {
+        // 全量展开/折叠/复位：全局水平居中，顶部锁定 64px
+        const idealLeft = Math.round((vpRect.width - targetRenderedWidth) / 2)
+        targetX = Math.round(idealLeft - targetScale * minL_svg)
+        targetY = Math.round(SAFE_TOP_MARGIN - targetScale * minT_svg)
+      } else {
+        // 局部分支展开/收起：根据当前操作翼（lastInteractedDir）进行精准定向保护
+        const projectedMinL = vpRect.left + currX + targetScale * minL_svg
+        const projectedMaxR = vpRect.left + currX + targetScale * maxR_svg
+        const projectedMinT = vpRect.top + currY + targetScale * minT_svg
+
+        let driftX = 0
+        if (lastInteractedDir === 'left') {
+          // 左翼操作：首要保证左边界绝不被裁切！
+          if (projectedMinL < vpRect.left + SAFE_SIDE_MARGIN) {
+            driftX = Math.round((vpRect.left + SAFE_SIDE_MARGIN) - projectedMinL)
+          }
+        } else if (lastInteractedDir === 'right') {
+          // 右翼操作：首要保证右边界绝不被裁切！
+          if (projectedMaxR > vpRect.right - SAFE_SIDE_MARGIN) {
+            driftX = Math.round((vpRect.right - SAFE_SIDE_MARGIN) - projectedMaxR)
+          }
+        } else {
+          // 未知或居中操作：双向保护，先保左再保右
+          if (projectedMinL < vpRect.left + SAFE_SIDE_MARGIN) {
+            driftX = Math.round((vpRect.left + SAFE_SIDE_MARGIN) - projectedMinL)
+          } else if (projectedMaxR > vpRect.right - SAFE_SIDE_MARGIN) {
+            driftX = Math.round((vpRect.right - SAFE_SIDE_MARGIN) - projectedMaxR)
+          }
+        }
+
+        // 纵向呼吸线：展开防切顶（< MIN_SAFE_TOP 56px 平滑下推至 64px 呼吸留白）；收折柔和上浮回弹
+        let driftY = 0
+        const currentTopOffset = projectedMinT - vpRect.top
+        if (currentTopOffset < MIN_SAFE_TOP) {
+          driftY = Math.round(SAFE_TOP_MARGIN - currentTopOffset)
+        } else if (currentTopOffset > SAFE_TOP_MARGIN + 20) {
+          driftY = Math.round(SAFE_TOP_MARGIN - currentTopOffset)
+        }
+
+        targetX = Math.round(currX + driftX)
+        targetY = Math.round(currY + driftY)
       }
-      // 双向自适应：收回时恢复至 1.0，展开受限时微调缩放
-      if (Math.abs(targetScale - currScale) > 0.015) {
+
+      // 4. 触发平滑过渡（scale + x + y 同步过渡 300ms）
+      if (opt?.smooth !== false) {
+        smoothViewTransition(instance, targetX, targetY, targetScale, opt?.duration || 300)
+      } else {
+        mm.view.x = targetX
+        mm.view.y = targetY
         mm.view.scale = targetScale
         mm.view.transform()
-        scaleAdjusted = true
       }
 
-      const deltaH = clampedHeight - viewportHeight.value
-
-      if (Math.abs(deltaH) > 16) {
-        isCalibrating = true
-        viewportHeight.value = clampedHeight
-        // 视口容器高度具有 0.38s 平滑 CSS 动效，等待过渡趋近稳定时触发 resize 与微调
-        setTimeout(() => {
-          try {
-            mm.resize?.()
-          } finally {
-            isCalibrating = false
-            calibratePosition(instance, { reCenterHorizontal: opt?.reCenterHorizontal !== false, smooth: true })
-          }
-        }, 360)
-      } else {
-        calibratePosition(instance, { reCenterHorizontal: opt?.reCenterHorizontal !== false, smooth: true })
-      }
+      // 5. 动画趋近完成时静默微调底层尺寸缓存
+      setTimeout(() => {
+        try {
+          mm.resize?.()
+        } catch {}
+      }, 320)
     } catch {}
   })
 }
 
-/**
- * 黄金中心对齐与防切顶硬性断言：
- * 1. 当 reCenterHorizontal 为 true 时（默认）：整幅脑图水平黄金居中，顶部锁定 56px 呼吸留白；
- * 2. 局部讲义展开/收起时（用户点击）：平滑自适应位移，收回时自动上浮归位，展开时防切顶与居中；
- * 3. 彻底根除“折叠收回后画布陷在下方回不来”与“多分支展开偏置横溢”的病灶。
- */
-function calibratePosition(instance: MindMapInstance, opt?: CalibrateOptions): void {
-  try {
-    const el = chartContainerRef.value
-    if (!el) return
-    const nodes = [...el.querySelectorAll('g.smm-node')]
-    if (nodes.length === 0) return
 
-    const vpRect = el.getBoundingClientRect()
-    let minT = Infinity
-    let maxB = -Infinity
-    let minL = Infinity
-    let maxR = -Infinity
-
-    for (const n of nodes) {
-      const r = n.getBoundingClientRect()
-      if (r.width > 0 && r.height > 0) {
-        if (r.top < minT) minT = r.top
-        if (r.bottom > maxB) maxB = r.bottom
-        if (r.left < minL) minL = r.left
-        if (r.right > maxR) maxR = r.right
-      }
-    }
-
-    if (!isFinite(minT) || !isFinite(maxB) || !isFinite(minL) || !isFinite(maxR)) return
-
-    const renderedHeight = maxB - minT
-    const renderedWidth = maxR - minL
-    const currentTop = minT - vpRect.top
-    const currentLeft = minL - vpRect.left
-
-    let driftX = 0
-    let driftY = 0
-
-    if (opt?.reCenterHorizontal !== false) {
-      // 全量与局部自适应居中：整体包围盒始终水平居中，展开/收回均平滑微调
-      const idealLeft = Math.round((vpRect.width - renderedWidth) / 2)
-      driftX = idealLeft - currentLeft
-
-      // 顶部始终锁定在 SAFE_TOP_MARGIN (56px) 呼吸留白处，折叠收回自动上浮归位，绝不下沉偏置
-      const idealTop = SAFE_TOP_MARGIN
-      driftY = idealTop - currentTop
-    } else {
-      // 边界微调保底
-      if (minL < vpRect.left + 24) {
-        driftX = Math.round(vpRect.left + 24 - minL)
-      } else if (maxR > vpRect.right - 24) {
-        driftX = Math.round(vpRect.right - 24 - maxR)
-      } else {
-        driftX = 0
-      }
-
-      if (currentTop < MIN_SAFE_TOP) {
-        driftY = SAFE_TOP_MARGIN - currentTop
-      } else {
-        driftY = 0
-      }
-    }
-
-    if (Math.abs(driftX) > 1 || Math.abs(driftY) > 1) {
-      if (opt?.smooth !== false) {
-        smoothTranslate(instance, driftX, driftY, 260)
-      } else {
-        const mm = instance as unknown as {
-          view?: { translateXY?: (x: number, y: number) => void }
-        }
-        mm.view?.translateXY?.(driftX, driftY)
-      }
-    }
-  } catch {}
-}
 
 async function mountMap(kind: 'inline' | 'modal'): Promise<void> {
   if (typeof window === 'undefined') return
@@ -1067,33 +1120,13 @@ async function mountMap(kind: 'inline' | 'modal'): Promise<void> {
   const instance = new MindMap({ el, data: buildMindMapData(), ...createOptions(kind) })
   instance.on('node_click', handleNodeClick)
 
-  // 手风琴互斥收回与自适应对齐（Accordion Mutual Exclusion）：
-  // 当展开某一大系或阶段分支时，自动收回同级兄弟分支，杜绝屏幕无限膨胀失焦；
-  // 节点展开/折叠后触发自适应居中与高度调整
+  // 点击展开/收起按钮时，记录操作翼（方向），若处于全展开状态则重置标记
   instance.on('expand_btn_click', (node: any) => {
     try {
       if (isAllExpanded.value) {
         isAllExpanded.value = false
       }
-      const isExpanded = node?.getData?.('expand') !== false
-      if (isExpanded && node?.parent?.children) {
-        // 大系节点（layerIndex === 1）或 阶段节点（layerIndex === 2）：互斥手风琴收回
-        if (node.layerIndex === 1 || node.layerIndex === 2) {
-          let hasCollapsed = false
-          for (const sibling of node.parent.children) {
-            if (sibling !== node && sibling.getData?.('expand') !== false) {
-              if (sibling.nodeData?.data) {
-                sibling.nodeData.data.expand = false
-                hasCollapsed = true
-              }
-            }
-          }
-          if (hasCollapsed) {
-            instance.render()
-          }
-        }
-      }
-      needsRecenterOnNextRender = true
+      lastInteractedDir = getNodeDir(node)
     } catch {}
   })
 
@@ -1106,15 +1139,24 @@ async function mountMap(kind: 'inline' | 'modal'): Promise<void> {
   }
 
   let initialFitDone = false
-  let renderSettleTimer: ReturnType<typeof setTimeout> | null = null
 
-  // 视角与骨架高度自适应：
+  // 视角与骨架高度自适应（丝滑同频动画引擎）：
   // 首次渲染执行 performInitialFit 闭合几何映射，锁定水平居中与 56px 呼吸留白；
-  // 用户局部展开/折叠，自动手风琴收回兄弟分支，并自适应调整位置与高度；
+  // 用户后续自由展开/折叠，横向锁定光标稳定性（driftX = 0），纵向展开防切顶、收折柔和上浮回弹；
   // 用户全量展开/折叠/复位，经防抖等全量节点排版稳定后执行 performInitialFit 重新铺满与居中
   instance.on('node_tree_render_end', () => {
     if (kind === 'modal') {
-      fitInstance(instance)
+      if (!initialFitDone) {
+        initialFitDone = true
+        fitInstance(instance)
+        return
+      }
+      if (modalNeedsRecenter) {
+        modalNeedsRecenter = false
+        fitInstance(instance)
+        return
+      }
+      // 全屏模态下：严格遵循用户当前的缩放比例（scale）与漫游位置（x, y），点开/收起节点绝不强制重置
       return
     }
 
@@ -1124,15 +1166,13 @@ async function mountMap(kind: 'inline' | 'modal'): Promise<void> {
       return
     }
 
-    if (renderSettleTimer) clearTimeout(renderSettleTimer)
-    renderSettleTimer = setTimeout(() => {
-      if (needsRecenterOnNextRender) {
-        needsRecenterOnNextRender = false
-        performInitialFit(instance)
-      } else {
-        autoCalibrateLayout(instance, { reCenterHorizontal: true, smooth: true })
-      }
-    }, 120)
+    if (chartNeedsRecenter) {
+      chartNeedsRecenter = false
+      performInitialFit(instance)
+    } else {
+      // 局部展开/折叠完成：立即同频平滑自适应容器高度与纵向/边界校准（0 延迟，0 抖动）
+      autoCalibrateLayout(instance, { reCenterHorizontal: false, smooth: true })
+    }
   })
   if (kind === 'modal') modalChartInstance = instance
   else chartInstance = instance
@@ -1196,7 +1236,8 @@ function destroyModalMap(): void {
 function toggleExpandAll(): void {
   isAllExpanded.value = !isAllExpanded.value
   userToggledExpand = true
-  needsRecenterOnNextRender = true
+  chartNeedsRecenter = true
+  modalNeedsRecenter = true
   const command = isAllExpanded.value ? 'EXPAND_ALL' : 'UNEXPAND_ALL'
   for (const instance of [chartInstance, modalChartInstance]) {
     if (!instance) continue
@@ -1205,7 +1246,8 @@ function toggleExpandAll(): void {
 }
 
 function resetView(): void {
-  needsRecenterOnNextRender = true
+  chartNeedsRecenter = true
+  modalNeedsRecenter = true
   for (const instance of [chartInstance, modalChartInstance]) {
     if (!instance) continue
     instance.view.reset()
@@ -1351,6 +1393,14 @@ onUnmounted(() => {
     progressTimer = null
   }
   cancelAnimationFrame(resizeRaf)
+  if (calibrateRaf) {
+    cancelAnimationFrame(calibrateRaf)
+    calibrateRaf = null
+  }
+  if (activeViewRaf) {
+    cancelAnimationFrame(activeViewRaf)
+    activeViewRaf = null
+  }
   if (typeof window !== 'undefined') {
     window.removeEventListener('resize', handleResize)
     window.removeEventListener('keydown', handleEscKey)
@@ -1440,6 +1490,12 @@ onUnmounted(() => {
               <span class="gc-badge">{{ badgeText }}</span>
             </div>
             <div class="modal-actions">
+              <button type="button" class="gc-action-btn" @click="toggleExpandAll">
+                {{ isAllExpanded ? '折叠' : '展开' }}
+              </button>
+              <button type="button" class="gc-icon-btn" title="复位缩放与视角" @click="resetView">
+                <span v-html="ICONS.reset"></span>
+              </button>
               <button type="button" class="modal-close-btn" title="关闭全屏" @click="closeFullscreen">
                 <span v-html="ICONS.close"></span>
               </button>
@@ -1719,13 +1775,13 @@ onUnmounted(() => {
   filter: brightness(1.2) drop-shadow(0 0 8px rgba(59, 130, 246, 0.6));
 }
 
-/* 脑图画布视口高度（动态自适应骨架，向下延展与收缩，0.38s 平滑过渡无抖动） */
+/* 脑图画布视口高度（动态自适应骨架，向下延展与收缩，0.3s 平滑过渡同频并发无抖动） */
 .gc-viewport {
   position: relative;
   width: 100%;
   min-height: 560px;
   background: var(--vp-c-bg);
-  transition: height 0.38s cubic-bezier(0.25, 1, 0.5, 1);
+  transition: height 0.3s cubic-bezier(0.25, 1, 0.5, 1);
   will-change: height;
 }
 
