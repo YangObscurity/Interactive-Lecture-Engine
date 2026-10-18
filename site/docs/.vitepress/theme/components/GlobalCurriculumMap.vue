@@ -542,7 +542,7 @@ async function ensureMindMapLib(): Promise<MindMapConstructor | null> {
 }
 
 /** 视口自适应骨架高度约束：展开越多向下延伸越长，展开少动态收缩，保证展开时完全展示 */
-const MIN_VIEWPORT_HEIGHT = 620
+const MIN_VIEWPORT_HEIGHT = 560
 const MAX_VIEWPORT_HEIGHT = 16000
 const viewportHeight = ref<number>(880)
 
@@ -1008,15 +1008,15 @@ function autoCalibrateLayout(instance: MindMapInstance, opt?: CalibrateOptions):
       // 可用视口宽度（左右各保留 SAFE_SIDE_MARGIN 36px 呼吸留白）
       const availableWidth = vpRect.width - (SAFE_SIDE_MARGIN * 2)
 
-      // 1. 动态自适应缩放（防止单翼深度展开或双翼展开导致边界截断）
+      // 1. 动态自适应缩放（防止单翼深度展开或双翼展开导致边界截断，收缩时平滑恢复 1.0）
       let targetScale = 1.0
       if (availableWidth > 0) {
-        if (opt?.reCenterHorizontal && unscaledWidth > availableWidth) {
-          // 全局展开/复位：按全宽自适应，底线 0.70
-          targetScale = Math.min(1.0, Math.max(0.70, availableWidth / unscaledWidth))
+        if (unscaledWidth > availableWidth) {
+          // 全宽超出可用视口：自适应缩放铺满，保证双侧完全展现不被截断
+          targetScale = Math.min(1.0, availableWidth / unscaledWidth)
         } else if (maxSingleWingUnscaled > availableWidth - 120) {
           // 单翼深度展开：确保单翼从根节点延伸出去能在视口内完全展现
-          targetScale = Math.min(1.0, Math.max(0.76, (availableWidth - 120) / maxSingleWingUnscaled))
+          targetScale = Math.min(1.0, (availableWidth - 120) / maxSingleWingUnscaled)
         }
       }
 
@@ -1034,51 +1034,62 @@ function autoCalibrateLayout(instance: MindMapInstance, opt?: CalibrateOptions):
         viewportHeight.value = clampedHeight
       }
 
-      // 3. 计算目标位移 targetX 与 targetY
+      // 3. 计算水平目标位移 targetX 与垂直目标位移 targetY
       let targetX = currX
       let targetY = currY
 
-      if (opt?.reCenterHorizontal) {
-        // 全量展开/折叠/复位：全局水平居中，顶部锁定 64px
+      if (opt?.reCenterHorizontal || targetRenderedWidth <= availableWidth) {
+        // 宽度完全容纳（收缩/未超界/全量居中）：全局黄金水平居中！彻底杜绝收缩后偏向一侧或切断另一侧
         const idealLeft = Math.round((vpRect.width - targetRenderedWidth) / 2)
         targetX = Math.round(idealLeft - targetScale * minL_svg)
-        targetY = Math.round(SAFE_TOP_MARGIN - targetScale * minT_svg)
       } else {
-        // 局部分支展开/收起：根据当前操作翼（lastInteractedDir）进行精准定向保护
+        // 宽度超过视口：根据当前操作翼与双侧空隙动态平衡，杜绝单侧溢出切字
         const projectedMinL = vpRect.left + currX + targetScale * minL_svg
         const projectedMaxR = vpRect.left + currX + targetScale * maxR_svg
-        const projectedMinT = vpRect.top + currY + targetScale * minT_svg
+
+        const leftOverflow = (vpRect.left + SAFE_SIDE_MARGIN) - projectedMinL
+        const rightOverflow = projectedMaxR - (vpRect.right - SAFE_SIDE_MARGIN)
 
         let driftX = 0
-        if (lastInteractedDir === 'left') {
-          // 左翼操作：首要保证左边界绝不被裁切！
-          if (projectedMinL < vpRect.left + SAFE_SIDE_MARGIN) {
-            driftX = Math.round((vpRect.left + SAFE_SIDE_MARGIN) - projectedMinL)
-          }
-        } else if (lastInteractedDir === 'right') {
-          // 右翼操作：首要保证右边界绝不被裁切！
-          if (projectedMaxR > vpRect.right - SAFE_SIDE_MARGIN) {
-            driftX = Math.round((vpRect.right - SAFE_SIDE_MARGIN) - projectedMaxR)
+        if (leftOverflow > 0 && rightOverflow <= 0) {
+          // 仅左侧溢出：向右平移补全
+          driftX = Math.round(leftOverflow)
+        } else if (rightOverflow > 0 && leftOverflow <= 0) {
+          // 仅右侧溢出：向左平移补全（彻底修复收折/展开后对侧被截断的问题！）
+          driftX = -Math.round(rightOverflow)
+        } else if (leftOverflow > 0 && rightOverflow > 0) {
+          // 双侧同时溢出（超宽）：优先保护当前操作翼
+          if (lastInteractedDir === 'left') {
+            driftX = Math.round(leftOverflow)
+          } else if (lastInteractedDir === 'right') {
+            driftX = -Math.round(rightOverflow)
+          } else {
+            driftX = Math.round((leftOverflow - rightOverflow) / 2)
           }
         } else {
-          // 未知或居中操作：双向保护，先保左再保右
-          if (projectedMinL < vpRect.left + SAFE_SIDE_MARGIN) {
-            driftX = Math.round((vpRect.left + SAFE_SIDE_MARGIN) - projectedMinL)
-          } else if (projectedMaxR > vpRect.right - SAFE_SIDE_MARGIN) {
-            driftX = Math.round((vpRect.right - SAFE_SIDE_MARGIN) - projectedMaxR)
-          }
+          // 双侧均未触碰边框但处于偏置态：向中心平滑回弹
+          const currentCenter = (projectedMinL + projectedMaxR) / 2
+          const screenCenter = vpRect.left + vpRect.width / 2
+          driftX = Math.round(screenCenter - currentCenter)
         }
 
-        // 纵向呼吸线：展开防切顶（< MIN_SAFE_TOP 56px 平滑下推至 64px 呼吸留白）；收折柔和上浮回弹
+        targetX = Math.round(currX + driftX)
+      }
+
+      if (opt?.reCenterHorizontal || targetRenderedHeight + SAFE_TOP_MARGIN + SAFE_BOTTOM_MARGIN <= clampedHeight) {
+        // 容器高度充足容纳全部节点：上下黄金对称垂直居中，但顶部至少保持 SAFE_TOP_MARGIN 留白
+        const idealTop = Math.max(SAFE_TOP_MARGIN, Math.round((clampedHeight - targetRenderedHeight) / 2))
+        targetY = Math.round(idealTop - targetScale * minT_svg)
+      } else {
+        // 节点高度超出：顶部锁定 64px 呼吸线，展开防切顶（< MIN_SAFE_TOP 56px 平滑下推至 64px）
+        const projectedMinT = vpRect.top + currY + targetScale * minT_svg
         let driftY = 0
         const currentTopOffset = projectedMinT - vpRect.top
         if (currentTopOffset < MIN_SAFE_TOP) {
           driftY = Math.round(SAFE_TOP_MARGIN - currentTopOffset)
-        } else if (currentTopOffset > SAFE_TOP_MARGIN + 20) {
+        } else if (currentTopOffset > SAFE_TOP_MARGIN + 24) {
           driftY = Math.round(SAFE_TOP_MARGIN - currentTopOffset)
         }
-
-        targetX = Math.round(currX + driftX)
         targetY = Math.round(currY + driftY)
       }
 

@@ -1,10 +1,12 @@
 # 可交互工程讲义渲染引擎（Interactive Lecture Engine）
 
+> 🌐 **在线演示 / Live Demo**: [https://interactive-lecture-engine.vercel.app/](https://interactive-lecture-engine.vercel.app/)  
 > **语言 / Language**: 中文 ｜ [English](./README.en.md)
 
 > 一套将**现代工程与技术讲义**打造为**高品质交互式阅读与印刷级出版站点**的工业级开源渲染引擎：原生工程图表深度交互、构建期 KaTeX 严谨排版、SimpleMindMap 闭合几何投影全景脑图、时序与示波器仿真交互、随堂自测折叠抽屉、印刷级出版与导出套件（A4 智能跨页防截断 / Canvas 超清长图）、沉浸式工程阅读、无外链 `.cite` 引用胶囊体系、可插拔 AI 伴读侧栏 —— 全部组件化、零硬编码单一真源、内容与引擎即插即用物理级解耦。
 
 <p>
+  <a href="https://interactive-lecture-engine.vercel.app/"><img alt="Demo" src="https://img.shields.io/badge/Demo-Vercel-black?logo=vercel&style=flat-square"></a>
   <img alt="VitePress" src="https://img.shields.io/badge/VitePress-1.6.4-3451b2?style=flat-square">
   <img alt="Vue" src="https://img.shields.io/badge/Vue-3.5-42b883?style=flat-square">
   <img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-strict-3178c6?style=flat-square">
@@ -100,6 +102,9 @@ Interactive-Lecture-Engine/
 ---
 
 ## 一、快速开始 (Quick Start)
+
+> [!TIP]
+> **在线极速体验 (Live Demo)**：项目已预先部署至 Vercel，无需本地配置环境即可即时体验全套交互功能：[https://interactive-lecture-engine.vercel.app/](https://interactive-lecture-engine.vercel.app/)。
 
 ### 1. 环境准备
 - **Node.js**: `≥ 18.0.0` (推荐 Node.js 20 LTS)
