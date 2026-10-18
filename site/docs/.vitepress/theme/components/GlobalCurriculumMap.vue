@@ -544,7 +544,7 @@ async function ensureMindMapLib(): Promise<MindMapConstructor | null> {
 /** 视口自适应骨架高度约束：展开越多向下延伸越长，展开少动态收缩，保证展开时完全展示 */
 const MIN_VIEWPORT_HEIGHT = 560
 const MAX_VIEWPORT_HEIGHT = 16000
-const viewportHeight = ref<number>(880)
+const viewportHeight = ref<number>(560)
 
 function createOptions(kind: 'inline' | 'modal' = 'inline'): Record<string, unknown> {
   const isModal = kind === 'modal'
@@ -816,8 +816,10 @@ function performInitialFit(instance: MindMapInstance): void {
     const idealLeft = Math.round((vpRect.width - targetRenderedWidth) / 2)
     const newX = Math.round(idealLeft - targetScale * minL_svg)
 
-    // 2. 顶部严格锁定在 SAFE_TOP_MARGIN (64px) 呼吸留白
-    const idealTop = SAFE_TOP_MARGIN
+    // 2. 垂直黄金居中：容器高度充足时上下对称居中，高度超出时顶部锁定 SAFE_TOP_MARGIN (64px) 呼吸留白防切顶
+    const idealTop = (targetRenderedHeight + SAFE_TOP_MARGIN + SAFE_BOTTOM_MARGIN <= clampedHeight)
+      ? Math.max(SAFE_TOP_MARGIN, Math.round((clampedHeight - targetRenderedHeight) / 2))
+      : SAFE_TOP_MARGIN
     const newY = Math.round(idealTop - targetScale * minT_svg)
 
     mm.view.scale = targetScale
@@ -1261,10 +1263,9 @@ function resetView(): void {
   modalNeedsRecenter = true
   for (const instance of [chartInstance, modalChartInstance]) {
     if (!instance) continue
-    instance.view.reset()
     // reset 只归零变换（scale=1/原点），不等于 fit：复位后重新适配铺满视口
     if (instance === chartInstance) {
-      performInitialFit(instance)
+      autoCalibrateLayout(instance, { reCenterHorizontal: true, smooth: true })
     } else {
       fitInstance(instance)
     }
