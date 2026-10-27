@@ -97,7 +97,7 @@ Interactive-Lecture-Engine/
 | 课程组专属进阶知识拓扑 | 印刷级出版套件 HUD（A4 PDF / 超清长图） |
 |---|---|
 | ![课程组知识拓扑](site/docs/public/showcase/group-knowledge.png) | ![印刷级出版套件 HUD](site/docs/public/showcase/lecture-export.png) |
-| 讲次、知识阶段与前后置依赖全自动拓扑生成 | 一键导出 A4 智能防截断 PDF、连续平铺 PDF 与超清长图 PNG |
+| 讲次、知识阶段与前后置依赖全自动拓扑生成 | 一键导出 A4 智能防截断 PDF、连续平铺 PDF 与超清长图 PNG（提供 [A4 PDF 样例](./site/docs/public/demo/demo-lecture-standard-a4.pdf)、[长卷 PDF 样例](./site/docs/public/demo/demo-lecture-continuous.pdf) 与 [长图样例](./site/docs/public/demo/demo-lecture-fullpage.png) 下载） |
 
 ---
 
@@ -147,6 +147,10 @@ python ../scripts/safe_build.py --purpose "生产发布验证"
 - **A4 页面智能跨页防截断**：通过注入无头 Chrome 打印专用的分页 CSS 规则（`break-inside: avoid`），强制正文段落、代码围栏、公式块与交互图表在分页处完整显示，杜绝半张图表或单行代码被物理折断；
 - **Canvas 超清矢量切片长图**：集成 `html-to-image` 引擎，以 2x 设备像素比对 DOM 树进行超清矢量渲染采样，一键导出完整讲义长图；
 - **智能 HUD 交互浮层**：在讲义右上角常驻微交互导出按钮，智能感知宿主系统的 Chrome/Puppeteer 环境，提供丝滑下载进度反馈。
+- **内置出版级导出样例 (Bundled Export Demos)**：
+  - [标准 A4 智能避让跨页 PDF 样例 (A4 Break-Avoided PDF)](./site/docs/public/demo/demo-lecture-standard-a4.pdf)
+  - [单页无断点长卷 PDF 样例 (Continuous Tiled PDF)](./site/docs/public/demo/demo-lecture-continuous.pdf)
+  - [2x 超清全景长图 PNG 样例 (Ultra-HD Canvas Long Image)](./site/docs/public/demo/demo-lecture-fullpage.png)
 
 ### 4. 构建期 KaTeX 严谨排版体系
 - **语法边界守卫**：公式解析器严格匹配 `\(…\)`（行内）与 `$$…$$` / `\[…\]`（行间），**坚决不接管裸 `$…$` 字符**（彻底避免中文技术散文中的货币符号 `$1000`、NMEA 协议 `$GNRMC`、ARP 变量 `ar$` 触发意外数学解析）；

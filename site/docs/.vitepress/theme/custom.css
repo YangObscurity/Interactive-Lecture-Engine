@@ -244,6 +244,18 @@ html.reading-mode .VPNavBar {
   border-bottom: 1px solid var(--vp-c-divider) !important;
 }
 
+/* 顶栏沉浸阅读切换按钮：沉浸模式下全局强制高亮启用色，杜绝任何生命周期脱节 */
+html.reading-mode .reading-mode-nav-btn {
+  background: var(--vp-c-brand-1) !important;
+  border-color: var(--vp-c-brand-1) !important;
+  color: #ffffff !important;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12) !important;
+}
+html.reading-mode .reading-mode-nav-btn .rm-icon,
+html.reading-mode .reading-mode-nav-btn .rm-text {
+  color: #ffffff !important;
+}
+
 /* ================= 防遮挡 / 防截断 ================= */
 
 .vp-doc table {
@@ -1484,7 +1496,7 @@ html.chart-modal-open body {
 }
 
 /* 移动端默认收起侧栏 */
-@media (max-width: 768px) {
+@media screen and (max-width: 768px) {
   figure.chart[data-type='echarts'] .chart-body {
     height: 320px;
   }
@@ -2428,15 +2440,18 @@ details.custom-block > :not(summary) {
 
 /* ================= 打印出版与 PDF 防截断强化 ================= */
 @media print {
+  html, body {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  /* 基础容器防溢出 */
   .wave-compare-grid,
   .wave-channel-card,
   .scope-viewer,
-  figure.chart,
   table,
   details.details,
-  details.custom-block,
-  pre,
-  .vp-code-block {
+  details.custom-block {
     break-inside: avoid !important;
     page-break-inside: avoid !important;
     -webkit-print-color-adjust: exact !important;
@@ -2445,18 +2460,142 @@ details.custom-block > :not(summary) {
 
   details.details,
   details.custom-block {
-    border: 1px solid #cbd5e1 !important;
+    border: 1px solid #e2e8f0 !important;
     background: #f8fafc !important;
+    margin: 16px 0 !important;
+    padding: 12px 16px !important;
+    border-radius: 6px !important;
   }
 
   details.details summary,
   details.custom-block summary {
-    font-weight: bold !important;
+    font-weight: 600 !important;
+    color: #0f172a !important;
+    margin-bottom: 8px !important;
+    cursor: default !important;
   }
 
   .scope-viewer {
     background: #0f172a !important;
     border: 1px solid #334155 !important;
+  }
+
+  /* 讲义图表全类型自适应与防截断 */
+  figure.chart {
+    break-inside: avoid !important;
+    page-break-inside: avoid !important;
+    max-height: 240mm !important;
+    box-sizing: border-box !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    margin: 18px auto !important;
+    background: #f8fafc !important;
+    border: 1px solid #e2e8f0 !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  figure.chart .chart-body {
+    max-height: 230mm !important;
+    overflow: visible !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    box-sizing: border-box !important;
+  }
+
+  figure.chart .chart-body svg {
+    max-width: 100% !important;
+    max-height: 220mm !important;
+    height: auto !important;
+    display: block !important;
+    margin: 0 auto !important;
+  }
+
+  figure.chart .chart-body canvas {
+    max-height: 220mm !important;
+    max-width: 100% !important;
+    object-fit: contain !important;
+  }
+  /* ECharts 打印与导出尺寸防溢出与等比锁定 */
+  figure.chart[data-type='echarts'] .chart-body {
+    height: 440px !important;
+    max-height: 440px !important;
+    overflow: hidden !important;
+  }
+  figure.chart[data-type='echarts'] .chart-body > div {
+    height: 100% !important;
+    max-height: 100% !important;
+    width: 100% !important;
+  }
+  figure.chart[data-type='echarts'] .chart-body svg {
+    width: 100% !important;
+    max-width: 100% !important;
+    height: 100% !important;
+    max-height: 100% !important;
+    display: block !important;
+  }
+
+
+  /* 代码块全要素高保真跨页排版：彻底解决 overflow 截断与底色纯白裸奔 */
+  .vp-doc div[class*='language-'],
+  div[class*='language-'],
+  pre,
+  .vp-code-block {
+    overflow: visible !important;
+    overflow-x: visible !important;
+    overflow-y: visible !important;
+    box-sizing: border-box !important;
+    max-width: 100% !important;
+    white-space: pre-wrap !important;
+    word-break: break-all !important;
+    word-wrap: break-word !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  .vp-doc div[class*='language-'],
+  div[class*='language-'] {
+    background-color: #f8fafc !important;
+    border: 1px solid #e2e8f0 !important;
+    border-radius: 6px !important;
+    margin: 16px 0 !important;
+    padding: 12px 16px !important;
+    page-break-inside: auto !important;
+    break-inside: auto !important;
+    position: relative !important;
+  }
+
+  .vp-doc div[class*='language-'] pre,
+  div[class*='language-'] pre {
+    background: transparent !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: none !important;
+  }
+
+  .vp-doc div[class*='language-'] button.copy,
+  div[class*='language-'] button.copy {
+    display: none !important;
+  }
+
+  .vp-doc div[class*='language-'] span.lang,
+  div[class*='language-'] span.lang {
+    position: absolute !important;
+    top: 6px !important;
+    right: 12px !important;
+    font-size: 11px !important;
+    color: #94a3b8 !important;
+  }
+
+  /* 标题防孤行 */
+  h1, h2, h3, h4, h5, h6 {
+    break-after: avoid !important;
+    page-break-after: avoid !important;
+  }
+
+  /* 暗色模式下打印自动切换高对比度文字 */
+  html.dark .vp-adaptive-theme span {
+    color: var(--shiki-light, inherit) !important;
   }
 }
 

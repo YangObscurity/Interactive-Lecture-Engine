@@ -86,7 +86,7 @@ Chart toolbars adhere strictly to a **100% pure SVG vector contract**, eliminati
 | Course Group Knowledge Topology | Publication-Grade Export HUD (A4 PDF / Long Canvas) |
 |---|---|
 | ![Course Knowledge Topology](site/docs/public/showcase/group-knowledge.png) | ![Publication Export HUD](site/docs/public/showcase/lecture-export.png) |
-| Automated topology generation based on lecture sequence, phase stages, and dependencies | One-click export for A4 break-avoided PDF, continuous tiled PDF, and 2x retina PNG long image |
+| Automated topology generation based on lecture sequence, phase stages, and dependencies | One-click export for A4 break-avoided PDF, continuous tiled PDF, and 2x retina PNG long image (Download: [A4 PDF](./site/docs/public/demo/demo-lecture-standard-a4.pdf) / [Continuous PDF](./site/docs/public/demo/demo-lecture-continuous.pdf) / [PNG Strip](./site/docs/public/demo/demo-lecture-fullpage.png)) |
 
 ---
 
@@ -136,6 +136,10 @@ Static artifacts will be rendered into `site/docs/.vitepress/dist`.
 - **A4 Smart Page-Break Avoidance**: Injects headless Chrome print styles (`break-inside: avoid`), preventing paragraphs, code blocks, math formulas, and interactive diagrams from splitting across page breaks;
 - **Canvas Ultra-HD Vector Slicing**: Integrates `html-to-image` to resample DOM trees at 2x device pixel ratio, generating ultra-HD PNG panoramic lecture strips;
 - **Seamless HUD Export Menu**: Resident top-right micro-interaction HUD that detects headless Chrome / Puppeteer environments and provides real-time progress feedback.
+- **Bundled Export Demos**:
+  - [Publication A4 Break-Avoided PDF Sample](./site/docs/public/demo/demo-lecture-standard-a4.pdf)
+  - [Continuous Tiled PDF Sample](./site/docs/public/demo/demo-lecture-continuous.pdf)
+  - [Ultra-HD Canvas Panoramic PNG Sample](./site/docs/public/demo/demo-lecture-fullpage.png)
 
 ### 4. Build-Time KaTeX Mathematical Typesetting
 - **Delimiter Safety Guard**: Strictly matches `\(…\)` (inline) and `$$…$$` / `\[…\]` (display blocks), deliberately **ignoring bare `$` signs** (preventing accidental math parsing from `$1000`, NMEA `$GNRMC`, or ARP `ar$` identifiers);

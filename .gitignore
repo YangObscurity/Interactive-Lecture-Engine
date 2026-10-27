@@ -123,6 +123,8 @@ screenshot_*.jpg
 *.tar.gz
 audit_report.*
 !site/docs/public/showcase/*.png
+!site/docs/public/demo/*.pdf
+!site/docs/public/demo/*.png
 
 # ------------------------------------------------------------------------------
 # 8. Python Bytecode, Virtual Environments & Coverage Reports

@@ -8,14 +8,13 @@
  *   路由范围：仅在首页关闭（隐藏按键），在所有课程组页与讲义页均支持开启；
  *   离开首页进入组或讲义页时依据 localStorage 自动恢复沉浸状态。
  * 
- * 铁律：零 Emoji、纯工程矢量 SVG、SSR 安全防护。
+ * 铁律：零 Emoji、纯工程矢量 SVG、SSR 安全防护、双向生命周期防御与实时响应。
  */
 
-import { ref, computed, watch, onMounted } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useRoute } from 'vitepress'
 
 const KEY = 'lecture-reading-mode'
-const isReadingMode = ref(false)
 const route = useRoute()
 
 // 仅在首页关闭（/ 或 /index.html 或空路径），组页与讲义页全面开启沉浸模式
@@ -24,9 +23,41 @@ const isHome = computed(() => {
   return p === '' || p === '/'
 })
 
+function getSavedMode(): boolean {
+  if (typeof window === 'undefined') return false
+  const p = (window.location.pathname || '').replace(/index(?:\.html)?$/, '').replace(/\.html$/, '')
+  if (p === '' || p === '/') return false
+  try {
+    return localStorage.getItem(KEY) === '1'
+  } catch {
+    return false
+  }
+}
+
+// 客户端初始化时直接取 localStorage 状态，杜绝任何生命周期延迟或先假后真
+const isReadingMode = ref(getSavedMode())
+
 function syncState() {
   if (typeof document === 'undefined') return
-  isReadingMode.value = document.documentElement.classList.contains('reading-mode')
+  const p = (route.path || (typeof window !== 'undefined' ? window.location.pathname : '')).replace(/index(?:\.html)?$/, '').replace(/\.html$/, '')
+  const home = p === '' || p === '/'
+  if (home) {
+    document.documentElement.classList.remove('reading-mode')
+    isReadingMode.value = false
+    return
+  }
+
+  let saved = false
+  try {
+    saved = localStorage.getItem(KEY) === '1'
+  } catch {}
+  const hasClass = document.documentElement.classList.contains('reading-mode')
+  const shouldBeActive = saved || hasClass
+
+  if (document.documentElement.classList.contains('reading-mode') !== shouldBeActive) {
+    document.documentElement.classList.toggle('reading-mode', shouldBeActive)
+  }
+  isReadingMode.value = shouldBeActive
 }
 
 function toggleReadingMode() {
@@ -48,31 +79,40 @@ function toggleReadingMode() {
 // 路由监听：如果在首页则强制清退 reading-mode 类；离开首页进入组或讲义页则依 localStorage 恢复
 watch(
   () => route.path,
-  (newPath) => {
+  () => {
     if (typeof document === 'undefined') return
-    const p = (newPath || '').replace(/index(?:\.html)?$/, '').replace(/\.html$/, '')
-    const home = p === '' || p === '/'
-    if (home) {
-      document.documentElement.classList.remove('reading-mode')
-      isReadingMode.value = false
-    } else {
-      try {
-        const saved = localStorage.getItem(KEY) === '1'
-        document.documentElement.classList.toggle('reading-mode', saved)
-        isReadingMode.value = saved
-        // 延时让位触发 resize
-        setTimeout(() => window.dispatchEvent(new Event('resize')), 80)
-      } catch {
-        // ignore
-      }
-    }
+    syncState()
+    setTimeout(() => window.dispatchEvent(new Event('resize')), 80)
   },
   { immediate: true }
 )
 
+let classObserver: MutationObserver | null = null
+
 onMounted(() => {
   if (typeof window === 'undefined') return
   syncState()
+
+  // 挂载 MutationObserver 实时监听 html class 变动，确保外部任何脚本（如 reading-mode.ts）改变 reading-mode 时，按钮状态绝对 100% 同步
+  if (typeof MutationObserver !== 'undefined') {
+    classObserver = new MutationObserver(() => {
+      const inReading = document.documentElement.classList.contains('reading-mode')
+      if (isReadingMode.value !== inReading) {
+        isReadingMode.value = inReading
+      }
+    })
+    classObserver.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ['class']
+    })
+  }
+})
+
+onUnmounted(() => {
+  if (classObserver) {
+    classObserver.disconnect()
+    classObserver = null
+  }
 })
 </script>
 
@@ -129,11 +169,19 @@ onMounted(() => {
   background: var(--vp-c-bg-elv);
 }
 
-.reading-mode-nav-btn.is-active {
-  background: var(--vp-c-brand-1);
-  border-color: var(--vp-c-brand-1);
-  color: #ffffff;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+.reading-mode-nav-btn.is-active,
+:global(html.reading-mode) .reading-mode-nav-btn {
+  background: var(--vp-c-brand-1) !important;
+  border-color: var(--vp-c-brand-1) !important;
+  color: #ffffff !important;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12) !important;
+}
+
+.reading-mode-nav-btn.is-active .rm-icon,
+.reading-mode-nav-btn.is-active .rm-text,
+:global(html.reading-mode) .reading-mode-nav-btn .rm-icon,
+:global(html.reading-mode) .reading-mode-nav-btn .rm-text {
+  color: #ffffff !important;
 }
 
 .rm-icon {

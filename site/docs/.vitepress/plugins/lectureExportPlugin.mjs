@@ -879,9 +879,10 @@ export function lectureExportPlugin() {
         const targetFilePath = path.join(exportsDir, targetFile)
         const minBytes = CONFIG.minValidBytes ?? FALLBACK_CONFIG.minValidBytes
 
+        const forceRefresh = req.url.includes('force=1') || req.url.includes('refresh=1')
         // 已生成且体积合理 → 直接命中缓存，避免重复渲染（导出很贵，幂等很重要）
         try {
-          if (fs.existsSync(targetFilePath) && fs.statSync(targetFilePath).size > minBytes) {
+          if (!forceRefresh && fs.existsSync(targetFilePath) && fs.statSync(targetFilePath).size > minBytes) {
             return json(200, { ok: true, cached: true, file: targetFile })
           }
         } catch {
@@ -921,18 +922,28 @@ export function lectureExportPlugin() {
             })
           await page.evaluate(() => document.fonts?.ready).catch(() => {})
 
-          // 触发图表自适应：某些图在视口变化前尺寸为 0
+          // 展开所有自测折叠框，确保打印及长图中所有解析与答案可见
           await page.evaluate(() => {
+            document.querySelectorAll('details:not(.chart-code)').forEach((d) => {
+              d.setAttribute('open', '')
+            })
+          })
+
+          // 触发图表自适应：为当前导出格式适配最佳宽度（A4 纸为 660px，长卷/长图依据版心动态标定，防右侧截断）
+          await page.evaluate((reqType) => {
+            const cont = document.querySelector('.VPDoc .content-container') || document.querySelector('.vp-doc')
+            const contW = cont ? cont.clientWidth : (reqType === 'a4' ? 660 : 850)
+            const targetW = Math.min(contW - 24, reqType === 'a4' ? 660 : 850)
             if (typeof window.__RESIZE_ALL_CHARTS__ === 'function') {
               try {
-                window.__RESIZE_ALL_CHARTS__()
+                window.__RESIZE_ALL_CHARTS__(targetW)
               } catch {
                 /* 图表重排失败不该阻断导出 */
               }
             }
             window.dispatchEvent(new Event('resize'))
-          })
-          await new Promise((r) => setTimeout(r, 400))
+          }, requestedType)
+          await new Promise((r) => setTimeout(r, 450))
 
           // 注入干净的出版级导出样式：隐藏所有 Web 端交互控件，清掉侧边栏偏移
           await page.addStyleTag({ content: EXPORT_STYLE })
@@ -1064,23 +1075,30 @@ const EXPORT_STYLE = `
     padding: 0 !important;
     width: 100% !important;
   }
-  /* 图表与矢量组件：居中且自适应高度，严禁撑爆单页形成全白废页 */
+  /* 图表与矢量组件：严格防截断、居中且自适应高度 */
   figure.chart {
     page-break-inside: avoid !important;
     break-inside: avoid !important;
     max-height: 240mm !important;
     box-sizing: border-box !important;
-    margin-left: auto !important;
-    margin-right: auto !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    margin: 20px auto !important;
+    background: #f8fafc !important;
+    border: 1px solid #e2e8f0 !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
   }
   figure.chart .chart-body {
     max-height: 230mm !important;
     overflow: visible !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    box-sizing: border-box !important;
   }
   figure.chart .chart-body svg {
-    max-height: 220mm !important;
-    width: auto !important;
     max-width: 100% !important;
+    max-height: 220mm !important;
     height: auto !important;
     display: block !important;
     margin: 0 auto !important;
@@ -1090,16 +1108,96 @@ const EXPORT_STYLE = `
     max-width: 100% !important;
     object-fit: contain !important;
   }
-  table, tr, details.details {
+  /* ECharts 打印与导出尺寸防溢出与等比锁定 */
+  figure.chart[data-type='echarts'] .chart-body {
+    height: 440px !important;
+    max-height: 440px !important;
+    overflow: hidden !important;
+  }
+  figure.chart[data-type='echarts'] .chart-body > div {
+    height: 100% !important;
+    max-height: 100% !important;
+    width: 100% !important;
+  }
+  figure.chart[data-type='echarts'] .chart-body svg {
+    width: 100% !important;
+    max-width: 100% !important;
+    height: 100% !important;
+    max-height: 100% !important;
+    display: block !important;
+  }
+
+  table, tr, .wave-compare-grid, .scope-viewer {
     page-break-inside: avoid !important;
     break-inside: avoid !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
   }
-  /* 超长代码块允许自然跨页，禁止暴力 avoid 撑爆单页 */
-  pre, .vp-code-block, div[class*="language-"] {
-    break-inside: auto !important;
-    page-break-inside: auto !important;
+  /* 自测与折叠框优雅排版与防断页 */
+  details.details,
+  details.custom-block {
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+    margin: 16px 0 !important;
+    padding: 12px 16px !important;
+    background-color: #f8fafc !important;
+    border: 1px solid #e2e8f0 !important;
+    border-radius: 6px !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+  details.details summary,
+  details.custom-block summary {
+    font-weight: 600 !important;
+    color: #0f172a !important;
+    margin-bottom: 8px !important;
+    cursor: default !important;
+  }
+  /* 代码块全要素高保真跨页排版：彻底解决 overflow 截断与底色纯白裸奔 */
+  .vp-doc div[class*="language-"],
+  div[class*="language-"],
+  pre,
+  .vp-code-block {
+    overflow: visible !important;
+    overflow-x: visible !important;
+    overflow-y: visible !important;
+    box-sizing: border-box !important;
+    max-width: 100% !important;
     white-space: pre-wrap !important;
     word-break: break-all !important;
+    word-wrap: break-word !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+  .vp-doc div[class*="language-"],
+  div[class*="language-"] {
+    background-color: #f8fafc !important;
+    border: 1px solid #e2e8f0 !important;
+    border-radius: 6px !important;
+    margin: 16px 0 !important;
+    padding: 12px 16px !important;
+    page-break-inside: auto !important;
+    break-inside: auto !important;
+    position: relative !important;
+  }
+  .vp-doc div[class*="language-"] pre,
+  div[class*="language-"] pre {
+    background: transparent !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: none !important;
+  }
+  .vp-doc div[class*="language-"] button.copy,
+  div[class*="language-"] button.copy {
+    display: none !important;
+  }
+  .vp-doc div[class*="language-"] span.lang,
+  div[class*="language-"] span.lang {
+    position: absolute !important;
+    top: 6px !important;
+    right: 12px !important;
+    font-size: 11px !important;
+    color: #94a3b8 !important;
   }
   h1, h2, h3, h4, h5, h6 {
     page-break-after: avoid !important;

@@ -194,8 +194,32 @@ async function exportContinuousPdfFallback() {
     return
   }
 
-  const w = 960
-  const h = Math.ceil(Math.max(docEl.scrollHeight, docEl.offsetHeight)) + 40
+  // 暗色模式保护：打印统一采用高可读性纯净白底出版模式，防止 Shiki 暗色浅文本与白底冲撞
+  const wasDark = document.documentElement.classList.contains('dark')
+  if (wasDark) {
+    document.documentElement.classList.remove('dark')
+  }
+
+  // 自动展开所有自测/详情折叠框，保证长卷中全部解析与答案可见
+  const autoOpenedDetails: HTMLDetailsElement[] = []
+  document.querySelectorAll<HTMLDetailsElement>('details:not(.chart-code)').forEach((d) => {
+    if (!d.open) {
+      d.setAttribute('open', '')
+      d.dataset.printAutoOpened = '1'
+      autoOpenedDetails.push(d)
+    }
+  })
+
+  // 触发图表自适应重排与重绘（依据当前版心容器动态标定，严禁硬编码 1080px 导致右侧截断）
+  if (typeof (window as any).__RESIZE_ALL_CHARTS__ === 'function') {
+    const cont = document.querySelector('.VPDoc .content-container') as HTMLElement | null
+    const usableW = cont ? Math.min(cont.clientWidth - 24, 850) : 850
+    try { (window as any).__RESIZE_ALL_CHARTS__(usableW) } catch {}
+  }
+  window.dispatchEvent(new Event('resize'))
+
+  const w = 1200
+  const h = Math.ceil(Math.max(docEl.scrollHeight, docEl.offsetHeight)) + 80
 
   const styleId = '__lecture_continuous_print_style__'
   let styleEl = document.getElementById(styleId) as HTMLStyleElement
@@ -213,26 +237,42 @@ async function exportContinuousPdfFallback() {
     @media print {
       html, body {
         width: ${w}px !important;
-        height: ${h}px !important;
-        max-height: ${h}px !important;
-        overflow: hidden !important;
+        min-height: 100% !important;
+        height: auto !important;
+        max-height: none !important;
+        overflow: visible !important;
         margin: 0 !important;
         padding: 0 !important;
         background: #ffffff !important;
         color: #1e293b !important;
+        -webkit-print-color-adjust: exact !important;
+        print-color-adjust: exact !important;
       }
       .VPNav, .VPLocalNav, .VPSidebar, .aside, .VPDocAside, .reading-mode-nav-wrapper,
       .lecture-export-wrapper, .lecture-export-toast, .lecture-export-hud-overlay,
       .ai-sidebar-shell, .selection-toolbar-root, .lecture-progress-card,
       .VPDocFooter, .edit-link, .next-and-prev-link, .chart-tools, details.chart-code {
         display: none !important;
+        visibility: hidden !important;
       }
       .VPContent, .VPDoc {
         width: ${w}px !important;
         max-width: ${w}px !important;
         margin: 0 auto !important;
-        padding: 24px 32px !important;
+        padding: 32px 48px !important;
         box-sizing: border-box !important;
+      }
+      .VPDoc .container {
+        max-width: 100% !important;
+        margin: 0 auto !important;
+        display: block !important;
+      }
+      .VPDoc .content,
+      .VPDoc .content-container {
+        max-width: 100% !important;
+        margin: 0 auto !important;
+        padding: 0 !important;
+        width: 100% !important;
       }
       .vp-doc {
         font-size: 16px !important;
@@ -240,6 +280,99 @@ async function exportContinuousPdfFallback() {
       * {
         break-inside: auto !important;
         page-break-inside: auto !important;
+      }
+
+      /* 图表防截断与自适应 */
+      figure.chart {
+        break-inside: avoid !important;
+        page-break-inside: avoid !important;
+        box-sizing: border-box !important;
+        width: 100% !important;
+        max-width: 100% !important;
+        margin: 24px auto !important;
+        background: #f8fafc !important;
+        border: 1px solid #e2e8f0 !important;
+        -webkit-print-color-adjust: exact !important;
+        print-color-adjust: exact !important;
+      }
+      figure.chart .chart-body {
+        overflow: visible !important;
+        width: 100% !important;
+        max-width: 100% !important;
+        box-sizing: border-box !important;
+      }
+      figure.chart .chart-body svg {
+        max-width: 100% !important;
+        height: auto !important;
+        display: block !important;
+        margin: 0 auto !important;
+      }
+      figure.chart .chart-body canvas {
+        max-width: 100% !important;
+        height: auto !important;
+        object-fit: contain !important;
+      }
+  /* ECharts 打印与导出尺寸防溢出与等比锁定 */
+  figure.chart[data-type='echarts'] .chart-body {
+    height: 440px !important;
+    max-height: 440px !important;
+    overflow: hidden !important;
+  }
+  figure.chart[data-type='echarts'] .chart-body > div {
+    height: 100% !important;
+    max-height: 100% !important;
+    width: 100% !important;
+  }
+  figure.chart[data-type='echarts'] .chart-body svg {
+    width: 100% !important;
+    max-width: 100% !important;
+    height: 100% !important;
+    max-height: 100% !important;
+    display: block !important;
+  }
+
+
+      /* 代码块高保真与防截断 */
+      .vp-doc div[class*='language-'],
+      div[class*='language-'],
+      pre,
+      .vp-code-block {
+        overflow: visible !important;
+        overflow-x: visible !important;
+        overflow-y: visible !important;
+        box-sizing: border-box !important;
+        max-width: 100% !important;
+        white-space: pre-wrap !important;
+        word-break: break-all !important;
+        word-wrap: break-word !important;
+        -webkit-print-color-adjust: exact !important;
+        print-color-adjust: exact !important;
+      }
+      .vp-doc div[class*='language-'],
+      div[class*='language-'] {
+        background-color: #f8fafc !important;
+        border: 1px solid #e2e8f0 !important;
+        border-radius: 6px !important;
+        margin: 16px 0 !important;
+        padding: 12px 16px !important;
+        position: relative !important;
+      }
+      .vp-doc div[class*='language-'] pre,
+      div[class*='language-'] pre {
+        background: transparent !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        border: none !important;
+      }
+      .vp-doc div[class*='language-'] button.copy {
+        display: none !important;
+      }
+      .vp-doc div[class*='language-'] span.lang {
+        position: absolute !important;
+        top: 6px !important;
+        right: 12px !important;
+        font-size: 11px !important;
+        color: #94a3b8 !important;
       }
     }
   `
@@ -250,7 +383,18 @@ async function exportContinuousPdfFallback() {
   const cleanup = () => {
     if (cleanedUp) return
     cleanedUp = true
+    if (wasDark) {
+      document.documentElement.classList.add('dark')
+    }
+    autoOpenedDetails.forEach((d) => {
+      d.removeAttribute('open')
+      delete d.dataset.printAutoOpened
+    })
     if (styleEl && styleEl.parentNode) styleEl.parentNode.removeChild(styleEl)
+    if (typeof (window as any).__RESIZE_ALL_CHARTS__ === 'function') {
+      try { (window as any).__RESIZE_ALL_CHARTS__() } catch {}
+    }
+    window.dispatchEvent(new Event('resize'))
     window.removeEventListener('afterprint', cleanup)
     isExporting.value = false
     exportProgressText.value = ''
@@ -263,6 +407,28 @@ async function exportContinuousPdfFallback() {
 
 /** 降级实现：端侧出版级 A4 多页 PDF 打印 */
 async function exportA4PdfFallback() {
+  // 暗色模式保护：打印统一采用高可读性纯净白底出版模式
+  const wasDark = document.documentElement.classList.contains('dark')
+  if (wasDark) {
+    document.documentElement.classList.remove('dark')
+  }
+
+  // 自动展开所有自测/详情折叠框，保证 A4 打印中全部解析与答案可见
+  const autoOpenedDetails: HTMLDetailsElement[] = []
+  document.querySelectorAll<HTMLDetailsElement>('details:not(.chart-code)').forEach((d) => {
+    if (!d.open) {
+      d.setAttribute('open', '')
+      d.dataset.printAutoOpened = '1'
+      autoOpenedDetails.push(d)
+    }
+  })
+
+  // 触发图表自适应重排与重绘（A4 使用 660px 宽度）
+  if (typeof (window as any).__RESIZE_ALL_CHARTS__ === 'function') {
+    try { (window as any).__RESIZE_ALL_CHARTS__(660) } catch {}
+  }
+  window.dispatchEvent(new Event('resize'))
+
   const styleId = '__lecture_a4_print_style__'
   let styleEl = document.getElementById(styleId) as HTMLStyleElement
   if (!styleEl) {
@@ -287,26 +453,145 @@ async function exportA4PdfFallback() {
         color: #1e293b !important;
         width: 100% !important;
         height: auto !important;
+        overflow: visible !important;
+        -webkit-print-color-adjust: exact !important;
+        print-color-adjust: exact !important;
       }
       .VPNav, .VPLocalNav, .VPSidebar, .aside, .VPDocAside, .reading-mode-nav-wrapper,
       .lecture-export-wrapper, .lecture-export-toast, .lecture-export-hud-overlay,
       .ai-sidebar-shell, .selection-toolbar-root, .lecture-progress-card,
       .VPDocFooter, .edit-link, .next-and-prev-link, .chart-tools, details.chart-code {
         display: none !important;
+        visibility: hidden !important;
       }
       .VPContent, .VPDoc {
-        max-width: 860px !important;
+        max-width: 100% !important;
+        width: 100% !important;
         margin: 0 auto !important;
         padding: 0 !important;
+        box-sizing: border-box !important;
       }
-      figure.chart, table, tr, details.details, pre, .vp-code-block,
-      .wave-compare-grid, .scope-viewer {
+      .VPDoc .container {
+        max-width: 100% !important;
+        margin: 0 auto !important;
+        display: block !important;
+      }
+      .VPDoc .content,
+      .VPDoc .content-container {
+        max-width: 100% !important;
+        margin: 0 auto !important;
+        padding: 0 !important;
+        width: 100% !important;
+      }
+
+      /* 图表防截断与自适应 */
+      figure.chart {
         break-inside: avoid !important;
         page-break-inside: avoid !important;
+        max-height: 240mm !important;
+        box-sizing: border-box !important;
+        width: 100% !important;
+        max-width: 100% !important;
+        margin: 18px auto !important;
+        background: #f8fafc !important;
+        border: 1px solid #e2e8f0 !important;
+        -webkit-print-color-adjust: exact !important;
+        print-color-adjust: exact !important;
       }
-      h1, h2, h3, h4 {
+      figure.chart .chart-body {
+        max-height: 230mm !important;
+        overflow: visible !important;
+        width: 100% !important;
+        max-width: 100% !important;
+        box-sizing: border-box !important;
+      }
+      figure.chart .chart-body svg {
+        max-width: 100% !important;
+        max-height: 220mm !important;
+        height: auto !important;
+        display: block !important;
+        margin: 0 auto !important;
+      }
+      figure.chart .chart-body canvas {
+        max-height: 220mm !important;
+        max-width: 100% !important;
+        object-fit: contain !important;
+      }
+  /* ECharts 打印与导出尺寸防溢出与等比锁定 */
+  figure.chart[data-type='echarts'] .chart-body {
+    height: 440px !important;
+    max-height: 440px !important;
+    overflow: hidden !important;
+  }
+  figure.chart[data-type='echarts'] .chart-body > div {
+    height: 100% !important;
+    max-height: 100% !important;
+    width: 100% !important;
+  }
+  figure.chart[data-type='echarts'] .chart-body svg {
+    width: 100% !important;
+    max-width: 100% !important;
+    height: 100% !important;
+    max-height: 100% !important;
+    display: block !important;
+  }
+
+
+      /* 表格、折叠块防断行 */
+      table, tr, details.details, .wave-compare-grid, .scope-viewer {
+        break-inside: avoid !important;
+        page-break-inside: avoid !important;
+        -webkit-print-color-adjust: exact !important;
+        print-color-adjust: exact !important;
+      }
+      h1, h2, h3, h4, h5, h6 {
         break-after: avoid !important;
         page-break-after: avoid !important;
+      }
+
+      /* 代码块高保真与跨页防截断 */
+      .vp-doc div[class*='language-'],
+      div[class*='language-'],
+      pre,
+      .vp-code-block {
+        overflow: visible !important;
+        overflow-x: visible !important;
+        overflow-y: visible !important;
+        box-sizing: border-box !important;
+        max-width: 100% !important;
+        white-space: pre-wrap !important;
+        word-break: break-all !important;
+        word-wrap: break-word !important;
+        -webkit-print-color-adjust: exact !important;
+        print-color-adjust: exact !important;
+      }
+      .vp-doc div[class*='language-'],
+      div[class*='language-'] {
+        background-color: #f8fafc !important;
+        border: 1px solid #e2e8f0 !important;
+        border-radius: 6px !important;
+        margin: 16px 0 !important;
+        padding: 12px 16px !important;
+        page-break-inside: auto !important;
+        break-inside: auto !important;
+        position: relative !important;
+      }
+      .vp-doc div[class*='language-'] pre,
+      div[class*='language-'] pre {
+        background: transparent !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        border: none !important;
+      }
+      .vp-doc div[class*='language-'] button.copy {
+        display: none !important;
+      }
+      .vp-doc div[class*='language-'] span.lang {
+        position: absolute !important;
+        top: 6px !important;
+        right: 12px !important;
+        font-size: 11px !important;
+        color: #94a3b8 !important;
       }
     }
   `
@@ -317,7 +602,18 @@ async function exportA4PdfFallback() {
   const cleanup = () => {
     if (cleanedUp) return
     cleanedUp = true
+    if (wasDark) {
+      document.documentElement.classList.add('dark')
+    }
+    autoOpenedDetails.forEach((d) => {
+      d.removeAttribute('open')
+      delete d.dataset.printAutoOpened
+    })
     if (styleEl && styleEl.parentNode) styleEl.parentNode.removeChild(styleEl)
+    if (typeof (window as any).__RESIZE_ALL_CHARTS__ === 'function') {
+      try { (window as any).__RESIZE_ALL_CHARTS__() } catch {}
+    }
+    window.dispatchEvent(new Event('resize'))
     window.removeEventListener('afterprint', cleanup)
     isExporting.value = false
     exportProgressText.value = ''

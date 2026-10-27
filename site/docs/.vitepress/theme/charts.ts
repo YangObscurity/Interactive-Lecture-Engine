@@ -414,15 +414,26 @@ async function renderEcharts(fig: HTMLElement, code: string) {
   echarts.getInstanceByDom(body as HTMLElement)?.dispose()
   const chart = echarts.init(body, null, { renderer: 'canvas' })
   ;(body as any).__echarts_instance__ = chart
-  ;(fig as any).__chart_resize__ = () => chart.resize()
+  ;(fig as any).__chart_resize__ = (w?: number, h?: number) => {
+    chart.resize(w ? { width: w, height: h } : undefined)
+    fixEchartsSvgViewbox(body)
+  }
   chart.setOption(opt, true)
-  const ro = new ResizeObserver(() => chart.resize())
+  fixEchartsSvgViewbox(body)
+  requestAnimationFrame(() => fixEchartsSvgViewbox(body))
+  const ro = new ResizeObserver(() => {
+    chart.resize()
+    fixEchartsSvgViewbox(body)
+  })
   ro.observe(body)
   attachTools(
     fig,
     { reset: () => chart.dispatchAction({ type: 'restore' }) },
     {
-      resize: () => chart.resize(),
+      resize: () => {
+        chart.resize()
+        fixEchartsSvgViewbox(body)
+      },
       chart,
       body,
       dispose: () => {
@@ -431,6 +442,21 @@ async function renderEcharts(fig: HTMLElement, code: string) {
       },
     }
   )
+}
+
+/** 确保 ECharts 渲染的 SVG 具备 viewBox 属性，以便在打印或窄屏下整体等比缩放、防止右侧图例与条形被截断 */
+function fixEchartsSvgViewbox(body: HTMLElement) {
+  const svg = body.querySelector('svg')
+  if (!svg) return
+  const w = parseFloat(svg.getAttribute('width') || '') || svg.clientWidth || parseFloat(svg.style.width || '')
+  const h = parseFloat(svg.getAttribute('height') || '') || svg.clientHeight || parseFloat(svg.style.height || '')
+  if (w > 0 && h > 0) {
+    svg.setAttribute('viewBox', `0 0 ${w} ${h}`)
+    svg.style.maxWidth = '100%'
+    svg.style.width = '100%'
+    svg.style.height = '100%'
+    svg.style.overflow = 'hidden'
+  }
 }
 
 async function renderWavedrom(fig: HTMLElement, code: string) {
@@ -900,13 +926,18 @@ function openChartModal(fig: HTMLElement) {
 
 /* 导出与外部打印总线支持 */
 if (typeof window !== 'undefined') {
-  ;(window as any).__RESIZE_ALL_CHARTS__ = () => {
+  ;(window as any).__RESIZE_ALL_CHARTS__ = (targetWidth?: number) => {
     document.querySelectorAll<HTMLElement>('figure.chart[data-type="echarts"]').forEach((fig) => {
       const body = fig.querySelector('.chart-body') as HTMLElement | null
       if (body) {
         const chart = (body as any).__echarts_instance__
         if (chart && typeof chart.resize === 'function') {
-          try { chart.resize() } catch {}
+          try {
+            const w = targetWidth && targetWidth > 0 ? targetWidth : (body.clientWidth || 660)
+            const h = body.clientHeight || 430
+            chart.resize({ width: w, height: h })
+            fixEchartsSvgViewbox(body)
+          } catch {}
         }
       }
     })
@@ -918,6 +949,25 @@ if (typeof window !== 'undefined') {
       }
     })
   }
+
+  // 原生打印/导出防截断总线：在打印前自动展开自测答题折叠框，并适配图表宽度
+  window.addEventListener('beforeprint', () => {
+    document.querySelectorAll<HTMLDetailsElement>('details:not(.chart-code)').forEach((d) => {
+      if (!d.open) {
+        d.setAttribute('open', '')
+        d.dataset.printAutoOpened = '1'
+      }
+    })
+    ;(window as any).__RESIZE_ALL_CHARTS__?.(660)
+  })
+
+  window.addEventListener('afterprint', () => {
+    document.querySelectorAll<HTMLDetailsElement>('details[data-print-auto-opened="1"]').forEach((d) => {
+      d.removeAttribute('open')
+      delete d.dataset.printAutoOpened
+    })
+    ;(window as any).__RESIZE_ALL_CHARTS__?.()
+  })
 }
 
 /* ---------------- 入口（幂等，可被 onUpdated 反复调用） ---------------- */
@@ -966,18 +1016,52 @@ function findInlineMermaidBlocks(): HTMLElement[] {
     .map((s) => `${s}:not([data-mermaid-rendered])`)
     .join(', ')
   if (!sel) return []
-  return Array.from(document.querySelectorAll<HTMLElement>(sel)).filter(
-    (el) => !el.closest('.chart-code') && !el.closest('figure.chart')
-  )
+  const blocks = Array.from(document.querySelectorAll<HTMLElement>(sel)).filter((el) => {
+    if (el.closest('.chart-code') || el.closest('figure.chart')) return false
+    // 若前驱已是 inline-mermaid 卡片，说明已被接管，无需重复注入
+    if (el.previousElementSibling?.classList.contains('inline-mermaid')) {
+      el.dataset.mermaidRendered = '1'
+      if (!CHART_INLINE_MERMAID.keepSource) el.style.display = 'none'
+      return false
+    }
+    return true
+  })
+  // 立即在微任务/异步让出前打上标记，阻断后续并发调用提取相同 block
+  for (const b of blocks) {
+    b.dataset.mermaidRendered = '1'
+  }
+  return blocks
 }
 
-export async function initCharts() {
+let initChartsPromise: Promise<void> | null = null
+
+export function initCharts(): Promise<void> {
+  if (initChartsPromise) return initChartsPromise
+  initChartsPromise = _initChartsInternal().finally(() => {
+    initChartsPromise = null
+  })
+  return initChartsPromise
+}
+
+async function _initChartsInternal() {
   // SPA 换页时若弹层还开着，先关掉，避免把上一讲的图挂到新页面上
   if (modalEl && (!modalRestore || !document.contains(modalRestore.parent))) closeModal()
+
+  // 0. 防御性自愈：清理可能因并发/历史残留生成的相邻重复 inline-mermaid 节点
+  const duplicateFigs = Array.from(
+    document.querySelectorAll<HTMLElement>('figure.chart.inline-mermaid + figure.chart.inline-mermaid')
+  )
+  for (const dup of duplicateFigs) {
+    dup.remove()
+  }
 
   const figs = Array.from(
     document.querySelectorAll<HTMLElement>('figure.chart:not([data-rendered])')
   )
+  for (const f of figs) {
+    f.dataset.rendered = '1'
+  }
+
   const inlineBlocks = findInlineMermaidBlocks()
 
   if (!figs.length && !inlineBlocks.length) {
@@ -1025,7 +1109,11 @@ export async function initCharts() {
        直接把闸门打红。故只设 data-id（供 id/主题重绘登记用）与 data-type。 */
   if (inlineBlocks.length) {
     for (const block of inlineBlocks) {
-      block.dataset.mermaidRendered = '1' // 先打标，防止本轮/下轮重复接管
+      // 二次防御：若前驱已存在 inline-mermaid，避免重复插入
+      if (block.previousElementSibling?.classList.contains('inline-mermaid')) {
+        if (!CHART_INLINE_MERMAID.keepSource) block.style.display = 'none'
+        continue
+      }
       const code = extractMermaidCode(block)
       // 提取不到源码就**保持原样**：宁可继续显示代码块，也不能变成一张空图
       if (!code) {
@@ -1036,7 +1124,7 @@ export async function initCharts() {
       const fig = document.createElement('figure')
       fig.className = 'chart ' + CHART_INLINE_MERMAID.className
       fig.dataset.type = 'mermaid'
-      fig.dataset.id = 'inline_' + ++zoomSeq
+      fig.dataset.id = 'inline_' + (++zoomSeq)
       fig.dataset.source = 'inline-mermaid' // 标记来源，便于调试与外部脚本区分
 
       block.parentNode?.insertBefore(fig, block)
