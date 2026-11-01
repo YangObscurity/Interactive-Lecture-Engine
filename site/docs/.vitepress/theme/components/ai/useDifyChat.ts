@@ -101,6 +101,7 @@ interface RawDifyMessageEvent {
   conversation_id?: string
   answer?: string
   created_at?: number
+  from_variable_selector?: unknown
 }
 
 interface RawDifyThoughtEvent {
@@ -232,6 +233,7 @@ export function useDifyChat(options: UseDifyChatOptions = {}): UseDifyChatReturn
   let abortController: AbortController | null = null
   let lastUserQuery = ''
   let lastInputs: DifyChatInputs = {}
+  let hasReceivedAgentMessage = false
 
   if (getCurrentInstance()) {
     onUnmounted(() => {
@@ -386,11 +388,28 @@ export function useDifyChat(options: UseDifyChatOptions = {}): UseDifyChatReturn
     const eventName = (typeof parsedJson.event === 'string' ? parsedJson.event : eventType) || 'message'
 
     switch (eventName) {
-      case 'message':
       case 'agent_message': {
+        hasReceivedAgentMessage = true
         const payload = parsedJson as unknown as RawDifyMessageEvent
         if (payload.answer) {
           assistantMsg.content += sanitizeTemplatePlaceholders(payload.answer, lastInputs)
+          options.onMessage?.(assistantMsg)
+        }
+        if (payload.conversation_id && !conversationId.value) {
+          conversationId.value = payload.conversation_id
+        }
+        break
+      }
+
+      case 'message': {
+        const payload = parsedJson as unknown as RawDifyMessageEvent
+        if (payload.answer) {
+          const sanitizedAnswer = sanitizeTemplatePlaceholders(payload.answer, lastInputs)
+          if (hasReceivedAgentMessage) {
+            assistantMsg.content = sanitizedAnswer
+          } else {
+            assistantMsg.content += sanitizedAnswer
+          }
           options.onMessage?.(assistantMsg)
         }
         if (payload.conversation_id && !conversationId.value) {
@@ -549,6 +568,7 @@ export function useDifyChat(options: UseDifyChatOptions = {}): UseDifyChatReturn
     }
 
     error.value = null
+    hasReceivedAgentMessage = false
     lastUserQuery = trimmedQuery
 
     const mergedInputs: DifyChatInputs = {
