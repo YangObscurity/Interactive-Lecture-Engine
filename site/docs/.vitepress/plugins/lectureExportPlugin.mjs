@@ -1108,24 +1108,24 @@ const EXPORT_STYLE = `
     max-width: 100% !important;
     object-fit: contain !important;
   }
-  /* ECharts 打印与导出尺寸防溢出与等比锁定 */
-  figure.chart[data-type='echarts'] .chart-body {
-    height: 440px !important;
-    max-height: 440px !important;
-    overflow: hidden !important;
-  }
-  figure.chart[data-type='echarts'] .chart-body > div {
-    height: 100% !important;
-    max-height: 100% !important;
-    width: 100% !important;
-  }
-  figure.chart[data-type='echarts'] .chart-body svg {
-    width: 100% !important;
-    max-width: 100% !important;
-    height: 100% !important;
-    max-height: 100% !important;
-    display: block !important;
-  }
+      /* ECharts 打印与导出尺寸防溢出与等比锁定 */
+      figure.chart[data-type='echarts'] .chart-body {
+        height: 440px !important;
+        max-height: 440px !important;
+        overflow: hidden !important;
+      }
+      figure.chart[data-type='echarts'] .chart-body > div {
+        height: 100% !important;
+        max-height: 100% !important;
+        width: 100% !important;
+      }
+      figure.chart[data-type='echarts'] .chart-body svg {
+        width: 100% !important;
+        max-width: 100% !important;
+        height: 100% !important;
+        max-height: 100% !important;
+        display: block !important;
+      }
 
   table, tr, .wave-compare-grid, .scope-viewer {
     page-break-inside: avoid !important;

@@ -2,11 +2,11 @@
 """mount_content.py —— 开源缓冲架构内容插拔管理中枢 (Content Mount & Lifecycle Manager)
 
 核心定位：
-  在「外部内容接入（Hot-Plug In）」与「纯净引擎发布（Clean & Export）」之间建立工业级桥梁。
+  在「向前自用（Hot-Plug In）」与「向后开源（Clean & Export）」之间建立工业级桥梁。
   支持讲义、图表及元数据的一键秒级挂载、精准卸载、契约验证、反向导出与脱敏清理。
 
 特性：
-  - 零拷贝接入加速：支持 Windows Junction / 软链接与跨平台自适应，失败平滑降级为拷贝；
+  - 零拷贝自用加速：支持 Windows Junction / 软链接与跨平台自适应，失败平滑降级为拷贝；
   - 保护白名单守卫：严格保护引擎核心文件（.vitepress/, index.md, examples/ 等），绝不误删；
   - 精准回滚卸载：基于原子写入的 `.content-mount.json` 清单执行 100% 干净卸载；
   - 沙箱安全防线：严格执行路径防逃逸（Anti-Path-Traversal）校验；

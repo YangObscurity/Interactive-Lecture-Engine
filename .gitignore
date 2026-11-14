@@ -165,3 +165,7 @@ temp/
 scratch/
 scratch_*.py
 tmp_*.py
+
+# Internal synchronization & compliance reports
+ops/SYNC_COMPLIANCE_REPORT.md
+*COMPLIANCE*.md

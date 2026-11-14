@@ -374,22 +374,21 @@ function computeProgressGroups(): void {
   }
 }
 
-/** 该大系下第一个「含已完成/学习中讲次」的阶段块序号（无进度返回 -1） */
-function firstActiveStageIndex(g: GroupMeta): number {
-  const chunks = chunkGroupLectures(g.lectures)
-  for (let i = 0; i < chunks.length; i += 1) {
-    for (const l of chunks[i]) {
-      const lecTag = `L${String(l.n).padStart(2, '0')}`
-      const matched = notionNodeByLid.value.get(`${g.id}-${lecTag}`.toLowerCase())
-      if (matched) {
-        const st = liveStatus(matched)
-        if (st === '已完成' || st === '学习中') return i
-      }
-      const local = progressDict.value[`${g.id}-${lecTag}`.toLowerCase()]
-      if (local === '已完成' || local === '学习中') return i
-    }
+/**
+ * 阶段智能展开判定（契约）：
+ * 1. 阶段内只要有任一讲次是「已完成」或「学习中」，该阶段即展开；
+ * 2. 全未完成（全部为未开始）的阶段则收起；
+ * 3. 随着各阶段学习推进，最终全部学完时全量展开。
+ */
+function stageHasProgress(g: GroupMeta, chunk: GroupLecture[]): boolean {
+  for (const l of chunk) {
+    const lecTag = `L${String(l.n).padStart(2, '0')}`
+    const key = `${g.id}-${lecTag}`.toLowerCase()
+    const matched = notionNodeByLid.value.get(key)
+    const st = matched ? liveStatus(matched) : progressDict.value[key]
+    if (st === '已完成' || st === '学习中') return true
   }
-  return -1
+  return false
 }
 
 function buildMindMapData(): MindMapTreeNode {
@@ -421,7 +420,6 @@ function buildGroupNode(g: GroupMeta, idx: number, isLeft: boolean, dark: boolea
   // 用户手动点过「展开/折叠」后，数据侧不再写死进度展开态：全开意图由 applyViewState
   // （EXPAND_ALL）恢复，折叠意图由 expand:false 保障——进度智能展开只服务首次进入。
   const hasProgress = !userToggledExpand && groupsWithProgress.has(g.id.toUpperCase())
-  const activeStage = hasProgress ? firstActiveStageIndex(g) : -1
   const groupLink = `/${g.dir}/`
   return {
     data: {
@@ -441,9 +439,11 @@ function buildGroupNode(g: GroupMeta, idx: number, isLeft: boolean, dark: boolea
       lineColor: branchColor,
       lineWidth: 2
     },
-    children: chunkGroupLectures(g.lectures).map((chunk, stageIdx) =>
-      buildStageNode(g, chunk, stageIdx, stageIdx === activeStage, branchColor, dark)
-    )
+    children: chunkGroupLectures(g.lectures).map((chunk, stageIdx) => {
+      // 阶段展开契约：阶段内只要有已完成或正在进行的讲次即展开；全未完成的阶段则收起；最终学完全部展开
+      const shouldExpand = !userToggledExpand && stageHasProgress(g, chunk)
+      return buildStageNode(g, chunk, stageIdx, shouldExpand, branchColor, dark)
+    })
   }
 }
 

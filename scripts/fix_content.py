@@ -394,6 +394,7 @@ def main():
     ap.add_argument("--docs", default=str(DEFAULT_DOCS),
                     help="讲义 md 根目录（默认：<仓库根>/site/docs）")
     a = ap.parse_args()
+    docs_root = pathlib.Path(a.docs).resolve()
 
     if a.group:
         groups = [a.group]
