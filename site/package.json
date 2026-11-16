@@ -20,7 +20,7 @@
     "katex": "^0.19.1",
     "marked": "^18.2.0",
     "markmap-view": "^0.18.13",
-    "mermaid": "^11.4.1",
+    "mermaid": "^12.3.0",
     "shiki": "^4.6.0",
     "simple-mind-map": "^0.14.0-fix.3",
     "vue": "^3.5.45",
