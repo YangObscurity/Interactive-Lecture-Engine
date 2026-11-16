@@ -15,21 +15,21 @@
   "dependencies": {
     "dompurify": "^3.4.17",
     "echarts": "^5.6.0",
-    "esbuild": "^0.21.5",
+    "esbuild": "^0.28.2",
     "html-to-image": "^1.11.13",
-    "katex": "^0.16.47",
-    "marked": "^18.1.1",
-    "markmap-view": "^0.18.12",
+    "katex": "^0.19.1",
+    "marked": "^18.2.0",
+    "markmap-view": "^0.18.13",
     "mermaid": "^11.4.1",
-    "shiki": "^4.5.0",
+    "shiki": "^4.6.0",
     "simple-mind-map": "^0.14.0-fix.3",
-    "vue": "^3.5.43",
-    "wavedrom": "^3.7.0"
+    "vue": "^3.5.45",
+    "wavedrom": "^3.8.0"
   },
   "allowScripts": {
     "esbuild@0.21.5": true
   },
   "optionalDependencies": {
-    "puppeteer": "^25.14.0"
+    "puppeteer": "^25.17.0"
   }
 }
