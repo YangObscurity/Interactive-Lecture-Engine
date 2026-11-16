@@ -17,7 +17,7 @@ jobs:
     name: 依赖变更审查
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: 审查 PR 引入的依赖漏洞
         uses: actions/dependency-review-action@v4
