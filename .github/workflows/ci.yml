@@ -79,7 +79,7 @@ jobs:
           python-version: '3.12'
 
       - name: 下载构建产物
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: vitepress-dist
           path: site/docs/.vitepress/dist
