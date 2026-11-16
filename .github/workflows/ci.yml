@@ -59,7 +59,7 @@ jobs:
         run: npm run build
 
       - name: 上传构建产物（供后续闸门复用）
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: vitepress-dist
           path: site/docs/.vitepress/dist
