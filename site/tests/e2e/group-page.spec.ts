@@ -667,6 +667,21 @@ test.describe('group page: content', () => {
     expect(consoleErrors.filter((t) => /hydrat/i.test(t))).toEqual([])
     expect(pageErrors).toEqual([])
   })
+
+  test('datasheet small DIP/SOIC chip keeps id and package label inside the body without clipping or overlap', async ({ page }) => {
+    await openGroup(page, '/wrt/', 'datasheet', 'datasheet')
+    const box = await page.evaluate(() => {
+      const body = document.querySelector('.gm-d .dip-body')!.getBoundingClientRect()
+      const id = document.querySelector('.gm-d .chip-id')!.getBoundingClientRect()
+      const pkg = document.querySelector('.gm-d .chip-pkg')!.getBoundingClientRect()
+      return { body, id, pkg }
+    })
+    expect(box.body.height).toBeGreaterThanOrEqual(96)
+    expect(box.id.top).toBeGreaterThanOrEqual(box.body.top + 14)
+    expect(box.id.bottom).toBeLessThanOrEqual(box.body.bottom - 8)
+    expect(box.pkg.top).toBeGreaterThanOrEqual(box.id.bottom)
+    expect(box.pkg.bottom).toBeLessThanOrEqual(box.body.bottom - 8)
+  })
 })
 
 // 10. screenshot baselines (light, desktop): the group page in both skins

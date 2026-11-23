@@ -53,7 +53,7 @@ const geo = computed(() => {
 
 <template>
   <div class="gm-d">
-    <div class="dip-grid" :style="{ gridTemplateRows: `repeat(${geo.half}, 28px)` }" role="group" :aria-label="labels.lectures">
+    <div class="dip-grid" :style="{ gridTemplateRows: `repeat(${geo.half}, ${geo.half <= 2 ? Math.ceil(96 / geo.half) : 28}px)` }" role="group" :aria-label="labels.lectures">
       <div class="dip-body" :style="{ gridRow: `1 / ${geo.half + 1}` }" aria-hidden="true">
         <span class="pin1" />
         <span class="chip-id">{{ groupId }}</span>

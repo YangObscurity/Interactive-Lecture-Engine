@@ -242,7 +242,9 @@ watch(
   color: var(--lec-text);
   font: inherit;
   font-size: 15px;
-  line-height: normal;
+  line-height: 20px;
+  min-height: 34px;
+  box-sizing: border-box;
   padding: 6px 8px;
 }
 

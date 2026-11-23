@@ -439,6 +439,12 @@ async function lockOnNode(id: string, how: 'box' | 'pan' = 'box'): Promise<void>
   hotPairKey.value = null
   hotTraceKey.value = null
   hotPanelNodeId.value = null
+  activeNodeId.value = id
+  const doc = stage.value?.stage?.ownerDocument
+  const focused = doc?.activeElement
+  if (focused instanceof SVGElement && focused.classList.contains('cv-node') && focused.getAttribute('data-id') !== id) {
+    ;(focused as unknown as { blur?: () => void }).blur?.()
+  }
   tip.hide()
   lock.value = { type: 'node', id }
   await nextTick()

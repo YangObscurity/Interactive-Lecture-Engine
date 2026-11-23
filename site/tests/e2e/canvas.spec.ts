@@ -541,6 +541,10 @@ for (const [theme, impl] of [
       await page.locator('#focusbar li[data-id="log-l02"] .tr').click()
       await settle(page, 460)
       await expect(page.locator('#focusbar .it.main')).toHaveAttribute('data-open', 'log-l02')
+      expect(await page.evaluate(() => document.activeElement?.getAttribute?.('data-id') ?? null)).not.toBe('log-l01')
+      if (theme === 'datasheet') {
+        await expect(page.locator('.cv-node.locked .p-half')).toBeHidden()
+      }
       const k1 = await scaleOf(page)
       expect(k1, `scale after the trace button (was ${k0})`).toBeCloseTo(panK, 3)
       expect(k1).toBeGreaterThanOrEqual(0.7)

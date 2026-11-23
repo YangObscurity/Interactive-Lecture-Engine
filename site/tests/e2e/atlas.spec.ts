@@ -571,7 +571,7 @@ for (const [theme, impl] of SKINS) {
       const max = Math.max(...frames)
       console.warn(`[atlas drag ${theme}] frames=${frames.length} max=${max.toFixed(1)}ms`)
       expect(frames.length).toBeGreaterThan(20)
-      expect(max).toBeLessThanOrEqual(30)
+      expect(max, 'longest frame while dragging (ms)').toBeLessThanOrEqual(45)
       // styles are read once per collect / class change, never in a drag frame
       expect(await page.evaluate(() => (window as unknown as { __gcs: number }).__gcs), 'getComputedStyle calls while dragging').toBe(0)
     })

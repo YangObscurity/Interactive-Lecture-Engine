@@ -26,8 +26,8 @@ defineProps<CanvasNodeProps>()
 
 <style scoped>
 .n { cursor: pointer; }
-.n:focus-visible { outline: var(--lec-line-heavy) solid var(--lec-accent); outline-offset: 2px; }
-.n:focus-visible .n-box { stroke: var(--lec-accent); stroke-width: var(--lec-line-heavy); }
+.n:focus-visible { outline: var(--lec-line-heavy, 2px) solid var(--lec-accent); outline-offset: 2px; }
+.n:focus-visible .n-box { stroke: var(--lec-accent); stroke-width: var(--lec-line-heavy, 2px); }
 .n-box { fill: var(--lec-bg); stroke: var(--lec-border); stroke-width: 1; }
 .n.read .n-box { fill: color-mix(in srgb, var(--lec-done) 11%, var(--lec-bg)); stroke: color-mix(in srgb, var(--lec-done) 48%, var(--lec-border)); }
 .n.reading .n-box { fill: var(--lec-accent-tint); stroke: var(--lec-accent); stroke-width: 1.5; }

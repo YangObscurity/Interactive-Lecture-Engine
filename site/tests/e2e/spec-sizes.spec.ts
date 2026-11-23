@@ -54,7 +54,8 @@ for (const theme of ['reader', 'datasheet'] as const) {
       expect(th[0].lh).toBe('20.8px')
       const rows = await boxes(page, '.lec-tb-spec tr')
       const rowSpec = theme === 'reader' ? 33.8 : 34.8
-      near(rows[0].h, rowSpec, 1, 'first spec row')
+      // reader only draws a 1px divider on `tr + tr`, so row 0 has no top hairline (32.8px vs 33.8px)
+      near(rows[0].h, theme === 'reader' ? 32.8 : rowSpec, 1, 'first spec row')
       for (const [i, r] of rows.entries()) expect(r.h, `spec row ${i}`).toBeLessThanOrEqual(rowSpec + 1)
     })
 
@@ -125,7 +126,8 @@ for (const theme of ['reader', 'datasheet'] as const) {
       const th = await boxes(page, '.lec-tb-spec th')
       expect(th[0].pad).toBe('5px 8px')
       const rows = await boxes(page, '.lec-tb-spec tr')
-      near(rows[0].h, theme === 'reader' ? 31.8 : 32.8, 1, 'first spec row on a phone')
+      // reader only draws a 1px divider on `tr + tr`, so row 0 on phone has no top hairline (30.8px vs 32.8px)
+      near(rows[0].h, theme === 'reader' ? 30.8 : 32.8, 1, 'first spec row on a phone')
       // the node id keeps one line (it was squeezed to two, row 62px)
       const [code] = await boxes(page, '.lec-tb-spec code')
       expect(code.h, 'node id height').toBeLessThanOrEqual(21)
