@@ -146,7 +146,7 @@ function validateHome(home: unknown): void {
 
 function validateThemePacks(packs: unknown): void {
   if (packs === undefined) return
-  const hint = `lecture.config.ts: themePacks must be an array of folders relative to site/, e.g. ['docs/examples/themes/minimal-slot']`
+  const hint = `lecture.config.ts: themePacks must be an array of folders relative to site/, e.g. ['themes/my-pack']`
   if (!Array.isArray(packs)) throw new LectureConfigError(hint)
   const seen = new Set<string>()
   packs.forEach((p, i) => {

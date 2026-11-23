@@ -9,6 +9,7 @@ import { PROGRESS_WIRE_STATUS } from '../../site.config.mts'
 import type { CompanionPromptsFile, PROMPT_LIMITS as PromptLimitsShape } from '../../prompts/companion.ts'
 import type { SiteTexts } from '../../site-texts-schema.ts'
 import { request, type HttpResult } from './http'
+import { demoReadOnlyHint } from './devDashboard'
 
 export interface AdminOverviewTotals {
   users: number
@@ -248,7 +249,7 @@ export async function saveDevCompanionPrompts(
     body: { prompts },
   })
   if (!res.ok) {
-    return { ok: false, error: res.status ? `HTTP ${res.status}` : res.kind }
+    return { ok: false, error: httpSaveError(res) }
   }
   if (!isRecord(res.data)) return { ok: false, error: 'invalid_response' }
   return {
@@ -271,7 +272,7 @@ export async function saveDevSiteTexts(
     body: { texts },
   })
   if (!res.ok) {
-    return { ok: false, error: res.status ? `HTTP ${res.status}` : res.kind }
+    return { ok: false, error: httpSaveError(res) }
   }
   if (!isRecord(res.data)) return { ok: false, error: 'invalid_response' }
   const saved = isRecord(res.data.texts) ? (res.data.texts as unknown as SiteTexts) : undefined
@@ -281,4 +282,13 @@ export async function saveDevSiteTexts(
     ...(Array.isArray(res.data.errors) ? { errors: res.data.errors as string[] } : {}),
     ...(typeof res.data.error === 'string' ? { error: res.data.error } : {}),
   }
+}
+
+/**
+ * S6 decision B: the dev server answers 409 to every content write while the site shows the engine's demo content
+ * (no content folder of its own yet). Shown in the save status instead of a bare "HTTP 409" (dsh.demoReadOnly).
+ */
+function httpSaveError(res: { status?: number; kind: string }): string {
+  if (res.status === 409) return demoReadOnlyHint()
+  return res.status ? `HTTP ${res.status}` : res.kind
 }

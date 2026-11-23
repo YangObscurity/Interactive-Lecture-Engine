@@ -1,6 +1,8 @@
 import { test, expect, gotoAndSettle } from './fixtures'
 
-const LECTURE = '/g05/L19'
+const LECTURE = '/mea/L03'
+/** not in the demo progress seed (MEA 1-3 read, 4 reading): the progress card shows its primary button */
+const NOT_STARTED_LECTURE = '/mea/L05'
 
 test.describe('P6 / WP-F2: reader settings panel & AI companion', () => {
   test('settings panel §02: language, datasheet tint disable, stepper, custom tint contrast gate & Save/Restore', async ({ page }) => {
@@ -300,7 +302,8 @@ test.describe('P6 / WP-F2: reader settings panel & AI companion', () => {
         await route.fulfill({ status: 200, contentType: 'application/json', body: '[]' })
         return
       }
-      await route.continue()
+      // everything else goes to the fixtures' /api mock (never the network: the e2e server has no backend)
+      await route.fallback()
     })
 
     await page.route('https://openrouter.ai/api/v1/chat/completions', async (route) => {
@@ -398,7 +401,7 @@ test.describe('P6 / WP-F2: reader settings panel & AI companion', () => {
     })
 
     // Non-admin reader (default session fixture)
-    await gotoAndSettle(page, '/g01/L01')
+    await gotoAndSettle(page, NOT_STARTED_LECTURE)
     await expect(page.locator('[data-lpc-notion-control]')).toHaveCount(0)
     await page.locator('.lpc-primary-btn').click()
     expect(notionRequests).toHaveLength(0)
@@ -417,7 +420,7 @@ test.describe('P6 / WP-F2: reader settings panel & AI companion', () => {
         }),
       }),
     )
-    await gotoAndSettle(page, '/g01/L01')
+    await gotoAndSettle(page, NOT_STARTED_LECTURE)
     await expect(page.locator('[data-lpc-notion-control]')).toBeVisible()
     await page.locator('.lpc-primary-btn').click()
     await expect.poll(() => notionRequests.length).toBeGreaterThanOrEqual(1)

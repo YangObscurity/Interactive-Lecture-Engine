@@ -561,6 +561,14 @@
 }
 
 /* ---- relation panel: preview on hover / focus, tracking after a double click ---- */
+/* No scroll anchoring on a group page. On a short group scrolled to the bottom, the panel (in the page flow) can be the tallest
+ * thing: the hover preview makes the page taller, Chrome's scroll anchoring then moves the page, the chip leaves the pointer,
+ * the preview closes, the page gets shorter and the scroll is clamped back under the pointer, which opens the preview again:
+ * the page shook between two positions (about every frame) and a double click there landed on the blank map. Without anchoring a
+ * taller page keeps its scroll position, so the chip stays under the pointer. */
+html.is-group-page {
+  overflow-anchor: none;
+}
 .gp .gp-panel {
   position: sticky;
   top: calc(var(--vp-nav-height, 64px) + 16px);

@@ -1,0 +1,6 @@
+{
+  "c1": {
+    "type": "echarts",
+    "code": "{\n  \"title\": {\n    \"text\": \"同一长度的三种写法\"\n  },\n  \"tooltip\": {\n    \"trigger\": \"axis\"\n  },\n  \"xAxis\": {\n    \"type\": \"category\",\n    \"data\": [\n      \"mm\",\n      \"cm\",\n      \"m\"\n    ]\n  },\n  \"yAxis\": {\n    \"type\": \"log\"\n  },\n  \"series\": [\n    {\n      \"name\": \"数值\",\n      \"type\": \"bar\",\n      \"data\": [\n        1500,\n        150,\n        1.5\n      ]\n    }\n  ]\n}"
+  }
+}

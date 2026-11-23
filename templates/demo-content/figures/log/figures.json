@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "group": "log",
+  "figures": [
+    {
+      "id": "log-and-gate",
+      "file": "log-and-gate.svg",
+      "kind": "figure",
+      "width": 480,
+      "height": 180,
+      "caption": {
+        "zh": "与门：P 与 Q 都为真时 R 才为真",
+        "en": "An AND gate: R is true only when both P and Q are true"
+      },
+      "source": {
+        "paper": "Original Example Diagram",
+        "number": "Fig. 1",
+        "page": 1
+      },
+      "sha256": "5f4340a7c92a"
+    }
+  ]
+}

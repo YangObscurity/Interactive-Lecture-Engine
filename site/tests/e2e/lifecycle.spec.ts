@@ -5,7 +5,7 @@
  *     navigation, and window listeners do not accumulate (signal-aware listener counter
  *     installed before any page script runs).
  *   - Reading progress: scroll lecture A, leave, come back with a full reload → restored.
- *   - First load of g01/L01: no "Hydration completed but contains mismatches".
+ *   - First load of mea/L01: no "Hydration completed but contains mismatches".
  *
  * The debug console is enabled via localStorage `lecture:debug=1` so `__LECTURE_DEBUG__` exposes
  * the `lifecycle` and `reading-progress` panels in the prod build too.
@@ -13,7 +13,7 @@
 import type { Page } from '@playwright/test'
 import { test, expect, gotoAndSettle } from './fixtures'
 
-const LECTURES = ['/g05/L19', '/g05/L20', '/g01/L01', '/g03/L05', '/lr/L01'] as const
+const LECTURES = ['/mea/L03', '/mea/L04', '/mea/L01', '/log/L01', '/pln/L02'] as const // demo content
 const ROUNDS = 10
 
 interface LifecycleState {
@@ -139,10 +139,22 @@ test.describe('page lifecycle', () => {
     await gotoAndSettle(page, A)
     await page.mouse.move(640, 400)
     const target = await page.evaluate(() => Math.round((document.documentElement.scrollHeight - innerHeight) * 0.5))
-    // real wheel gestures (programmatic scrolls do not count as "user took over")
+    // real wheel gestures (programmatic scrolls do not count as "user took over"). Wait for each wheel's smooth scroll
+    // to settle before the next one: reading scrollY mid-animation wheels again and overshoots, and on a short lecture
+    // that lands at the very bottom (pct 1), where nothing is restored.
+    const settledY = async () => {
+      let prev = -1
+      let y = await page.evaluate(() => scrollY)
+      while (y !== prev) {
+        prev = y
+        await page.waitForTimeout(120)
+        y = await page.evaluate(() => scrollY)
+      }
+      return y
+    }
     for (let i = 0; i < 200; i++) {
-      const y = await page.evaluate(() => scrollY)
-      if (y >= target) break
+      const y = await settledY()
+      if (y >= target - 40) break
       await page.mouse.wheel(0, Math.min(1200, target - y))
     }
     await expect
@@ -154,7 +166,8 @@ test.describe('page lifecycle', () => {
       )
       .toBeGreaterThan(0.3)
     const saved = await page.evaluate((a) => JSON.parse(localStorage.getItem('lecture-read-pos') || '{}')[a], A)
-    expect(saved).toMatchObject({ group: 'g05' })
+    expect(saved).toMatchObject({ group: 'mea' })
+    expect(saved.pct).toBeLessThan(0.9) // inside the restore window (0.03 < pct < 0.97)
     expect(saved.title.length).toBeGreaterThan(0)
 
     // leave via SPA navigation: the old path's record must survive the navigation's scroll-to-top
@@ -162,9 +175,23 @@ test.describe('page lifecycle', () => {
     const kept = await page.evaluate((a) => JSON.parse(localStorage.getItem('lecture-read-pos') || '{}')[a], A)
     expect(kept.pct).toBeCloseTo(saved.pct, 2)
 
-    // come back with a full reload
+    // come back with a full reload. The resume hint is a short toast (fade in, ~1.1 s hold, fade out): on a short page
+    // it can come and go between two polls of toBeAttached, so record that it was added at all.
+    await page.addInitScript(() => {
+      const w = window as unknown as { __RESUME_HINT_SEEN__?: boolean }
+      new MutationObserver((_m, obs) => {
+        if (document.getElementById('lecture-resume-hint')) {
+          w.__RESUME_HINT_SEEN__ = true
+          obs.disconnect()
+        }
+      }).observe(document, { childList: true, subtree: true })
+    })
     await page.goto(A, { waitUntil: 'domcontentloaded' })
-    await expect(page.locator('#lecture-resume-hint')).toBeAttached({ timeout: 10_000 })
+    await expect
+      .poll(() => page.evaluate(() => (window as unknown as { __RESUME_HINT_SEEN__?: boolean }).__RESUME_HINT_SEEN__ === true), {
+        timeout: 10_000,
+      })
+      .toBe(true)
     await expect
       .poll(
         () =>
@@ -177,12 +204,12 @@ test.describe('page lifecycle', () => {
     expect(pageErrors.map((e) => e.message)).toEqual([])
   })
 
-  test('first load of g01/L01: no hydration mismatch', async ({ page, consoleErrors, pageErrors }) => {
+  test('first load of mea/L01: no hydration mismatch', async ({ page, consoleErrors, pageErrors }) => {
     const warnings: string[] = []
     page.on('console', (m) => {
       if (/hydration/i.test(m.text())) warnings.push(m.text())
     })
-    await gotoAndSettle(page, '/g01/L01')
+    await gotoAndSettle(page, '/mea/L01')
     expect(warnings).toEqual([])
     expect(consoleErrors.filter((t) => /hydration/i.test(t))).toEqual([])
     expect(pageErrors.map((e) => e.message)).toEqual([])

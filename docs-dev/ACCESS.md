@@ -154,10 +154,12 @@ the installed VitePress source, the check script including the negative case).
 
 ## 7. Tests and ports
 
-`E2E_PROD_PORT` / `E2E_DEV_PORT` move the Playwright servers off 4174 / 5174, so two checkouts can run e2e at once:
+The suites run on the engine's demo content, never on a site's own lectures (commands and output folders:
+`docs-dev/BUILD.md` section 5). `E2E_PROD_PORT` / `E2E_DEV_PORT` / `E2E_ACCESS_PORT` move the Playwright servers off
+4174 / 5174 / 4374, so two checkouts can run e2e at once:
 
 ```
-E2E_PROD_PORT=4274 E2E_DEV_PORT=5274 npx playwright test --project prod
+E2E_PROD_PORT=4274 E2E_DEV_PORT=5274 npm run test:e2e:prod
 ```
 
 ## 8. Client side (WP-A2)
@@ -190,11 +192,11 @@ npm run build:e2e:access         # only the build (site/.access-e2e/dist, git-ig
 E2E_ACCESS_PORT=4575 npx playwright test --project access --repeat-each=3
 ```
 
-- Build (`scripts/build_access_e2e.mjs`): `LECTURE_BUILD_GROUPS=G06,G09,G12` and an `access` block with G09 `authenticated` and G12 for the gateway group `staff`; then `check:access:dist` runs on it. The build always writes its manifest to `site/.lecture-build/access-manifest.json`; the script restores that file afterwards and keeps the e2e manifest at `site/.access-e2e/access-manifest.json`.
+- Build (`scripts/build_access_e2e.mjs`): the engine's demo content (`templates/demo-content`, through `buildDemo` of `scripts/build_e2e.mjs`) with the tiers of its `access.e2e.json` (`ACCESS_E2E_ENV`): MEA and LOG inline, PLN `authenticated`, DAT for the gateway group `staff`; then `check:access:dist` runs on it. The owner's lectures never take part (see `docs-dev/BUILD.md` section 5). The build always writes its manifest to `site/.lecture-build/access-manifest.json`; the script restores that file afterwards and keeps the e2e manifest at `site/.access-e2e/access-manifest.json`.
 - Server: `tests/e2e/access-server.mjs` (clean URLs, 404 page), started by the project's `webServer` on `E2E_ACCESS_PORT` (default 4374).
 - The `access` project exists only with `--project access`; `prod` and `dev` ignore `access.spec.ts`, so the normal run is neither extended nor slowed down.
-- Gateway: `context.route` answers 403 for denied paths. Anonymous: `/_access/authenticated/**`, `/_access/grp-*/**`, `/g09/**`, `/g12/**`, `/en/g09/**`, `/en/g12/**` and `/assets/{g09,g12,en_g09,en_g12}_*`. Signed-in: only `grp-*` and G12. Staff: nothing.
-- Per scenario: group cards and totals on the home page (inline numbers come from the server HTML), the nav groups menu, the sidebar of each allowed group, search for a distinctive G09 and G12 word, the merged graph (node total and the `graph.json` requests), no page error, no hydration warning. Signed-in and staff also check the server HTML of `/g09/` (via `request.get`), the chart request path and measure the layout shift of the sidebar appearing.
+- Gateway: `context.route` answers 403 for denied paths. Anonymous: `/_access/authenticated/**`, `/_access/grp-*/**` and the pages and page chunks of PLN and DAT (both locales). Signed-in: only `grp-*` and DAT. Staff: nothing.
+- Per scenario: group cards and totals on the home page (inline numbers come from the server HTML), the nav groups menu, the sidebar of each allowed group, search for a distinctive PLN and DAT word, the merged graph (node total and the `graph.json` requests), no page error, no hydration warning. Signed-in and staff also check the server HTML of `/pln/` (via `request.get`), the chart request path and measure the layout shift of the sidebar appearing.
 - `tests/e2e/no-access-requests.spec.ts` (prod and dev): this site, no restricted tier, zero requests to `/_access/` on home, group page, lecture page and search.
 
 ## 10. Concept tool data (K1)

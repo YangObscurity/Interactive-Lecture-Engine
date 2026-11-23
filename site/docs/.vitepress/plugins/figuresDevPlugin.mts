@@ -1,7 +1,6 @@
 /**
- * Vite dev-server fallback middleware for example figures (`exampleFiguresDir` from `paths.mts`).
- * Mirrors `exampleChartsDir` handling so `docs/examples/public/figures/**` works in dev even
- * under separated `LECTURE_CONTENT_DIR` mode.
+ * Vite dev-server middleware for the original figure files (`figuresDir` from `paths.mts`), so `/figures/**`
+ * works in dev also when the figures live in a separate content folder (`LECTURE_CONTENT_DIR`).
  */
 import fs from 'node:fs'
 import path from 'node:path'
@@ -20,7 +19,6 @@ const MIME_BY_EXT: Record<string, string> = {
 
 export function figuresDevPlugin(): Plugin {
   const paths = resolveContent()
-  const exampleRoot = path.resolve(paths.exampleFiguresDir)
   const primaryRoot = path.resolve(paths.figuresDir)
 
   return {
@@ -37,7 +35,7 @@ export function figuresDevPlugin(): Plugin {
         const guard = validateSafeFigureRelPath(rel, { allowedExts: ORIGINAL_FIGURE_EXTS })
         if (!guard.ok) return next()
 
-        for (const baseRoot of [primaryRoot, exampleRoot]) {
+        for (const baseRoot of [primaryRoot]) {
           const candidate = path.resolve(baseRoot, guard.normalized)
           const diff = path.relative(baseRoot, candidate)
           if (!diff || diff.startsWith('..') || path.isAbsolute(diff)) continue

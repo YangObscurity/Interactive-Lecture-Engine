@@ -1,8 +1,9 @@
 /**
  * Locales, hreflang and first-paint script of the V2 config (P2d WP-I2). The default lecture.config.ts enables
- * zh-CN (root) + en, and docs/en/examples/g01/L01.md is the real English example lecture.
+ * zh-CN (root) + en. The translation scan of site/docs is replaced by one synthetic English lecture
+ * (`/courses/g01/L01`, a nested group dir), so the tests do not depend on what content:sync left in site/docs.
  */
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import {
   v2AbsoluteUrl,
   v2Hreflang,
@@ -15,8 +16,15 @@ import {
   v2Translations,
 } from '../../docs/.vitepress/config.v2.mts'
 
+// hoisted above the imports by vitest: config.v2.mts scans site/docs for translations when it is loaded
+vi.mock('../../docs/.vitepress/i18n/scan.mts', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../docs/.vitepress/i18n/scan.mts')>()),
+  scanTranslations: (_docsRoot: string, keys: readonly string[]) =>
+    Object.fromEntries(keys.map((k) => [k, k === 'en' ? { '/courses/g01/L01': { link: '/en/courses/g01/L01', title: "Example Lecture 1 · Ohm's Law" } } : {}])),
+}))
+
 const groups = [
-  { id: 'EX', dir: 'examples/g01', title: '示例课程', i18n: { en: { title: 'Example course' } } },
+  { id: 'EX', dir: 'courses/g01', title: '示例课程', i18n: { en: { title: 'Example course' } } },
   { id: 'G02', dir: 'g02', title: '第二组', temp: true },
 ]
 const siteMeta = { name: '站点', tagline: '副标题', i18n: { en: { name: 'Site', tagline: 'Tagline' } } }
@@ -27,8 +35,8 @@ describe('v2Locales', () => {
   it('default config: en is the one other language and has a real translation', () => {
     expect(v2OtherLangs).toEqual(['en'])
     expect(v2LocaleKeys).toEqual(['en'])
-    expect(v2Translations.en?.['/examples/g01/L01']).toMatchObject({ link: '/en/examples/g01/L01' })
-    expect(v2Translations.en?.['/examples/g01/L01']?.title).toContain('Ohm')
+    expect(v2Translations.en?.['/courses/g01/L01']).toMatchObject({ link: '/en/courses/g01/L01' })
+    expect(v2Translations.en?.['/courses/g01/L01']?.title).toContain('Ohm')
   })
 
   it('root + en; every label is empty so the built-in language menu stays hidden', () => {
@@ -41,23 +49,23 @@ describe('v2Locales', () => {
     const nav = locales?.en?.themeConfig?.nav as Array<{ text: string; link?: string; items?: Array<{ text: string; link: string }> }>
     expect(nav[0]).toMatchObject({ text: 'Overview', link: '/en/' })
     expect(nav[1]?.items).toEqual([
-      { text: 'EX · Example course', link: '/en/examples/g01/' },
+      { text: 'EX · Example course', link: '/en/courses/g01/' },
       { text: 'G02 · 第二组 (temporary)', link: '/en/g02/' },
     ])
   })
 
   it('en sidebar lists only translated lectures; groups without any get no entry', () => {
     const sidebar = locales?.en?.themeConfig?.sidebar as Record<string, Array<{ items: Array<{ text: string; link: string }> }>>
-    expect(Object.keys(sidebar)).toEqual(['/en/examples/g01/'])
-    expect(sidebar['/en/examples/g01/']?.[0]?.items).toEqual([
-      { text: v2Translations.en?.['/examples/g01/L01']?.title, link: '/en/examples/g01/L01' },
+    expect(Object.keys(sidebar)).toEqual(['/en/courses/g01/'])
+    expect(sidebar['/en/courses/g01/']?.[0]?.items).toEqual([
+      { text: v2Translations.en?.['/courses/g01/L01']?.title, link: '/en/courses/g01/L01' },
     ])
   })
 
   it('i18nPages is keyed by the root path', () => {
     const pages = locales?.en?.themeConfig?.i18nPages as Record<string, { title: string }>
-    expect(Object.keys(pages)).toContain('/examples/g01/L01')
-    expect(pages['/examples/g01/L01']?.title).toBe(v2Translations.en?.['/examples/g01/L01']?.title)
+    expect(Object.keys(pages)).toContain('/courses/g01/L01')
+    expect(pages['/courses/g01/L01']?.title).toBe(v2Translations.en?.['/courses/g01/L01']?.title)
   })
 
   it('chrome strings are in the locale language', () => {
@@ -157,7 +165,7 @@ describe('first-paint reading-mode script', () => {
 
   it('treats every locale home as home, but not other English pages', () => {
     for (const p of ['/en', '/en/', '/en/index.html']) expect(classAdded(p, '1'), p).toBe(false)
-    expect(classAdded('/en/examples/g01/L01', '1')).toBe(true)
+    expect(classAdded('/en/courses/g01/L01', '1')).toBe(true)
     expect(classAdded('/en/g01/', '1')).toBe(true)
     expect(classAdded('/english/', '1')).toBe(true)
   })

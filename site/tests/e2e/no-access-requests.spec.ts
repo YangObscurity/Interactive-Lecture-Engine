@@ -9,13 +9,13 @@ test('no request to /_access/ on a site without restricted tiers', async ({ page
   page.on('request', (r) => seen.push(r.url()))
 
   await gotoAndSettle(page, '/')
-  await gotoAndSettle(page, '/g05/')
-  await gotoAndSettle(page, '/g05/L19')
+  await gotoAndSettle(page, '/mea/')
+  await gotoAndSettle(page, '/mea/L03')
   // open the search box and search: this loads the split title + shard index
   await page.locator('.VPNavBarSearch button, #local-search button').first().click()
-  // on a group page the panel opens scoped to that group; "mmc" lives elsewhere
+  // on a group page the panel opens scoped to that group; "关键路径" lives elsewhere (demo group PLN)
   await page.locator('.sp-scope-btn').first().click()
-  await page.locator('#lec-search-input').fill('mmc')
+  await page.locator('#lec-search-input').fill('关键路径')
   await expect(page.locator('.sp-hit').first()).toBeVisible({ timeout: 10_000 })
   await page.waitForLoadState('networkidle').catch(() => {})
 

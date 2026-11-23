@@ -5,40 +5,30 @@
  * checks ported from the home-canvas prototype, datasheet compact/zones layout switching,
  * bundle expand (`ann-tag` isolation), LOD zoom labels, search & Enter lock, trace-panel wheel isolation,
  * runtime skin swap, sharp canvas rendering during pan, zero `/_access/` requests, and `@visual-v2` baselines.
+ *
+ * S6: runs on the demo content (`npm run build:e2e`): 4 groups MEA / LOG / PLN / DAT, 14 lectures, all on the canvas; the MEA chain
+ * L01→L02→L03→L04 (L03→L05, L04+L05→L06) and the cross-group edges log/L02→pln/L02, mea/L04→pln/L03, mea/L04→dat/L01, dat/L02→pln/L03.
  */
 import { test, expect, waitForLabelPaint } from './fixtures'
 import { expectThemeActive, useTheme, type Mode, type ThemeId } from './theme-helpers'
 import type { Page } from '@playwright/test'
 
-const SAMPLE_PROGRESS = [
-  ...Array.from({ length: 18 }, (_, i) => ({
-    lecture_id: `g05-l${String(i + 1).padStart(2, '0')}`,
-    group_id: 'G05',
-    status: 'completed',
-    completed_at: '2026-11-01T00:00:00.000Z',
-    updated_at: '2026-11-01T00:00:00.000Z',
-    notion_node_id: null,
-    notion_page_id: null,
-  })),
-  {
-    lecture_id: 'g05-l19',
-    group_id: 'G05',
-    status: 'in_progress',
-    completed_at: null,
-    updated_at: '2026-11-01T00:00:00.000Z',
-    notion_node_id: null,
-    notion_page_id: null,
-  },
-  {
-    lecture_id: 'g03-l07',
-    group_id: 'G03',
-    status: 'in_progress',
-    completed_at: null,
-    updated_at: '2026-11-01T00:00:00.000Z',
-    notion_node_id: null,
-    notion_page_id: null,
-  },
-]
+/** The mocked progress read: MEA 1-3 read and 4 reading, LOG 2 reading. */
+const row = (lecture_id: string, group_id: string, done: boolean) => ({
+  lecture_id,
+  group_id,
+  status: done ? 'completed' : 'in_progress',
+  completed_at: done ? '2026-11-01T00:00:00.000Z' : null,
+  updated_at: '2026-11-01T00:00:00.000Z',
+  notion_node_id: null,
+  notion_page_id: null,
+})
+const SAMPLE_PROGRESS = [row('mea-l01', 'MEA', true), row('mea-l02', 'MEA', true), row('mea-l03', 'MEA', true), row('mea-l04', 'MEA', false), row('log-l02', 'LOG', false)]
+
+/** The demo groups (all four have prerequisite edges, so all are on the canvas) and its cross-group bundles. */
+const GROUPS = ['MEA', 'LOG', 'PLN', 'DAT'] as const
+const LECTURES = 14
+const BUNDLES = ['DAT|PLN', 'LOG|PLN', 'DAT|MEA', 'MEA|PLN']
 
 async function mockProgress(page: Page): Promise<void> {
   await page.context().route(/\/api\/db\/progress(\/|\?|$)/, (route) => {
@@ -90,8 +80,8 @@ async function openCanvas(
   await settle(page, 200)
 }
 
-async function zoomGroupG05(page: Page, theme: ThemeId): Promise<void> {
-  const hit = page.locator('[data-g="G05"] .lec-map-hit').first()
+async function zoomGroupMEA(page: Page, theme: ThemeId): Promise<void> {
+  const hit = page.locator('[data-g="MEA"] .lec-map-hit').first()
   if (theme === 'reader') await hit.dblclick({ position: { x: 80, y: 20 } })
   else await hit.dblclick()
   await settle(page, 460)
@@ -102,29 +92,29 @@ for (const [theme, impl] of [
   ['datasheet', 'datasheet'],
 ] as const) {
   test.describe(`canvas (${theme})`, () => {
-    test('1. default overview renders all mapped groups (13) and excludes LR/SPI with notice in #edgeinfo', async ({
+    test('1. default overview renders all four demo groups and every lecture; nothing is left off the map', async ({
       page,
       consoleErrors,
       pageErrors,
     }) => {
       await openCanvas(page, theme, impl)
-      await expect(page.locator('#atlas [data-slot="CanvasGroup"]')).toHaveCount(13)
-      await expect(page.locator('#atlas [data-g="LR"]')).toHaveCount(0)
-      await expect(page.locator('#atlas [data-g="SPI"]')).toHaveCount(0)
-      expect(await page.locator('#atlas .cv-node').count()).toBeGreaterThan(250)
-      await expect(page.locator('#edgeinfo')).toContainText('LR')
-      await expect(page.locator('#edgeinfo')).toContainText('SPI')
+      await expect(page.locator('#atlas [data-slot="CanvasGroup"]')).toHaveCount(GROUPS.length)
+      for (const g of GROUPS) await expect(page.locator(`#atlas [data-slot="CanvasGroup"][data-g="${g}"]`)).toHaveCount(1)
+      await expect(page.locator('#atlas .cv-node')).toHaveCount(LECTURES)
+      // the notice names the groups without prerequisite edges (left off the map); the demo has none, so it is the plain line
+      await expect(page.locator('#edgeinfo')).toContainText('14')
+      for (const g of GROUPS) await expect(page.locator('#edgeinfo')).not.toContainText(g)
       expect(consoleErrors).toEqual([])
       expect(pageErrors).toEqual([])
     })
 
-    test('2. dblclick group G03 zooms all nodes inside stage without trace panel or text selection', async ({
+    test('2. dblclick group LOG zooms all nodes inside stage without trace panel or text selection', async ({
       page,
       consoleErrors,
       pageErrors,
     }) => {
       await openCanvas(page, theme, impl)
-      const hit = page.locator('[data-g="G03"] .lec-map-hit').first()
+      const hit = page.locator('[data-g="LOG"] .lec-map-hit').first()
       if (theme === 'reader') await hit.dblclick({ position: { x: 80, y: 20 } })
       else await hit.dblclick()
       await settle(page, 460)
@@ -135,7 +125,7 @@ for (const [theme, impl] of [
 
       const out = await page.evaluate(() => {
         const sr = document.querySelector('.cv-stage')!.getBoundingClientRect()
-        const nodes = [...document.querySelectorAll('.cv-node[data-id^="g03-"]')]
+        const nodes = [...document.querySelectorAll('.cv-node[data-id^="log-"]')]
         if (nodes.length === 0) return -1
         let outside = 0
         for (const n of nodes) {
@@ -144,52 +134,52 @@ for (const [theme, impl] of [
         }
         return outside
       })
-      expect(out, 'no G03 lecture missing outside stage').toBe(0)
+      expect(out, 'no LOG lecture missing outside stage').toBe(0)
       expect(consoleErrors).toEqual([])
       expect(pageErrors).toEqual([])
     })
 
-    test('3. single click group G03 navigates to /g03/', async ({ page, consoleErrors, pageErrors }) => {
+    test('3. single click group LOG navigates to /log/', async ({ page, consoleErrors, pageErrors }) => {
       await openCanvas(page, theme, impl)
-      const hit = page.locator('[data-g="G03"] .lec-map-hit').first()
+      const hit = page.locator('[data-g="LOG"] .lec-map-hit').first()
       await Promise.all([
-        page.waitForURL(/\/g03\/$/),
+        page.waitForURL(/\/log\/$/),
         theme === 'reader' ? hit.click({ position: { x: 80, y: 20 } }) : hit.click(),
       ])
       expect(consoleErrors).toEqual([])
       expect(pageErrors).toEqual([])
     })
 
-    test('4. single click lecture g05-l19 opens /g05/L19 after click window without entering lock', async ({
+    test('4. single click lecture mea-l04 opens /mea/L04 after click window without entering lock', async ({
       page,
       consoleErrors,
       pageErrors,
     }) => {
       await openCanvas(page, theme, impl)
-      await zoomGroupG05(page, theme)
-      const nodeHit = page.locator('.cv-node[data-id="g05-l19"] .lec-map-hit').first()
-      await Promise.all([page.waitForURL(/\/g05\/L19(?:\.html)?$/), nodeHit.click()])
+      await zoomGroupMEA(page, theme)
+      const nodeHit = page.locator('.cv-node[data-id="mea-l04"] .lec-map-hit').first()
+      await Promise.all([page.waitForURL(/\/mea\/L04(?:\.html)?$/), nodeHit.click()])
       await expect(page.locator('#focusbar')).toHaveCount(0)
       expect(consoleErrors).toEqual([])
       expect(pageErrors).toEqual([])
     })
 
-    test('5. dblclick lecture g05-l19 enters trace mode and keeps endpoints right of 380px trace panel', async ({
+    test('5. dblclick lecture mea-l04 enters trace mode and keeps endpoints right of 380px trace panel', async ({
       page,
       consoleErrors,
       pageErrors,
     }) => {
       await openCanvas(page, theme, impl)
-      await zoomGroupG05(page, theme)
+      await zoomGroupMEA(page, theme)
 
-      const nodeHit = page.locator('.cv-node[data-id="g05-l19"] .lec-map-hit').first()
+      const nodeHit = page.locator('.cv-node[data-id="mea-l04"] .lec-map-hit').first()
       await nodeHit.dblclick()
       await settle(page, 500)
 
       await expect(page.locator('#focusbar')).toBeVisible()
-      await expect(page.locator('#focusbar [data-open="g05-l19"]')).toBeVisible()
+      await expect(page.locator('#focusbar [data-open="mea-l04"]')).toBeVisible()
       await expect(page.locator('.cv-layer')).toHaveClass(/cv-dim/)
-      await expect(page.locator('.cv-node[data-id="g05-l19"]')).toHaveClass(/\blocked\b/)
+      await expect(page.locator('.cv-node[data-id="mea-l04"]')).toHaveClass(/\blocked\b/)
 
       const bounds = await page.evaluate(() => {
         const sr = document.querySelector('.cv-stage')!.getBoundingClientRect()
@@ -234,7 +224,7 @@ for (const [theme, impl] of [
       await settle(page, 460)
       const newMainId = await page.locator('#focusbar .it.main').getAttribute('data-open')
       expect(newMainId).toBeTruthy()
-      expect(newMainId).not.toBe('g05-l19')
+      expect(newMainId).not.toBe('mea-l04')
 
       await page.keyboard.press('Escape')
       await settle(page, 180)
@@ -252,7 +242,7 @@ for (const [theme, impl] of [
     }) => {
       await openCanvas(page, theme, impl)
       const search = page.locator('.cv-search')
-      await search.fill('GPIO')
+      await search.fill('插值')
       await settle(page, 120)
       await expect(page.locator('.cv-layer')).toHaveClass(/cv-searching/)
       const matchCount = await page.locator('.cv-node.match').count()
@@ -329,7 +319,7 @@ for (const [theme, impl] of [
     })
 
     if (theme === 'datasheet') {
-      test('10. datasheet bundle G03|G12 click shows .ann-tag only inside .bundle-g.on; compact <-> zones switches zones', async ({
+      test('10. datasheet bundle MEA|PLN click shows .ann-tag only inside .bundle-g.on; compact <-> zones switches zones', async ({
         page,
         consoleErrors,
         pageErrors,
@@ -342,8 +332,10 @@ for (const [theme, impl] of [
         // Zero active bundles before click
         await expect(page.locator('.bundle-g.on')).toHaveCount(0)
 
-        const targetBundle = page.locator('.bundle-g[data-pair="G03|G12"]')
+        const targetBundle = page.locator('.bundle-g[data-pair="MEA|PLN"]')
         await expect(targetBundle).toHaveCount(1)
+      // one bundle per pair of groups with cross-group edges: log/L02→pln/L02, mea/L04→pln/L03, mea/L04→dat/L01, dat/L02→pln/L03
+      expect((await page.locator('.bundle-g').evaluateAll((els) => els.map((e) => e.getAttribute('data-pair')))).sort()).toEqual([...BUNDLES].sort())
         await targetBundle.locator('.hitline').first().dispatchEvent('click', { bubbles: true })
         await settle(page, 480)
 
@@ -389,14 +381,19 @@ for (const [theme, impl] of [
       await openCanvas(page, theme, impl)
       const zl = page.locator('#zoomlabel')
       await page.locator('.cv-stage').focus()
-      for (let i = 0; i < 4; i++) {
-        if ((await zl.textContent()) === '组视图') break
+      // the 14-lecture demo opens close in (讲名视图): zoom out through 编号视图 to 组视图
+      const seen: string[] = []
+      for (let i = 0; i < 12; i++) {
+        const now = (await zl.textContent()) ?? ''
+        if (seen[seen.length - 1] !== now) seen.push(now)
+        if (now === '组视图') break
         await page.keyboard.press('-')
         await settle(page, 180)
       }
       await expect(zl).toHaveText('组视图')
+      expect(seen, 'the label passed through the numbers view on the way out').toContain('编号视图')
 
-      await zoomGroupG05(page, theme)
+      await zoomGroupMEA(page, theme)
       for (let i = 0; i < 3; i++) {
         if ((await zl.textContent()) === '讲名视图') break
         await page.keyboard.press('=')
@@ -511,7 +508,7 @@ for (const [theme, impl] of [
   }) => {
     await openCanvas(page, theme, impl)
     const nodes = page.locator('.cv-node')
-    await expect.poll(() => nodes.count()).toBeGreaterThan(250)
+    await expect.poll(() => nodes.count()).toBe(LECTURES)
 
     const activeFirst = page.locator('.cv-node[tabindex="0"]')
     await expect(activeFirst).toHaveCount(1)

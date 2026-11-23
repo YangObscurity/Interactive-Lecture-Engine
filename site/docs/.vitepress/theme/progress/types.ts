@@ -74,7 +74,7 @@ export function normaliseLectureId(id: string): string {
 
 /** Group id from a lecture id (`g05-l19` -> `g05`); used only when nothing better is known. */
 /**
- * Group id of a group directory: its LAST segment, lower-cased (`examples/g01` → `g01`, `G05` → `g05`), the same rule
+ * Group id of a group directory: its LAST segment, lower-cased (`courses/g01` → `g01`, `G05` → `g05`), the same rule
  * as `core/route.ts` and API_CONTRACT.md §2.1. Accepts a plain group id too (no slash → itself, lower-cased).
  */
 export function groupOfDir(dir: string): string {

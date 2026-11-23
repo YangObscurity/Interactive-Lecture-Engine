@@ -14,7 +14,7 @@
  * ────────────────────────────────────────────────────────────────────────────
  * 核心架构与解耦机制
  * ────────────────────────────────────────────────────────────────────────────
- *   A. 动态课程组发现：通过 `resolveGroupDirs()` 动态扫描真实存在的课程目录，无任何硬编码先验。
+ *   A. 动态课程组判定：`isExportableGroup()` 只看 `site/docs/<组目录>/` 是否真实存在（或配置白名单），无任何硬编码先验。
  *   B. 模块依赖智能探测：按「配置路径 → 仓库根 node_modules → site/node_modules → 全局」自动探测 Puppeteer。
  *   C. 几何与环境配置外置：统一由 `site.config.mts` 中的 `LECTURE_EXPORT` 控制，并支持环境变量覆盖。
  *   D. 沙箱安全性与零副作用：产物严格收敛在当前仓库输出目录内，杜绝跨目录写盘。
@@ -386,13 +386,12 @@ async function closeBrowser() {
  *
  * ⚠️ 为什么**必须保留 `/`**（2026-10-16 修，实测缺陷）：
  *   原实现用 `[^a-z0-9._-]` 把所有非法字符删掉，**包括路径分隔符** ——
- *   于是 `examples/g01` 被压成 `examplesg01`。而调用方
+ *   于是 `courses/g01` 被压成 `coursesg01`。而调用方
  *   `isExportableGroup()` 里用的是**原始** group 做 `fs.statSync`，
  *   两者口径不一致 ⇒ **嵌套课程组目录永远判定为「不存在」**。
- *   而 `groups.example.mts` 明确允许 `dir` 是嵌套路径
- *   （`dir: 'examples/g01'`），开源示例正是这种形态 ——
+ *   而课程组定义明确允许 `dir` 是嵌套路径（`dir: 'courses/g01'`）——
  *   所以导出功能对所有嵌套目录形态的内容源**整体不可用**，
- *   且报错信息打印的是被删过的 `examplesg01`，把排查引向错误方向。
+ *   且报错信息打印的是被删过的 `coursesg01`，把排查引向错误方向。
  *
  * 保留 `/` 的同时**防目录穿越**：拒绝含 `..` 的片段、盘符、反斜杠。
  * （安全性不降级：`/` 本身不构成穿越，`..` 才是。）
@@ -410,19 +409,6 @@ function resolveTargetFile(type) {
   return t.suffix
 }
 
-/** 从 docs 目录真实存在的子目录中解析允许导出的课程组目录。 */
-function resolveGroupDirs() {
-  if (Array.isArray(CONFIG.groupDirs) && CONFIG.groupDirs.length > 0) return CONFIG.groupDirs
-  try {
-    return fs
-      .readdirSync(path.join(SITE_DOCS, 'examples'), { withFileTypes: true })
-      .filter((d) => d.isDirectory())
-      .map((d) => d.name)
-  } catch {
-    return []
-  }
-}
-
 /**
  * 判断一个组名是否可导出。
  *
@@ -437,15 +423,12 @@ function isExportableGroup(group) {
   if (Array.isArray(CONFIG.groupDirs) && CONFIG.groupDirs.length > 0) {
     return CONFIG.groupDirs.map(safeSegment).includes(g)
   }
-  // 默认扫描 site/docs 下的直接子目录（含 examples）
-  for (const base of [SITE_DOCS, path.join(SITE_DOCS, 'examples')]) {
-    try {
-      if (fs.statSync(path.join(base, group)).isDirectory()) return true
-    } catch {
-      /* 不存在则继续 */
-    }
+  // 默认：site/docs 下真实存在的课程组目录（可以是嵌套路径）
+  try {
+    return fs.statSync(path.join(SITE_DOCS, group)).isDirectory()
+  } catch {
+    return false /* 不存在 */
   }
-  return false
 }
 
 /** 安装/子进程状态（模块级，便于 cancel 拿到句柄） */

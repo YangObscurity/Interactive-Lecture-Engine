@@ -2,8 +2,10 @@
  * Playwright config.
  *
  * Two projects against the same specs:
- *   - prod: `vitepress preview` of the built dist on 4174 (run `npm run build` first)
- *   - dev : `vitepress dev` on 5174 (the V2 dev port; 5173 is reserved for V1)
+ *   - prod: the demo-content build of `npm run build:e2e` (site/.e2e-demo/dist, from templates/demo-content) served by
+ *           tests/e2e/access-server.mjs on 4174 (`npm run test:e2e:prod` builds and runs it)
+ *   - dev : `vitepress dev` on 5174 (the V2 dev port; 5173 is reserved for V1), started by scripts/dev_e2e.mjs on a copy
+ *           of the same demo content (site/.e2e-demo/content); tests/e2e/dev-teardown.ts puts site/docs back afterwards
  * The ports can be moved with E2E_PROD_PORT / E2E_DEV_PORT (defaults as above).
  *
  * Locally we drive the installed Google Chrome (`channel: 'chrome'`) so no browser download is
@@ -21,6 +23,8 @@ const DEV_PORT = Number(process.env.E2E_DEV_PORT ?? 5174)
 // P3b: the `access` project serves its own dist (npm run build:e2e:access) with tests/e2e/access-server.mjs
 const ACCESS_PORT = Number(process.env.E2E_ACCESS_PORT ?? 4374)
 const ACCESS_SPEC = '**/access.spec.ts'
+// S6: the dist of `npm run build:e2e` (scripts/build_e2e.mjs): the engine's demo content, never the site's own lectures
+const E2E_DEMO_DIST = '.e2e-demo/dist'
 
 /**
  * Playwright starts every `webServer` entry regardless of `--project`, so only launch the servers
@@ -91,10 +95,12 @@ export default defineConfig({
   ],
   webServer: [
     wanted.has('prod') && {
-      command: `npx vitepress preview docs --host 127.0.0.1 --port ${PROD_PORT} --strictPort`,
+      // S6: the prod project runs on the engine's demo content (templates/demo-content), built by `npm run build:e2e`
+      // into its own folder; `docs/.vitepress/dist` (the site's own build, the one that is deployed) is not served here
+      command: `node tests/e2e/access-server.mjs --dir ${E2E_DEMO_DIST} --port ${PROD_PORT}`,
       url: `http://127.0.0.1:${PROD_PORT}/`,
       reuseExistingServer: !CI,
-      timeout: 120_000,
+      timeout: 30_000,
       stdout: 'ignore',
       stderr: 'pipe',
     },
@@ -107,12 +113,18 @@ export default defineConfig({
       stderr: 'pipe',
     },
     wanted.has('dev') && {
-      command: `npx vitepress dev docs --host 127.0.0.1 --port ${DEV_PORT} --strictPort`,
+      // S6 decision B: the dev project runs on a throw-away copy of the demo content (site/.e2e-demo/content, synced into
+      // site/docs, LECTURE_CONTENT_DIR at the copy; Dashboard / concept writes land in the copy). site/docs is put back
+      // for the site's own content by tests/e2e/dev-teardown.ts (or the script's own exit / next start / --restore).
+      command: `node scripts/dev_e2e.mjs --port ${DEV_PORT}`,
       url: `http://127.0.0.1:${DEV_PORT}/`,
-      reuseExistingServer: !CI,
+      // never reuse a server already on the port: it could be `npm run dev` on the site's own lectures
+      reuseExistingServer: false,
       timeout: 180_000,
       stdout: 'ignore',
       stderr: 'pipe',
     },
   ].filter((x): x is Exclude<typeof x, false> => Boolean(x)),
+  // the dev server script swaps site/docs to the demo copy: put it back (Playwright stops web servers with taskkill /F on Windows)
+  ...(wanted.has('dev') ? { globalTeardown: './tests/e2e/dev-teardown.ts' } : {}),
 })

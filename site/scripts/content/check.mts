@@ -155,9 +155,7 @@ export async function runContentCheck(options: { paths?: ContentPaths; only?: re
   const readChart = (lectureId: string) => {
     usedCharts.add(lectureId)
     if (!chartCache.has(lectureId)) {
-      const own = path.join(paths.chartsDir, `${lectureId}.json`)
-      const example = path.join(paths.exampleChartsDir, `${lectureId}.json`)
-      const raw = readJson(fs.existsSync(own) ? own : example)
+      const raw = readJson(path.join(paths.chartsDir, `${lectureId}.json`))
       chartCache.set(lectureId, raw === null || raw === 'invalid' ? raw : typeof raw === 'object' && !Array.isArray(raw) ? (raw as Record<string, { type?: unknown }>) : 'invalid')
     }
     return chartCache.get(lectureId) ?? null

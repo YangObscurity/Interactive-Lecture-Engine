@@ -11,7 +11,7 @@
  *   - Deletes only stale files that were in the old manifest; never touches files outside the manifest.
  *   - Refuses with exit code 3 if a previously synced copy in `site/docs/` was modified in place (`--force` overwrites).
  *   - Refuses symlinks, `..` segments, absolute paths, and any target outside `site/docs/` (exit code 3).
- *   - Refuses lecture entries colliding with engine pages/directories (`index.md`, `dashboard.md`, `en`, `examples`,
+ *   - Refuses lecture entries colliding with engine pages/directories (`index.md`, `dashboard.md`, `en`, `concepts`,
  *     `public`, `.vitepress`) with exit code 3.
  *   - `--clean` removes every file listed in the manifest, empty directories created by sync, and the manifest itself.
  */
@@ -27,7 +27,6 @@ export const ENGINE_COLLISION_NAMES = new Set([
   'dashboard.md',
   'concepts',
   'en',
-  'examples',
   'public',
   '.vitepress',
 ])
@@ -39,7 +38,7 @@ export const ENGINE_COLLISION_NAMES = new Set([
 export const TRANSLATION_LOCALE_KEYS: ReadonlySet<string> = new Set(['en'])
 
 /** Engine pages inside a language folder (`site/docs/en/index.md`, `dashboard.md`, the `[group]` route) a translation may not replace. */
-export const TRANSLATION_COLLISION_NAMES = new Set(['index.md', 'dashboard.md', 'concepts', 'examples', 'public', '.vitepress'])
+export const TRANSLATION_COLLISION_NAMES = new Set(['index.md', 'dashboard.md', 'concepts', 'public', '.vitepress'])
 
 export class ContentSyncError extends Error {
   readonly exitCode: number

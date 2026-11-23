@@ -1,7 +1,7 @@
 import { expect, test, gotoAndSettle } from './fixtures'
 import { useTheme } from './theme-helpers'
 
-const LECTURE = '/g05/L19'
+const LECTURE = '/mea/L03'
 
 for (const skin of ['reader', 'datasheet'] as const) {
   test.describe(`WP-F7 quick actions (${skin})`, () => {
@@ -79,7 +79,7 @@ for (const skin of ['reader', 'datasheet'] as const) {
         lang: 'zh',
         query: '',
       })
-      expect(chatRequests[0]?.inputs?.current_lecture).toContain('L19')
+      expect(chatRequests[0]?.inputs?.current_lecture).toContain('L03')
       await expect(page.locator('.assistant-body')).toContainText('Action=quiz')
 
       // Close sidebar before selecting text from lecture prose

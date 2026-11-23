@@ -18,10 +18,8 @@ function makeFixture() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'f8-xref-'))
   dirs.push(root)
   const figuresDir = path.join(root, 'figures')
-  const exampleFiguresDir = path.join(root, 'example-figures')
   fs.mkdirSync(path.join(figuresDir, 'g01'), { recursive: true })
   fs.mkdirSync(path.join(figuresDir, 'g09'), { recursive: true })
-  fs.mkdirSync(exampleFiguresDir, { recursive: true })
 
   const svg = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="320" height="180"/>')
   const sha = createHash('sha256').update(svg).digest('hex').slice(0, 12)
@@ -102,7 +100,7 @@ function makeFixture() {
   const md = new MarkdownIt({ html: true })
   md.use(
     createFiguresMarkdownPlugin({
-      paths: { figuresDir, exampleFiguresDir },
+      paths: { figuresDir },
       groupDirs: ['g01', 'g09'],
       groupIdByDir: new Map([
         ['g01', 'G01'],

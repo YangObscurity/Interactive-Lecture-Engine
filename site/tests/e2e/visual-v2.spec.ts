@@ -1,19 +1,25 @@
 /**
- * V2 visual baselines (P2b): theme packs × modes on the three reference pages.
+ * V2 visual baselines (P2b): theme packs × modes on the three reference pages of the demo content (templates/demo-content).
  *
- *   desktop 1440×900: home (full page), /g05/L19 (viewport), /lr/ (full page)
+ *   desktop 1440×900: home (full page), /mea/L04 (viewport: a chart, inline formulas, a table, code and a self-test card),
+ *                     /mea/ (the six-lecture group page, full page)
  *                     × reader-light, reader-dark, datasheet-light, datasheet-dark
- *   mobile  390×844 : /g05/L19 × the same four theme-modes
+ *   mobile  390×844 : /mea/L04 × the same four theme-modes
  *
- * Snapshot names start with `v2-`; the P0 V1 references in visual-baseline.spec.ts are kept as they
- * were (that spec only runs with VISUAL_V1=1). Record with
- *   npx playwright test --project prod --update-snapshots tests/e2e/visual-v2.spec.ts
+ * Snapshot names start with `v2-`; the P0 V1 references in visual-baseline.spec.ts only run with VISUAL_V1=1.
+ * The baselines are pictures of the demo site and ship with the engine. Record them (prod project only) with
+ *   npm run build:e2e
+ *   npx playwright test tests/e2e/visual-v2.spec.ts --project prod --update-snapshots
  */
 import type { Locator, Page } from '@playwright/test'
 import { test, expect, gotoAndSettle, waitForLabelPaint } from './fixtures'
 import { THEME_MODES, expectThemeActive, useTheme } from './theme-helpers'
 
-const LECTURE = '/g05/L19'
+const LECTURE = '/mea/L04'
+const GROUP = '/mea/'
+
+// the dev server adds the author's extras (chart source folds) and compiles on demand: the baselines describe the built site
+const prodOnly = (): void => test.skip(test.info().project.name !== 'prod', 'baselines are recorded for the prod project only')
 
 function dynamicMasks(page: Page): Locator[] {
   return [
@@ -54,7 +60,10 @@ async function expectThemeSettled(page: Page, theme: (typeof THEME_MODES)[number
 for (const [theme, mode] of THEME_MODES) {
   test.describe(`@visual-v2 desktop ${theme}-${mode}`, () => {
     test.use({ viewport: { width: 1440, height: 900 } })
-    test.beforeEach(async ({ page }) => useTheme(page, theme, mode))
+    test.beforeEach(async ({ page }) => {
+      prodOnly()
+      await useTheme(page, theme, mode)
+    })
 
     test('home', async ({ page }) => {
       await gotoAndSettle(page, '/')
@@ -62,27 +71,30 @@ for (const [theme, mode] of THEME_MODES) {
       await expect(page).toHaveScreenshot(`v2-home-${theme}-${mode}-desktop.png`, { fullPage: true, mask: dynamicMasks(page) })
     })
 
-    test('g05 lecture', async ({ page }) => {
+    test('mea lecture', async ({ page }) => {
       expect(await gotoAndSettle(page, LECTURE), '__CHARTS_DONE__').toBe(true)
       await expectThemeSettled(page, theme, mode, ['SidebarStatus', 'LectureTitleBlock', 'FigureFrame', 'QuizHeader'])
-      await expect(page).toHaveScreenshot(`v2-g05-L19-${theme}-${mode}-desktop.png`, { mask: dynamicMasks(page) })
+      await expect(page).toHaveScreenshot(`v2-mea-L04-${theme}-${mode}-desktop.png`, { mask: dynamicMasks(page) })
     })
 
-    test('lr group', async ({ page }) => {
-      await gotoAndSettle(page, '/lr/')
+    test('mea group', async ({ page }) => {
+      await gotoAndSettle(page, GROUP)
       await expectThemeSettled(page, theme, mode, ['GroupMap'])
-      await expect(page).toHaveScreenshot(`v2-lr-group-${theme}-${mode}-desktop.png`, { fullPage: true, mask: dynamicMasks(page) })
+      await expect(page).toHaveScreenshot(`v2-mea-group-${theme}-${mode}-desktop.png`, { fullPage: true, mask: dynamicMasks(page) })
     })
   })
 
   test.describe(`@visual-v2 mobile ${theme}-${mode}`, () => {
     test.use({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true })
-    test.beforeEach(async ({ page }) => useTheme(page, theme, mode))
+    test.beforeEach(async ({ page }) => {
+      prodOnly()
+      await useTheme(page, theme, mode)
+    })
 
-    test('g05 lecture', async ({ page }) => {
+    test('mea lecture', async ({ page }) => {
       expect(await gotoAndSettle(page, LECTURE), '__CHARTS_DONE__').toBe(true)
       await expectThemeSettled(page, theme, mode, ['SidebarStatus', 'LectureTitleBlock', 'FigureFrame', 'QuizHeader'])
-      await expect(page).toHaveScreenshot(`v2-g05-L19-${theme}-${mode}-mobile.png`, { mask: dynamicMasks(page) })
+      await expect(page).toHaveScreenshot(`v2-mea-L04-${theme}-${mode}-mobile.png`, { mask: dynamicMasks(page) })
     })
   })
 }

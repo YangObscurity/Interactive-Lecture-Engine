@@ -194,7 +194,6 @@ export interface SearchEngineOptions {
   labels: {
     lectureNo: (n: number) => string
     groupCount: (n: number) => string
-    groupExamples: string
     groupSite: string
     groupConcepts?: string
     conceptBadge?: string
@@ -312,7 +311,6 @@ export class LectureSearchEngine {
 
   private resolveGroupTitle(grp: TitleIndexGroup): string {
     if (grp.id === 'CONCEPTS') return this.opts.labels.groupConcepts ?? grp.title
-    if (grp.id === 'EXAMPLES') return this.opts.labels.groupExamples
     if (grp.id === 'SITE') return this.opts.labels.groupSite
     return grp.title
   }

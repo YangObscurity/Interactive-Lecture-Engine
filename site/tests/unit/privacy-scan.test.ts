@@ -117,4 +117,23 @@ describe('privacy scan', () => {
     expect(rules('assets/g01_L01.md.Ab12.js')).toEqual(['personal-term', 'api-token'])
     expect(rules('site/assets/chunks/x.js')).toEqual(['personal-term', 'api-token'])
   })
+
+  it('takes regex syntax in a grammar for regex, not a drive, and still finds a drive path next to it', () => {
+    const rules = (text: string) => (scanText('assets/chunks/vb.Cd05.js', text, []) as Hit[]).map((h) => h.rule)
+    // as the shiki grammars of a built site have them: inline flag groups and an escaped class letter before a colon
+    expect(rules(String.raw`{"match":"(?i:\\b(If|Then)\\b)","begin":"(?-i:\\s*\\"}`)).toEqual([])
+    expect(rules(String.raw`"[.\\w:\\x{80}-\\x{10FFFF}]"`)).toEqual([])
+    expect(rules(String.raw`"(?i:\\b(x))" and "D:\\work\\notes"`)).toEqual(['local-path']) // privacy-scan: allow
+    expect(rules(String.raw`root = 'E:/proj/site'`)).toEqual(['local-path']) // privacy-scan: allow
+  })
+
+  it('names the LICENSE copyright holder only on that line of a LICENSE file', () => {
+    const terms = ['owner-name']
+    const rules = (rel: string, text: string) => (scanText(rel, text, terms) as Hit[]).map((h) => `${h.line}:${h.rule}`)
+    const license = 'MIT License\n\nCopyright (c) 2026 owner-name\n\nThanks to owner-name for the idea.'
+    expect(rules('LICENSE', license)).toEqual(['5:personal-term'])
+    expect(rules('docs/engine-root/LICENSE', license)).toEqual(['5:personal-term'])
+    expect(rules('README.md', 'Copyright (c) 2026 owner-name')).toEqual(['1:personal-term'])
+    expect(rules('LICENSE.bak', 'Copyright (c) 2026 owner-name')).toEqual(['1:personal-term'])
+  })
 })

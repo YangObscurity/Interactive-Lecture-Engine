@@ -1,0 +1,93 @@
+{
+  "version": 1,
+  "group": "mea",
+  "figures": [
+    {
+      "id": "mea-ruler",
+      "file": "mea-ruler.svg",
+      "kind": "figure",
+      "width": 480,
+      "height": 120,
+      "caption": {
+        "zh": "刻度尺读数：最后一位是估读",
+        "en": "Reading a ruler: the last digit is an estimate"
+      },
+      "source": {
+        "paper": "Original Example Diagram",
+        "number": "Fig. 1",
+        "page": 1
+      },
+      "sha256": "be143f61830a"
+    },
+    {
+      "id": "mea-error-bars",
+      "file": "mea-error-bars.svg",
+      "kind": "figure",
+      "width": 480,
+      "height": 200,
+      "caption": {
+        "zh": "四个测量点及其误差棒",
+        "en": "Four measurements with error bars"
+      },
+      "source": {
+        "paper": "Original Example Diagram",
+        "number": "Fig. 2",
+        "page": 1
+      },
+      "sha256": "438f48330201"
+    },
+    {
+      "id": "mea-grid",
+      "file": "mea-grid.webp",
+      "kind": "figure",
+      "width": 480,
+      "height": 240,
+      "caption": {
+        "zh": "方格纸上的圆、三角形与长方形（位图）",
+        "en": "A circle, a triangle and a rectangle on squared paper (raster)"
+      },
+      "source": {
+        "paper": "Original Example Diagram",
+        "number": "Fig. 5",
+        "page": 3
+      },
+      "sha256": "942259e955f6"
+    },
+    {
+      "id": "mea-interp",
+      "file": "mea-interp.svg",
+      "kind": "figure",
+      "width": 480,
+      "height": 200,
+      "caption": {
+        "zh": "两个已知点之间的直线插值",
+        "en": "Linear interpolation between two known points"
+      },
+      "source": {
+        "paper": "Original Example Diagram",
+        "number": "Fig. 3",
+        "page": 2
+      },
+      "sha256": "4ba5769e4664",
+      "original": "mea-interp-original.svg"
+    },
+    {
+      "id": "mea-scale",
+      "file": "mea-scale.svg",
+      "kind": "figure",
+      "width": 480,
+      "height": 160,
+      "caption": {
+        "zh": "天平：两边读数相等才算平衡（本图没有讲义引用）",
+        "en": "A balance: equal readings on both sides (not cited by any lecture)"
+      },
+      "source": {
+        "paper": "Original Example Diagram",
+        "number": "Fig. 4",
+        "page": 2
+      },
+      "doi": "10.5555/demo.0004",
+      "sha256": "95d879c351f0"
+    }
+  ]
+}

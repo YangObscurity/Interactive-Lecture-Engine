@@ -34,7 +34,7 @@ describe('scan translations', () => {
   it('maps ROOT paths to the translated page, nested directories included', () => {
     put('en/g01/L03.md', '---\ntitle: "Kconfig and menuconfig"\n---\n# x\n')
     put('en/g01/L10.md', '---\ntitle: Ten\n---\n')
-    put('en/examples/g01/L01.md', '---\ntitle: "Ohm"\n---\n')
+    put('en/courses/g01/L01.md', '---\ntitle: "Ohm"\n---\n')
     put('en/g01/L04.md', '# no frontmatter title\n')
     put('en/g01/index.md', '---\ntitle: Group\n---\n')
     put('en/g01/notes.md', 'x')
@@ -42,7 +42,7 @@ describe('scan translations', () => {
     put('en/.hidden/L09.md', 'x')
     put('g01/L03.md', '---\ntitle: root\n---\n') // root-language files are not in any locale folder
     expect(scanLocale(dir, 'en')).toEqual({
-      '/examples/g01/L01': { link: '/en/examples/g01/L01', title: 'Ohm' },
+      '/courses/g01/L01': { link: '/en/courses/g01/L01', title: 'Ohm' },
       '/g01/L03': { link: '/en/g01/L03', title: 'Kconfig and menuconfig' },
       '/g01/L04': { link: '/en/g01/L04', title: '' },
       '/g01/L10': { link: '/en/g01/L10', title: 'Ten' },
@@ -77,12 +77,10 @@ describe('resolveGroups(dir)', () => {
       'content/groups.ts',
       'content-groups.mts',
       'groups.mts',
-      'groups.example.mts',
     ])
   })
 
   it('takes the first existing source and logs it', async () => {
-    put('groups.example.mts', GROUP('example'))
     put('groups.mts', GROUP('local'))
     const r = await resolveGroups(dir)
     expect(r.GROUPS.map((g) => g.dir)).toEqual(['local'])
@@ -109,5 +107,7 @@ describe('resolveGroups(dir)', () => {
     expect(r.GROUPS).toEqual([])
     expect(r.SITE_META).toEqual(FALLBACK_SITE_META)
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('未找到任何课程组来源'))
+    // in-place mode with no groups: the warning says how to get content (npm run init, or the demo fallback)
+    expect(warn).toHaveBeenCalledWith(expect.stringMatching(/npm run init[\s\S]*LECTURE_DEMO=0/))
   })
 })

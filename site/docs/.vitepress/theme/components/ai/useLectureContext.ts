@@ -1,7 +1,7 @@
 /**
  * useLectureContext.ts — Lecture context detector (P6 singleton, FE-013 / FE-035 / FE-058).
  *
- * Uses `core/route.ts` as the single route parser (supports nested group dirs like `examples/g01/L01`
+ * Uses `core/route.ts` as the single route parser (supports nested group dirs like `courses/g01/L01`
  * and locale prefixes like `/en/g05/L19`) and shares one reference-counted browser listener pair
  * (`scroll` + `selectionchange`) across all components calling `useLectureContext()`.
  */

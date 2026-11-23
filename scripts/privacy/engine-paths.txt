@@ -9,6 +9,12 @@
 AGENTS.md
 README.md
 LICENSE
+# root files of the engine repository that only the export writes (from docs/engine-root/)
+README.en.md
+CONTRIBUTING.md
+SECURITY.md
+CODE_OF_CONDUCT.md
+CODE_OF_CONDUCT.en.md
 docs/
 docs-dev/
 templates/
@@ -34,7 +40,9 @@ scripts/deploy_dist_cli.py
 !site/docs/.content-mount.json
 # the site owner's V1 lecture workflow (personal paths and tools)
 !docs-dev/legacy-content/
-# Playwright screenshot baselines are pictures of the owner's site (lectures, progress): generated per site, never shipped
-!site/tests/e2e/__screenshots__/
+# the engine repository root files (README, LICENSE, community files): the export moves docs/engine-root/<path> to <path>
+!docs/engine-root/
+# Playwright screenshot baselines (site/tests/e2e/__screenshots__/) ship with the engine: since S6 they are pictures of the
+# demo content (templates/demo-content), not of the site owner's lectures (user decision 2026-11-23), so site/ covers them
 # CI of the V1 lecture scripts, which stay private
 !.github/workflows/legacy-content.yml

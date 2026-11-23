@@ -1,6 +1,6 @@
 /**
- * groups-source.mts - resolves WHICH file defines the course groups (content-groups.mts > groups.mts >
- * groups.example.mts) and loads it. Moved out of config.mts in P2d (WP-I2) with identical behaviour and
+ * groups-source.mts - resolves WHICH file defines the course groups (content/groups.ts > content-groups.mts >
+ * groups.mts) and loads it. Moved out of config.mts in P2d (WP-I2) with identical behaviour and
  * log lines, because two places need the result: config.mts (nav, sidebar, home data) and the dynamic
  * English group pages (docs/en/[group]/index.paths.mts). Node only; never imported by the client.
  */
@@ -18,13 +18,14 @@ const here = path.dirname(fileURLToPath(import.meta.url))
  * ──────────────────────────────────────────────────────────────────────────
  * 课程组元信息的优先级解析（多内容源接入策略）
  * ──────────────────────────────────────────────────────────────────────────
- * 设计目标：引擎与业务内容元信息物理彻底解耦，支持通用示例、自定义本地与插拔式挂载三种形态。
+ * 设计目标：引擎与业务内容元信息物理彻底解耦，支持内容目录、自定义本地与插拔式挂载三种形态。
  *
  * 候选来源按优先级排序，取第一个存在的来源加载：
+ *   0. `content/groups.ts`  —— V2 内容目录（含没有内容目录时回落的示例内容 templates/demo-content）。
  *   1. `content-groups.mts` —— 由 `scripts/mount_content.py` 挂载外部内容源时生成。
- *      优先级最高：显式挂载的内容源优先于本地配置文件。
- *   2. `groups.mts`         —— 本地定制化课程组定义（被 .gitignore 排除，不提交至版本库）。
- *   3. `groups.example.mts` —— 引擎内置的结构示例与通用占位课件，作为开箱即用的默认兜底配置。
+ *      显式挂载的内容源优先于本地配置文件。
+ *   2. `groups.mts`         —— 原位模式的本地课程组定义（被 .gitignore 排除，不提交至版本库）。
+ *   都没有 → 零课程组的空站点（原位模式且没有 groups.mts 时出现），构建日志给出提示。
  *
  * 为什么用「existsSync + 动态 import()」而不是静态 import：
  *   静态 import 的路径在解析期就写死了，文件不存在 → 模块解析失败 → 构建直接挂。
@@ -69,10 +70,9 @@ export const GROUPS_CANDIDATES = [
   { file: 'content/groups.ts', desc: 'V2 内容目录课程组定义（content/groups.ts）' },
   { file: 'content-groups.mts', desc: '挂载的内容源（scripts/mount_content.py 产生）' },
   { file: 'groups.mts', desc: '本地自定义课程组定义' },
-  { file: 'groups.example.mts', desc: '引擎自带的结构示例（通用占位文案）' },
 ] as const
 
-/** 引擎兜底文案：即使 `groups.example.mts` 也被删掉，站点仍要立得起来。 */
+/** 引擎兜底文案：一个课程组来源都没有时（原位模式、没有 groups.mts），站点仍要立得起来。 */
 export type SiteMeta = { name: string; shortName?: string; text: string; tagline: string; description?: string; i18n?: SiteMetaI18n }
 
 export const FALLBACK_SITE_META: SiteMeta = {
@@ -128,10 +128,12 @@ export async function resolveGroups(dir: string = here) {
     console.log(`[groups] 元信息来源 = ${cand.file} —— ${cand.desc}（${groups.length} 组，${abs}）`)
     return { GROUPS: groups, SITE_META: resolveSiteMeta(dir, mod.SITE_META as SiteMeta | undefined) }
   }
-  // 三个候选全不可用：**不抛错**。抛错会让「引擎独立构建」这一核心目标落空，
-  // 而一个零课程组的空站点恰恰是合法的「引擎裸奔」状态。
+  // 候选全不可用：**不抛错**。抛错会让「引擎独立构建」这一核心目标落空，
+  // 而一个零课程组的空站点恰恰是合法的「引擎裸奔」状态（原位模式，即 LECTURE_DEMO=0 且没有 content/）。
   console.warn(
-    `[groups] ⚠️ 未找到任何课程组来源，回退为空站点（无课程组）。尝试过：\n  - ${tried.join('\n  - ')}`
+    `[groups] ⚠️ 未找到任何课程组来源，回退为空站点（无课程组）。尝试过：\n  - ${tried.join('\n  - ')}\n` +
+      '  原位模式只读 site/docs 里的讲义与 site/docs/.vitepress/groups.mts；要建自己的讲义库请运行 npm run init（创建 content/），' +
+      '要看引擎自带的示例内容请去掉 LECTURE_DEMO=0。'
   )
   return { GROUPS: [] as GroupMetaLike[], SITE_META: resolveSiteMeta(dir, undefined) }
 }
@@ -139,9 +141,9 @@ export async function resolveGroups(dir: string = here) {
 /**
  * 解析结果里 GROUPS 元素的最小形状。
  *
- * 这里刻意**不做运行期字段校验**：契约的权威定义在 `groups.example.mts`
+ * 这里刻意**不做运行期字段校验**：契约的权威定义在 `templates/content/groups.ts`（npm run init 的模板）
  * 与 `content/CONTENT_SOURCE.md`，config.mts 只负责「取到数组」这一件事。
- * 三个候选来源（示例 / 本地 / 挂载）因此具有完全一致的消费口径。
+ * 各候选来源（内容目录 / 本地 / 挂载）因此具有完全一致的消费口径。
  */
 export type GroupMetaLike = {
   id: string

@@ -572,6 +572,7 @@ export const dashboardZhCN = {
   'dsh.tl.save': '保存工具开关',
   'dsh.tl.saved': '工具开关已保存',
   'dsh.tl.saveFailed': '没有保存：{e}',
+  'dsh.demoReadOnly': '示例内容只读：先运行 npm run init 建自己的内容目录',
   // ---- 运行状态 › 同步与索引 ----
   'dsh.rt.tabSync': '同步与索引',
   'dsh.rt.syncTitle': '内容同步',

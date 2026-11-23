@@ -42,7 +42,6 @@ export const zhCN = {
   'search.loadingIdle': '正文索引载入中（{loaded} / {total} MB）…',
   'search.groupCount': '{count} 条',
   'search.lectureNo': '第{n}讲',
-  'search.groupExamples': '示例讲义',
   'search.groupSite': '站点页面',
   'search.groupConcepts': '概念',
   'search.conceptBadge': '概念',

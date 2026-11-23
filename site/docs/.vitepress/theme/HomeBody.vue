@@ -190,7 +190,7 @@ const cards = computed<Array<{ key: string; props: GroupCardProps }>>(() =>
 )
 
 // 启航按钮
-const firstGroupLink = computed(() => groups.value.length > 0 ? groupHref(groups.value[0]) : withBase(`${prefix.value}/examples/g01/`))
+const firstGroupLink = computed(() => groups.value.length > 0 ? groupHref(groups.value[0]) : withBase(`${prefix.value}/`))
 const firstGroupTitle = computed(() => groups.value.length > 0 ? t('home.startFrom', { id: groups.value[0].id, title: groupText(groups.value[0], 'title') }) : t('home.startBasic'))
 const groupsRangeLabel = computed(() => {
   if (groups.value.length === 0) return t('home.rangeEmpty')

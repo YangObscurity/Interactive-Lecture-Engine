@@ -22,7 +22,7 @@ const ajvInstance = new AjvClass({ allErrors: true, strict: false })
 const compiledValidate = ajvInstance.compile<FiguresRegistry>(FIGURES_REGISTRY_SCHEMA)
 
 export interface ValidateRegistryOptions {
-  /** Expected group directory string (`lr`, `examples/g01`, ...). */
+  /** Expected group directory string (`g01`, `courses/g01`, ...). */
   expectedGroup?: string
   /** Absolute directory on disk (`<figuresDir>/<group>`). When given + verifyFiles, asserts existence, containment, and sha256. */
   groupDir?: string

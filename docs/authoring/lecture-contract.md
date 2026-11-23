@@ -15,7 +15,7 @@
 | 概念页 | `content/concepts/<slug>.md`，草稿在 `_drafts/` | 见第 7 节 |
 | 图谱 | `content/graph/graph.json`、`graph-bindings.json` | 见第 9 节 |
 
-组目录名不能是引擎占用的 `en`、`examples`、`public`、`concepts`、`.vitepress`，也不能叫 `index.md`、`dashboard.md`。
+组目录名不能是引擎占用的 `en`、`public`、`concepts`、`.vitepress`，也不能叫 `index.md`、`dashboard.md`。
 
 ## 2. frontmatter（四项必填）
 

@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import fs from 'node:fs'
 import path from 'node:path'
-import { describe, expect, it } from 'vitest'
+import { afterAll, describe, expect, it, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { defineComponent, h, nextTick } from 'vue'
 import { EMPTY_SEED, buildSeed, seedIndex } from '../../docs/.vitepress/theme/progress/seed'
@@ -17,26 +17,35 @@ import type { ProgressRecord } from '../../docs/.vitepress/theme/progress/types'
 import { fromLegacyStatus, toLegacyStatus } from '../../docs/.vitepress/theme/progress/types'
 import { PROGRESS_WIRE_STATUS } from '../../docs/.vitepress/site.config.mts'
 import { FakeClock, FakeScheduler, MemoryStorage, ScriptedBackend, deferred, rec, settle } from './progress-helpers'
+import { DEMO_CONTENT_DIR } from './demo-content'
+
+// S6: the data loader reads the active content root when it is imported; point it at the engine's demo content
+// (templates/demo-content/graph/notion_knowledge_graph.json) before the imports run, never the owner's export.
+vi.hoisted(() => {
+  process.env.LECTURE_CONTENT_DIR = `${__dirname}/../../../templates/demo-content`
+})
 
 const W = PROGRESS_WIRE_STATUS
-// S2: content mode keeps the export in content/graph/, in-place mode in docs/public/
-const graphFile = resolveContent({ env: {} }).graphDir.notionKnowledgeGraph
+const graphFile = resolveContent({ env: { LECTURE_CONTENT_DIR: DEMO_CONTENT_DIR } }).graphDir.notionKnowledgeGraph
+afterAll(() => {
+  delete process.env.LECTURE_CONTENT_DIR
+})
 
 describe('seed', () => {
   const node = (lectureId: string, status: string, extra: Record<string, unknown> = {}) => ({ lectureId, groupId: lectureId.split('-')[0]?.toUpperCase(), status, nodeId: `n-${lectureId}`, notionPageId: `p-${lectureId}`, completedDate: null, ...extra })
 
   it('maps graph nodes to records: lower-case ids, domain statuses, Notion ids, completion time only when completed', () => {
     const seed = buildSeed([
-      node('G05-L19', W.completed, { completedDate: '2026-10-25T21:54:00.000+08:00' }),
-      node('G05-L20', W.in_progress, { completedDate: '2026-10-25T21:54:00.000+08:00' }),
-      node('G06-L01', W.not_started),
+      node('G03-L07', W.completed, { completedDate: '2026-10-25T21:54:00.000+08:00' }),
+      node('G03-L08', W.in_progress, { completedDate: '2026-10-25T21:54:00.000+08:00' }),
+      node('G04-L01', W.not_started),
     ])
     expect(seed.records).toEqual([
-      { lectureId: 'g05-l19', groupId: 'g05', status: 'completed', completedAt: '2026-10-25T21:54:00.000+08:00', updatedAt: null, notionNodeId: 'n-G05-L19', notionPageId: 'p-G05-L19' },
-      { lectureId: 'g05-l20', groupId: 'g05', status: 'in_progress', completedAt: null, updatedAt: null, notionNodeId: 'n-G05-L20', notionPageId: 'p-G05-L20' },
-      { lectureId: 'g06-l01', groupId: 'g06', status: 'not_started', completedAt: null, updatedAt: null, notionNodeId: 'n-G06-L01', notionPageId: 'p-G06-L01' },
+      { lectureId: 'g03-l07', groupId: 'g03', status: 'completed', completedAt: '2026-10-25T21:54:00.000+08:00', updatedAt: null, notionNodeId: 'n-G03-L07', notionPageId: 'p-G03-L07' },
+      { lectureId: 'g03-l08', groupId: 'g03', status: 'in_progress', completedAt: null, updatedAt: null, notionNodeId: 'n-G03-L08', notionPageId: 'p-G03-L08' },
+      { lectureId: 'g04-l01', groupId: 'g04', status: 'not_started', completedAt: null, updatedAt: null, notionNodeId: 'n-G04-L01', notionPageId: 'p-G04-L01' },
     ])
-    expect(seedIndex(seed).get('g05-l19')?.status).toBe('completed')
+    expect(seedIndex(seed).get('g03-l07')?.status).toBe('completed')
   })
 
   it('skips nodes without a lecture id or with an unknown status; anything that is not an array is the empty seed', () => {
@@ -136,9 +145,9 @@ describe('site runtime settings', () => {
     expect(parseProgressRuntime(undefined)).toEqual({ adapter: 'local', endpoint: '/api/db', notionSync: false, authAdapter: 'none', sessionEndpoint: undefined, groupIds: [] })
     const rt = parseProgressRuntime({
       lectureModules: { progress: { adapter: 'rest', endpoint: '/svc', notionSync: true }, auth: { adapter: 'trusted-header', sessionEndpoint: '/svc/session' } },
-      groups: [{ dir: 'examples/G01' }, { dir: 'lr' }, { id: 'no-dir' }, null],
+      groups: [{ dir: 'courses/G01' }, { dir: 'xr' }, { id: 'no-dir' }, null],
     })
-    expect(rt).toEqual({ adapter: 'rest', endpoint: '/svc', notionSync: true, authAdapter: 'trusted-header', sessionEndpoint: '/svc/session', groupIds: ['g01', 'lr'] })
+    expect(rt).toEqual({ adapter: 'rest', endpoint: '/svc', notionSync: true, authAdapter: 'trusted-header', sessionEndpoint: '/svc/session', groupIds: ['g01', 'xr'] })
   })
 
   it('configureProgress sets the runtime the singleton uses', () => {

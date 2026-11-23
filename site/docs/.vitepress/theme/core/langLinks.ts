@@ -49,7 +49,7 @@ export function hasTranslation(locales: SiteLocales | undefined, key: string, ro
 
 export interface SwitchContext {
   locales: SiteLocales | undefined
-  /** `dir` of every course group (`g01`, `examples/g01`). */
+  /** `dir` of every course group (`g01`, `courses/g01`). */
   groupDirs: readonly string[]
   base?: string
 }

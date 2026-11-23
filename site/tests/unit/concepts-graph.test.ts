@@ -260,15 +260,15 @@ describe('related, concept-page link and unlinked-mention checks', () => {
 // ---- tiers: panels and tool files -----------------------------------------------------------------------------------------
 
 const PLAN: AccessPlan = resolveAccess({
-  access: { default: 'public', enforcement: 'gateway', groups: { G05: { read: 'authenticated' }, LR: { read: ['staff'] } } },
-  groupIds: ['G01', 'G05', 'LR'],
+  access: { default: 'public', enforcement: 'gateway', groups: { G05: { read: 'authenticated' }, XR: { read: ['staff'] } } },
+  groupIds: ['G01', 'G05', 'XR'],
 })
 const GROUPS = [
   { id: 'G01', dir: 'g01' },
   { id: 'G05', dir: 'g05' },
-  { id: 'LR', dir: 'lr' },
+  { id: 'XR', dir: 'xr' },
 ]
-const STAFF_TIER = PLAN.tierOfGroup.LR as string
+const STAFF_TIER = PLAN.tierOfGroup.XR as string
 
 function lecture(title: string, body: string): string {
   return `---\ntitle: ${JSON.stringify(title)}\n---\n\n# ${title}\n\n${body}\n`
@@ -308,14 +308,14 @@ function makeSite(): { docs: string } {
     'concepts/staff-c.md',
     concept('staff-c', {
       term: 'Staff Gamma',
-      groups: ['LR'],
+      groups: ['XR'],
       related: 'related:\n  - { slug: auth-b, rel: contrast }\n  - { slug: pub-z, rel: special-case }',
       body: 'Gamma text uses [Beta](concept:auth-b) and [Alpha](concept:pub-a).',
     }),
   )
   put('g01/L01.md', lecture('Public lecture', '## Intro\n\nUses [alpha](concept:pub-a) twice: [alpha](concept:pub-a).\n\n### Detail\n\nText.'))
   put('g05/L01.md', lecture('Auth lecture', '## Part\n\nSee [alpha](concept:pub-a) and [beta](concept:auth-b).'))
-  put('lr/L01.md', lecture('Staff lecture', '## Secret\n\nSee [gamma](concept:staff-c). RESTRICTED-STAFF-SECTION-TEXT-12345.'))
+  put('xr/L01.md', lecture('Staff lecture', '## Secret\n\nSee [gamma](concept:staff-c). RESTRICTED-STAFF-SECTION-TEXT-12345.'))
   return { docs }
 }
 
@@ -360,7 +360,7 @@ describe('tier-bounded neighbourhood and page panels', () => {
     // the staff page sees everything below it, grouped in the fixed role order
     const staff = conceptPanelsOf(graph, 'staff-c', STAFF_TIER)
     expect(staff.related.map((g) => g.role)).toEqual(['contrast', 'generalization'])
-    expect(staff.lectures.map((l) => l.id)).toEqual(['LR-L01'])
+    expect(staff.lectures.map((l) => l.id)).toEqual(['XR-L01'])
 
     // a concept nobody relates to and nobody cites has three empty panels
     expect(conceptPanelsOf(graph, 'nope', 'public')).toEqual({ related: [], backlinks: [], lectures: [] })
@@ -468,7 +468,7 @@ describe('per-tier tool files', () => {
     expect(pub.concepts[1]!.backlinks).toEqual(['pub-a'])
 
     const publicText = [files.get('tools/concepts.json'), files.get('tools/lectures.json')].join('\n')
-    expect(publicText).not.toMatch(/auth-b|Auth Beta|staff-c|Staff Gamma|G05-L01|LR-L01|Auth lecture|Staff lecture|RESTRICTED-STAFF-SECTION-TEXT/)
+    expect(publicText).not.toMatch(/auth-b|Auth Beta|staff-c|Staff Gamma|G05-L01|XR-L01|Auth lecture|Staff lecture|RESTRICTED-STAFF-SECTION-TEXT/)
 
     const auth = JSON.parse(files.get('_access/authenticated/tools/concepts.json') as string) as ToolConceptsFile
     expect(auth.tier).toBe('authenticated')
@@ -479,7 +479,7 @@ describe('per-tier tool files', () => {
       backlinks: [],
       lectures: [{ route: '/g05/L01', id: 'G05-L01', title: 'Auth lecture', count: 1 }],
     })
-    expect(files.get('_access/authenticated/tools/concepts.json')).not.toMatch(/staff-c|Staff Gamma|LR-L01/)
+    expect(files.get('_access/authenticated/tools/concepts.json')).not.toMatch(/staff-c|Staff Gamma|XR-L01/)
 
     const staff = JSON.parse(files.get(`_access/${STAFF_TIER}/tools/concepts.json`) as string) as ToolConceptsFile
     expect(staff.concepts.map((c) => c.slug)).toEqual(['staff-c'])
@@ -498,7 +498,7 @@ describe('per-tier tool files', () => {
 
   it('without a restricted tier everything is inline: one tier, files under tools/, nothing under _access', async () => {
     const { docs } = makeSite()
-    const plan = resolveAccess({ access: { default: 'authenticated', enforcement: 'gateway' }, groupIds: ['G01', 'G05', 'LR'] })
+    const plan = resolveAccess({ access: { default: 'authenticated', enforcement: 'gateway' }, groupIds: ['G01', 'G05', 'XR'] })
     const content = contentForDocsRoot(docs)
     const records = loadConceptRecords({ content, accessPlan: plan, builtGroupIds: new Set(GROUPS.map((g) => g.id)), includeDrafts: false, isDev: false })
     const lectures = scanLectureFiles({ content, groups: GROUPS, accessPlan: plan })

@@ -4,6 +4,7 @@
  */
 import type { CompanionPromptsFile } from '../../prompts/companion.ts'
 import { request } from './http'
+import { currentLang, translate } from '../../i18n/index.ts'
 
 const base = (): string => ['/__lecture', '/api'].join('')
 
@@ -221,6 +222,17 @@ export async function saveToolSwitches(
   sw: { engine: Record<string, boolean>; servers: Record<string, { enabled: boolean; tools: Record<string, boolean> }> },
 ): Promise<{ ok: true; tools: ToolsPayload } | { ok: false; error: string }> {
   const r = await post('/tools', token, sw)
-  if (!r.ok || !r.data) return { ok: false, error: r.data && typeof r.data.error === 'string' ? r.data.error : r.status ? `HTTP ${r.status}` : 'network' }
+  if (!r.ok || !r.data) {
+    const error = r.data && typeof r.data.error === 'string' ? r.data.error : r.status === 409 ? demoReadOnlyHint() : r.status ? `HTTP ${r.status}` : 'network'
+    return { ok: false, error }
+  }
   return { ok: true, tools: r.data as unknown as ToolsPayload }
+}
+
+/**
+ * S6 decision B: the dev server answers 409 to every content write while the site shows the engine's demo content
+ * (no content folder of its own yet). Shown in the save status instead of a bare "HTTP 409".
+ */
+export function demoReadOnlyHint(): string {
+  return translate(currentLang(), 'dsh.demoReadOnly')
 }

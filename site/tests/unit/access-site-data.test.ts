@@ -71,8 +71,8 @@ const GROUPS: GroupDir[] = [
   { id: 'G01', dir: 'g01' },
   { id: 'G02', dir: 'g02' },
   { id: 'G03', dir: 'g03' },
-  { id: 'LR', dir: 'lr' },
-  { id: 'EX', dir: 'examples/g01' },
+  { id: 'XR', dir: 'xr' },
+  { id: 'EX', dir: 'courses/g01' },
 ]
 
 function splitOptions(tiers: Record<string, string>, inlineTier: string): SplitOptions {
@@ -81,7 +81,7 @@ function splitOptions(tiers: Record<string, string>, inlineTier: string): SplitO
 
 describe('splitSiteData / mergeSiteData', () => {
   const site = makeSite(GROUPS)
-  const tiers = { G02: 'authenticated', G03: 'grp-aaaaaaaa', LR: 'authenticated' }
+  const tiers = { G02: 'authenticated', G03: 'grp-aaaaaaaa', XR: 'authenticated' }
 
   it('the inline part holds only inline-tier groups in every place; totals are those of the inline groups', () => {
     const { inline, slices } = splitSiteData(site, splitOptions(tiers, 'public'))
@@ -90,16 +90,16 @@ describe('splitSiteData / mergeSiteData', () => {
     // real sidebars only for inline groups; restricted groups keep their key with an empty placeholder (no names)
     const realKeys = (sb: object) => Object.entries(sb).filter(([, v]) => !isSidebarPlaceholder(v)).map(([k]) => k)
     const placeholderKeys = (sb: object) => Object.entries(sb).filter(([, v]) => isSidebarPlaceholder(v)).map(([k]) => k)
-    expect(realKeys(theme.sidebar as object)).toEqual(['/g01/', '/examples/g01/'])
-    expect(placeholderKeys(theme.sidebar as object).sort()).toEqual(['/g02/', '/g03/', '/lr/'])
+    expect(realKeys(theme.sidebar as object)).toEqual(['/g01/', '/courses/g01/'])
+    expect(placeholderKeys(theme.sidebar as object).sort()).toEqual(['/g02/', '/g03/', '/xr/'])
     expect(((theme.nav as Array<{ items?: unknown[] }>)[1] as { items: unknown[] }).items).toHaveLength(2)
     expect(theme.totals).toEqual({ lectures: 3 + 7, charts: 0 + 20 })
     const en = (inline.locales?.en as { themeConfig: Record<string, unknown> }).themeConfig
-    expect(realKeys(en.sidebar as object)).toEqual(['/en/g01/', '/en/examples/g01/'])
-    expect(placeholderKeys(en.sidebar as object).sort()).toEqual(['/en/g02/', '/en/g03/', '/en/lr/'])
-    expect(Object.keys(en.i18nPages as object)).toEqual(['/g01/L01', '/g01/L02', '/examples/g01/L01', '/examples/g01/L02'])
+    expect(realKeys(en.sidebar as object)).toEqual(['/en/g01/', '/en/courses/g01/'])
+    expect(placeholderKeys(en.sidebar as object).sort()).toEqual(['/en/g02/', '/en/g03/', '/en/xr/'])
+    expect(Object.keys(en.i18nPages as object)).toEqual(['/g01/L01', '/g01/L02', '/courses/g01/L01', '/courses/g01/L02'])
     expect(Object.keys(slices).sort()).toEqual(['authenticated', 'grp-aaaaaaaa'])
-    expect(slices.authenticated?.groups.map((p) => (p.value as { id: string }).id)).toEqual(['G02', 'LR'])
+    expect(slices.authenticated?.groups.map((p) => (p.value as { id: string }).id)).toEqual(['G02', 'XR'])
     expect(slices.authenticated?.totals).toEqual({ lectures: 4 + 6, charts: 5 + 15 })
     // untouched keys survive
     expect(theme.siteMeta).toEqual({ name: 'Site' })
@@ -110,15 +110,15 @@ describe('splitSiteData / mergeSiteData', () => {
   it('nothing restricted inline: names of restricted groups appear nowhere in the inline part (only placeholder keys)', () => {
     const { inline, slices } = splitSiteData(site, splitOptions(tiers, 'public'))
     const text = JSON.stringify(inline)
-    for (const id of ['G02', 'G03', 'LR']) expect(text, id).not.toMatch(new RegExp(`${id}(?![0-9])`))
+    for (const id of ['G02', 'G03', 'XR']) expect(text, id).not.toMatch(new RegExp(`${id}(?![0-9])`))
     for (const name of Object.values(slices).flatMap((s) => namesOfSiteData(s))) expect(text, name).not.toContain(name)
     // a restricted folder path may only appear as a sidebar key whose value is the empty placeholder
     const sidebarOf = (t: unknown) => ((t as { sidebar?: Record<string, unknown> } | undefined)?.sidebar ?? {})
     const themes = [inline.themeConfig, ...Object.values(inline.locales ?? {}).map((l) => (l as { themeConfig?: unknown }).themeConfig)].filter((t) => t !== undefined)
-    for (const t of themes) for (const [k, v] of Object.entries(sidebarOf(t))) if (/\/(g02|g03|lr)\/$/.test(k)) expect(isSidebarPlaceholder(v), k).toBe(true)
+    for (const t of themes) for (const [k, v] of Object.entries(sidebarOf(t))) if (/\/(g02|g03|xr)\/$/.test(k)) expect(isSidebarPlaceholder(v), k).toBe(true)
     const withoutSidebars = JSON.stringify(themes.map((t) => ({ ...(t as object), sidebar: undefined })))
     expect(withoutSidebars).not.toContain('/g02/')
-    expect(withoutSidebars).not.toContain('/en/lr/')
+    expect(withoutSidebars).not.toContain('/en/xr/')
   })
 
   it('the sidebar placeholder is what VitePress needs to lay out a sidebar (non-empty array) and holds no text', () => {
@@ -148,13 +148,13 @@ describe('splitSiteData / mergeSiteData', () => {
     const auth = slices.authenticated as TierSlice
     const merged = mergeSiteData(inline, [auth])
     const theme = merged.themeConfig as { groups: Array<{ id: string }>; totals: { lectures: number } }
-    expect(theme.groups.map((g) => g.id)).toEqual(['G01', 'G02', 'LR', 'EX'])
+    expect(theme.groups.map((g) => g.id)).toEqual(['G01', 'G02', 'XR', 'EX'])
     expect(theme.totals.lectures).toBe(3 + 4 + 6 + 7)
     const nav = ((merged.themeConfig as { nav: Array<{ items?: Array<{ link: string }> }> }).nav[1] as { items: Array<{ link: string }> }).items
-    expect(nav.map((i) => i.link)).toEqual(['/g01/', '/g02/', '/lr/', '/examples/g01/'])
+    expect(nav.map((i) => i.link)).toEqual(['/g01/', '/g02/', '/xr/', '/courses/g01/'])
     const en = (merged.locales?.en as { themeConfig: { sidebar: object; i18nPages: object } }).themeConfig
     const realEn = Object.entries(en.sidebar).filter(([, v]) => !isSidebarPlaceholder(v)).map(([k]) => k)
-    expect(realEn.sort()).toEqual(['/en/examples/g01/', '/en/g01/', '/en/g02/', '/en/lr/'])
+    expect(realEn.sort()).toEqual(['/en/courses/g01/', '/en/g01/', '/en/g02/', '/en/xr/'])
     // the unreadable tier keeps its placeholder: still no names of it
     expect(isSidebarPlaceholder((en.sidebar as Record<string, unknown>)['/en/g03/'])).toBe(true)
     expect(Object.keys(en.i18nPages)).toHaveLength(8)
@@ -220,16 +220,16 @@ describe('splitSiteData / mergeSiteData', () => {
 
 describe('graph split', () => {
   const node = (nodeId: string, groupId: string | null, lectureId: string | null = null): GraphNodeLike => ({ nodeId, groupId, lectureId, lecturePath: lectureId ? `/${(groupId ?? '').toLowerCase()}/${lectureId.split('-')[1]}` : null })
-  const nodes = [node('a', 'G01', 'G01-L01'), node('b', 'G02', 'G02-L01'), node('c', 'G03', 'G03-L07'), node('d', '', null), node('e', null, 'LR-L03'), node('f', 'G99', 'G99-L01')]
+  const nodes = [node('a', 'G01', 'G01-L01'), node('b', 'G02', 'G02-L01'), node('c', 'G03', 'G03-L07'), node('d', '', null), node('e', null, 'XR-L03'), node('f', 'G99', 'G99-L01')]
 
   it('groupIdOfGraphNode: groupId, else the lectureId prefix, else null', () => {
     expect(groupIdOfGraphNode(nodes[0] as GraphNodeLike)).toBe('G01')
     expect(groupIdOfGraphNode(nodes[3] as GraphNodeLike)).toBeNull()
-    expect(groupIdOfGraphNode(nodes[4] as GraphNodeLike)).toBe('LR')
+    expect(groupIdOfGraphNode(nodes[4] as GraphNodeLike)).toBe('XR')
   })
 
   it('splits by tier; nodes without a group stay inline; groups not built are dropped; merging gives back all kept nodes', () => {
-    const plan = resolveAccess({ access: { groups: { G02: { read: 'authenticated' }, G03: { read: ['staff'] } } }, groupIds: ['G01', 'G02', 'G03', 'LR'], buildGroups: ['G01', 'G02', 'G03'] })
+    const plan = resolveAccess({ access: { groups: { G02: { read: 'authenticated' }, G03: { read: ['staff'] } } }, groupIds: ['G01', 'G02', 'G03', 'XR'], buildGroups: ['G01', 'G02', 'G03'] })
     const g = splitGraph(nodes, (id) => lookupTier(plan, id), plan.inlineTier)
     expect(g.inline.map((n) => n.nodeId)).toEqual(['a', 'd'])
     expect(g.tiers.authenticated?.map((n) => n.nodeId)).toEqual(['b'])
@@ -240,7 +240,7 @@ describe('graph split', () => {
   })
 
   it('with every tier readable the merge has exactly the nodes of the original (no build limit)', () => {
-    const plan = resolveAccess({ access: { groups: { G02: { read: 'authenticated' }, G03: { read: ['staff'] } } }, groupIds: ['G01', 'G02', 'G03', 'LR', 'G99'] })
+    const plan = resolveAccess({ access: { groups: { G02: { read: 'authenticated' }, G03: { read: ['staff'] } } }, groupIds: ['G01', 'G02', 'G03', 'XR', 'G99'] })
     const g = splitGraph(nodes, (id) => lookupTier(plan, id), plan.inlineTier)
     expect(g.dropped).toEqual([])
     expect(mergeGraph(g.inline, Object.values(g.tiers)).map((n) => n.nodeId).sort()).toEqual(nodes.map((n) => n.nodeId).sort())
@@ -252,7 +252,7 @@ describe('lecture catalog split (remote_server.py reads the inline copy from the
     { id: 'G01-L01', group: 'G01', title: 'a' },
     { id: 'G02-L03', group: 'G02', title: 'b' },
     { id: 'G03-L07', title: 'c' },
-    { id: 'LR-L01', group: 'LR', title: 'd' },
+    { id: 'XR-L01', group: 'XR', title: 'd' },
     { title: 'no id' },
   ]
 
@@ -263,7 +263,7 @@ describe('lecture catalog split (remote_server.py reads the inline copy from the
   })
 
   it('splits by tier like the graph; entries without a group stay inline; groups not built are dropped', () => {
-    const plan = resolveAccess({ access: { groups: { G02: { read: 'authenticated' }, G03: { read: ['staff'] } } }, groupIds: ['G01', 'G02', 'G03', 'LR'], buildGroups: ['G01', 'G02', 'G03'] })
+    const plan = resolveAccess({ access: { groups: { G02: { read: 'authenticated' }, G03: { read: ['staff'] } } }, groupIds: ['G01', 'G02', 'G03', 'XR'], buildGroups: ['G01', 'G02', 'G03'] })
     const c = splitCatalog(items, (id) => lookupTier(plan, id), plan.inlineTier)
     expect(c.inline.map((i) => i.title)).toEqual(['a', 'no id'])
     expect(c.tiers.authenticated?.map((i) => i.title)).toEqual(['b'])
@@ -272,7 +272,7 @@ describe('lecture catalog split (remote_server.py reads the inline copy from the
   })
 
   it('nothing restricted: every entry stays inline (the file is left untouched by the build)', () => {
-    const plan = resolveAccess({ access: { default: 'authenticated', enforcement: 'gateway' }, groupIds: ['G01', 'G02', 'G03', 'LR'] })
+    const plan = resolveAccess({ access: { default: 'authenticated', enforcement: 'gateway' }, groupIds: ['G01', 'G02', 'G03', 'XR'] })
     const c = splitCatalog(items, (id) => lookupTier(plan, id), plan.inlineTier)
     expect(c.inline).toHaveLength(items.length)
     expect(c.tiers).toEqual({})

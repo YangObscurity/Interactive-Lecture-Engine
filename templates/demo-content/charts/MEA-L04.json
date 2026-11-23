@@ -1,0 +1,6 @@
+{
+  "c1": {
+    "type": "echarts",
+    "code": "{\n  \"title\": {\n    \"text\": \"两组数据，平均值相同\",\n    \"left\": 8\n  },\n  \"tooltip\": {\n    \"trigger\": \"axis\"\n  },\n  \"legend\": {\n    \"bottom\": 0\n  },\n  \"grid\": {\n    \"bottom\": 64\n  },\n  \"xAxis\": {\n    \"type\": \"category\",\n    \"data\": [\n      \"1\",\n      \"2\",\n      \"3\",\n      \"4\",\n      \"5\"\n    ]\n  },\n  \"yAxis\": {\n    \"type\": \"value\"\n  },\n  \"series\": [\n    {\n      \"name\": \"A\",\n      \"type\": \"line\",\n      \"data\": [\n        10,\n        10,\n        10,\n        10,\n        10\n      ]\n    },\n    {\n      \"name\": \"B\",\n      \"type\": \"line\",\n      \"data\": [\n        6,\n        14,\n        8,\n        12,\n        10\n      ]\n    }\n  ]\n}"
+  }
+}

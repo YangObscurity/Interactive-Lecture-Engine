@@ -102,7 +102,7 @@ function lastSegment(dir: string): string {
   return dir.split('/').filter(Boolean).pop() ?? ''
 }
 
-/** `lectureIdOf('examples/g01', 3)` -> `g01-l03`. */
+/** `lectureIdOf('courses/g01', 3)` -> `g01-l03`. */
 export function lectureIdOf(dir: string, n: number): string {
   const r = parseLecture(`/${dir}/L${n}`)
   return (r ? r.lectureId : `${lastSegment(dir)}-L${String(n).padStart(2, '0')}`).toLowerCase()
@@ -126,7 +126,7 @@ export function stripLectureNumber(title: string): string {
 
 /**
  * Lecture id a `requires` entry points at, or null when the entry is not a lecture reference. Accepted forms:
- * `g05/L18` and `/g05/L18` (also with nested directories: `examples/g01/L01`), `L18` (a lecture of the same group),
+ * `g05/L18` and `/g05/L18` (also with nested directories: `courses/g01/L01`), `L18` (a lecture of the same group),
  * `g05-L18` (a lecture id).
  */
 export function resolveRequire(ref: string, ownDir: string): { id: string; group: string } | null {

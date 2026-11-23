@@ -7,15 +7,15 @@
  *   the contract (FE-038); tables follow the spec board (14.5px / 1.7, maths cells 2.0 or prose
  *   line-height for tall maths); reader font step scales the box;
  * - debug hook switches theme / tint at runtime;
- * - fonts: reader downloads no webfont; datasheet cold load of a G05 lecture is measured against the
+ * - fonts: reader downloads no webfont; datasheet cold load of a demo lecture is measured against the
  *   3 MB woff2 regression guard (user decision 2026-11-17, replaces the 600 KB budget of plan §4).
  */
 import type { Page } from '@playwright/test'
 import { test, expect, gotoAndSettle } from './fixtures'
 import { BG, expectThemeActive, lecVar, useTheme, type ThemeId } from './theme-helpers'
 
-const MATH_LECTURE = '/g01/L01' // inline maths, tables, ::: details
-const G05 = '/g05/L19'
+const MATH_LECTURE = '/mea/L04' // inline maths, a table, ::: details (demo content)
+const CHART_LECTURE = '/mea/L03' // demo lecture with a chart and a figure
 const FONT_BUDGET = 3 * 1024 * 1024 // regression guard; see the datasheet budget test below
 
 async function metrics(page: Page) {
@@ -42,14 +42,20 @@ async function metrics(page: Page) {
 }
 
 test.describe('theme packs', () => {
+  // the first-paint script and the DOMContentLoaded checks need the server-rendered page of the build: the dev server sends an empty
+  // #app shell and VitePress injects head scripts from the client, after DOMContentLoaded
+  const SSR_ONLY = 'built site only: the dev server does not server-render pages, so the first-paint script is not in the HTML and nothing is applied at DOMContentLoaded'
+
   test('SSR html carries the first-paint script in <head>', async ({ request }) => {
-    const html = await (await request.get(G05)).text()
+    test.skip(test.info().project.name === 'dev', SSR_ONLY)
+    const html = await (await request.get(CHART_LECTURE)).text()
     const head = html.slice(0, html.indexOf('</head>'))
     expect(head).toContain('id="lecture-theme-prefs"')
     expect(head).toContain('data-lec-theme')
   })
 
   test('stored prefs apply before hydration, without hydration warnings', async ({ page, consoleErrors, pageErrors }) => {
+    test.skip(test.info().project.name === 'dev', SSR_ONLY)
     const warnings: string[] = []
     page.on('console', (m) => {
       if (/hydration/i.test(m.text())) warnings.push(m.text())
@@ -74,6 +80,7 @@ test.describe('theme packs', () => {
   })
 
   test('custom tint, imported theme layer and group-desc default apply at DOMContentLoaded without flash', async ({ page, consoleErrors, pageErrors }) => {
+    test.skip(test.info().project.name === 'dev', SSR_ONLY)
     const warnings: string[] = []
     page.on('console', (m) => {
       if (/hydration/i.test(m.text())) warnings.push(m.text())
@@ -94,7 +101,7 @@ test.describe('theme packs', () => {
         }
       })
     })
-    await gotoAndSettle(page, '/g05/')
+    await gotoAndSettle(page, '/mea/')
     const fp = await page.evaluate(
       () =>
         (window as unknown as {
@@ -106,7 +113,7 @@ test.describe('theme packs', () => {
     expect(fp.dangerStyle.toUpperCase()).toBe('#991B1B')
     expect(fp.descAttr).toBe('closed')
     expect((await lecVar(page, '--lec-bg')).toUpperCase()).toBe(fp.bgStyle.toUpperCase())
-    await page.locator('.gp-lanes [data-lecture="g05-l19"]').dblclick()
+    await page.locator('.gp-lanes [data-lecture="mea-l04"]').dblclick()
     await expect(page.locator('.gp-p-desc details')).toHaveJSProperty('open', false)
     expect(warnings).toEqual([])
     expect(consoleErrors.filter((t) => /hydration/i.test(t))).toEqual([])
@@ -143,7 +150,7 @@ test.describe('theme packs', () => {
 
   test('debug hook switches theme and tint at runtime', async ({ page }) => {
     await useTheme(page, 'datasheet', 'light')
-    await gotoAndSettle(page, `${G05}?debug=1`)
+    await gotoAndSettle(page, `${CHART_LECTURE}?debug=1`)
     await expectThemeActive(page, 'datasheet', 'light')
     const run = (...args: unknown[]) =>
       page.evaluate((a) => (window as unknown as { __LECTURE_DEBUG__: { run: (...x: unknown[]) => unknown } }).__LECTURE_DEBUG__.run(...a), args)
@@ -163,6 +170,12 @@ test.describe('theme packs', () => {
 })
 
 test.describe('fonts', () => {
+  // The dev server serves every module as its own request: a cold lecture passes the default resource timing buffer
+  // (250 entries) before the faces load, and the woff2 entries would be dropped (0 files). Make room on both projects.
+  test.beforeEach(async ({ page }) => {
+    await page.addInitScript(() => performance.setResourceTimingBufferSize(10_000))
+  })
+
   async function woff2(page: Page) {
     return page.evaluate(() =>
       (performance.getEntriesByType('resource') as PerformanceResourceTiming[])
@@ -173,18 +186,18 @@ test.describe('fonts', () => {
 
   test('reader downloads no webfont (KaTeX maths faces excepted)', async ({ page }) => {
     await useTheme(page, 'reader', 'light')
-    await gotoAndSettle(page, G05)
+    await gotoAndSettle(page, CHART_LECTURE)
     await page.evaluate(() => document.fonts.ready)
     const files = (await woff2(page)).filter((f) => !/^KaTeX_/.test(f.name))
     expect(files).toEqual([])
   })
 
-  test('datasheet: cold load of a G05 lecture stays within the woff2 budget', async ({ page }, testInfo) => {
+  test('datasheet: cold load of a demo lecture stays within the woff2 budget', async ({ page }, testInfo) => {
     // Budget decided by the user 2026-11-17: keep the variable Noto faces (measured ≈ 2673 KB cold:
     // Serif ≈ 1696 + Sans ≈ 957 + Mono 21) and guard against regressions at 3 MB. The original 600 KB
     // budget was dropped; per-page subsetting stays an optional later optimisation.
     await useTheme(page, 'datasheet', 'light')
-    await gotoAndSettle(page, G05)
+    await gotoAndSettle(page, CHART_LECTURE)
     await page.evaluate(() => document.fonts.ready)
     const files = await woff2(page)
     const sum = (xs: typeof files) => xs.reduce((a, f) => a + f.body, 0)

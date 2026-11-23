@@ -428,7 +428,10 @@ export function layoutAtlas(input: LayoutInput): AtlasLayout {
   R.xi = R.xo = R.x0 = ox
   R.y = oy
 
-  const key = `${skin}|${width}x${height}|${vis.length}|${vis.map((n) => `${n.id}:${n.label}:${n.prog}:${n.y}`).join(',')}`
+  // the key changes whenever a label moves: the stage re-collects the canvas labels (and an untouched map refits) on a new key only.
+  // The x positions are part of it because measured text widths (a font slice that arrives late) can move labels sideways while
+  // the size and the rows stay the same; without them the label layer kept painting the old positions.
+  const key = `${skin}|${width}x${height}|${ox}|${vis.length}|${vis.map((n) => `${n.id}:${n.label}:${n.prog}:${n.y}:${n.x0}:${n.xi}:${n.xo}`).join(',')}`
   return {
     skin, metrics: M, width, height, ox, oy, X, vis, all, links,
     center: { x: round1(ox - M.rootW / 2), y: round1(oy - M.rootH / 2), w: M.rootW, h: M.rootH, pads },

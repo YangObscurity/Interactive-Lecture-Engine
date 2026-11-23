@@ -31,7 +31,7 @@ export interface GroupMetaLike {
 }
 
 export interface AuditFiguresInput {
-  paths: Pick<ContentPaths, 'figuresDir' | 'exampleFiguresDir' | 'lecturesDir' | 'docsRoot'>
+  paths: Pick<ContentPaths, 'figuresDir' | 'lecturesDir' | 'docsRoot'>
   groups: readonly GroupMetaLike[]
   localeKeys: readonly string[]
   accessPlan: AccessPlan
@@ -54,7 +54,7 @@ export function buildFigureAuditAndGallery(
   const warnings: string[] = []
 
   const groupMetaByDir = new Map<string, GroupMetaLike>()
-  const knownDirs = new Set<string>(['examples/g01'])
+  const knownDirs = new Set<string>()
   for (const g of input.groups) {
     groupMetaByDir.set(g.dir, g)
     knownDirs.add(g.dir)
@@ -182,24 +182,11 @@ export function buildFigureAuditAndGallery(
   }
 }
 
-function copyDirMissing(srcDir: string, destDir: string): void {
-  if (!fs.existsSync(srcDir)) return
-  fs.mkdirSync(destDir, { recursive: true })
-  for (const ent of fs.readdirSync(srcDir, { withFileTypes: true })) {
-    const s = path.join(srcDir, ent.name)
-    const d = path.join(destDir, ent.name)
-    if (ent.isDirectory()) copyDirMissing(s, d)
-    else if (!fs.existsSync(d)) fs.copyFileSync(s, d)
-  }
-}
-
-/** Write public and tier-scoped `figures-gallery.json` artifacts and ensure example figures exist in `outDir`. */
+/** Write public and tier-scoped `figures-gallery.json` artifacts to `outDir`. */
 export function emitFiguresDistArtifacts(
   outDir: string,
   input: AuditFiguresInput,
 ): AuditFiguresResult {
-  copyDirMissing(input.paths.exampleFiguresDir, path.join(outDir, 'figures'))
-
   const res = buildFigureAuditAndGallery(input, { verifyFiles: true, isBuild: true })
   if (!res.ok) {
     throw new Error(`[figures] build failed:\n  - ${res.errors.join('\n  - ')}`)

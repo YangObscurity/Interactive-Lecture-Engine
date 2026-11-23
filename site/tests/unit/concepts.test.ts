@@ -12,7 +12,8 @@ import zlib from 'node:zlib'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { EventEmitter } from 'node:events'
 import MarkdownIt from 'markdown-it'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterAll, afterEach, beforeAll, describe, expect, it, onTestFinished, vi } from 'vitest'
+import { useSyntheticGroups } from './demo-content'
 import { resolveBuildAccess } from '../../docs/.vitepress/access/build.mts'
 import { resolveConceptTier, canReaderTierReadConcept, conceptTierChunkPattern } from '../../docs/.vitepress/concepts/access.ts'
 import {
@@ -107,6 +108,14 @@ afterEach(() => {
     fs.rmSync(d, { recursive: true, force: true })
   }
 })
+
+// S6: the dev handlers and the context builder read the course groups of the active content root; the fixtures below
+// name synthetic groups, so make exactly those the groups (not the owner's content/ nor the engine's demo content).
+let restoreGroups: (() => void) | undefined
+beforeAll(() => {
+  restoreGroups = useSyntheticGroups(['G01', 'G06', 'G09', 'G12', 'XR'])
+})
+afterAll(() => restoreGroups?.())
 
 const GROUPS = [
   { id: 'G06', dir: 'g06', title: '公开课程', catSlot: 1 },
@@ -228,7 +237,7 @@ describe('concept access tier inheritance, hover JSON split & split search index
     // Multiple restricted groups -> strictest (`grp-*` > `authenticated`)
     expect(resolveConceptTier(['G09', 'G12'], plan, built)).toEqual({ tier: g12Tier, drop: false })
     // Outside built subset -> drop
-    expect(resolveConceptTier(['LR'], plan, built)).toEqual({ tier: 'public', drop: true })
+    expect(resolveConceptTier(['XR'], plan, built)).toEqual({ tier: 'public', drop: true })
 
     expect(canReaderTierReadConcept('public', 'public')).toBe(true)
     expect(canReaderTierReadConcept('public', 'authenticated')).toBe(false)
@@ -241,7 +250,7 @@ describe('concept access tier inheritance, hover JSON split & split search index
     const docs = makeTempDir('concepts-search-docs-')
     writeFile(docs, 'g06/L01.md', '---\ntitle: "第1讲 · 公开基础"\n---\n\n# 公开\n\n使用 [公开术语](concept:public-term)。\n')
     writeFile(docs, 'g09/L01.md', '---\ntitle: "第1讲 · 登录认证"\n---\n\n# 认证\n\n使用 [内部术语](concept:auth-term)。\n')
-    writeFile(docs, 'en/examples/g01/L01.md', '---\ntitle: "Example Lecture 1 · Demo"\n---\n\n# Demo\n\nEnglish text only.\n')
+    writeFile(docs, 'en/courses/g01/L01.md', '---\ntitle: "Example Lecture 1 · Demo"\n---\n\n# Demo\n\nEnglish text only.\n')
 
     writeFile(
       docs,
@@ -352,7 +361,6 @@ describe('concept access tier inheritance, hover JSON split & split search index
       labels: {
         lectureNo: (n) => `第${n}讲`,
         groupCount: (n) => `${n}`,
-        groupExamples: '示例',
         groupSite: '概览',
         groupConcepts: '概念',
         conceptBadge: '概念',
@@ -584,7 +592,7 @@ describe('AST source rewriter & dev middleware lifecycle (create -> preview -> c
     expect(delExec.status).toBe(200)
     expect(fs.existsSync(path.join(conceptsDir, 'control-lease.md'))).toBe(false)
     expect(fs.readFileSync(path.join(tmpDocs, 'g06/L01.md'), 'utf8')).toContain('此处讲解 控制租约 的概念。')
-  })
+  }, 20_000)
 })
 
 describe('local author write path: token, loopback, slug confinement, stale preview, atomic and confined writes', () => {
@@ -1068,36 +1076,43 @@ describe('WP-K3 concept drafting v2: lookup before writing, duplicate stop, occu
     expect(updatedPub.body).toContain('补充新讲义增加的失效恢复路径')
   })
 
-  it('measures real repository selection context size for 执行租约 in /lr/L01 under 24,000 chars', async () => {
+  it('measures the selection context size for 有效数字 in the demo lecture /mea/L02 under 24,000 chars', async () => {
     const { buildLectureContextForDraft } = await import('../../docs/.vitepress/concepts/devWorkflow.mts')
-    const { resolveContent } = await import('../../docs/.vitepress/content/paths.mts')
-    const realContent = resolveContent()
-    const dupCheck = await buildLectureContextForDraft(realContent, {
+    const { DEMO_ENV, setEnv, syncDemoDocs } = await import('./demo-content')
+    // S6: the engine's demo content (templates/demo-content), synced into a temporary docs folder; never the owner's lectures
+    const demo = await syncDemoDocs()
+    const restoreEnv = setEnv({ ...DEMO_ENV }) // the groups come from the active content root
+    onTestFinished(() => {
+      restoreEnv()
+      demo.cleanup()
+    })
+    const demoContent = demo.paths
+    const dupCheck = await buildLectureContextForDraft(demoContent, {
       mode: 'create',
-      lecturePath: '/lr/L01',
-      selectedText: '执行租约',
+      lecturePath: '/mea/L02',
+      selectedText: '有效数字',
     })
     expect(dupCheck.ok).toBe(false)
     if (!dupCheck.ok) {
       expect(dupCheck.errorCode).toBe('DUPLICATE')
-      expect(dupCheck.existing.slug).toBe('actuation-lease')
+      expect(dupCheck.existing.slug).toBe('significant-figures')
     }
 
-    const suppCtx = await buildLectureContextForDraft(realContent, {
+    const suppCtx = await buildLectureContextForDraft(demoContent, {
       mode: 'supplement',
-      targetSlug: 'actuation-lease',
-      lecturePath: '/lr/L01',
-      selectedText: '执行租约',
+      targetSlug: 'significant-figures',
+      lecturePath: '/mea/L02',
+      selectedText: '有效数字',
     })
     expect(suppCtx.ok).toBe(true)
     if (suppCtx.ok) {
       expect(suppCtx.contextChars).toBeLessThanOrEqual(24_000)
       const occ = suppCtx.context.occurrences as Array<{ lectureCode: string; link: string }>
       const nb = suppCtx.context.neighbours as Array<{ slug: string }>
-      expect(occ[0]?.lectureCode).toBe('LR-L01')
+      expect(occ[0]?.lectureCode).toBe('MEA-L02')
       expect(suppCtx.contextChars).toBeGreaterThan(500)
       console.warn(
-        `[k3-measure] selection="执行租约" lecture="/lr/L01" contextChars=${suppCtx.contextChars} occurrences=${occ.length} neighbours=${nb.length}`,
+        `[k3-measure] selection="有效数字" lecture="/mea/L02" contextChars=${suppCtx.contextChars} occurrences=${occ.length} neighbours=${nb.length}`,
       )
     }
   })

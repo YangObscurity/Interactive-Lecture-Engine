@@ -13,6 +13,10 @@
  * The backend is an in-spec stateful mock (`ProgressMock`) installed with `context.route`, which takes precedence
  * over the static fixtures of fixtures.ts for the progress endpoints. It keeps the records in memory, honours
  * `Idempotency-Key`, and can be switched to offline / reject / legacy per test. The real backend is never reached.
+ *
+ * S6: runs on the demo content (`npm run build:e2e`). The group is MEA (6 lectures). The build's progress seed
+ * (graph/notion_knowledge_graph.json of the demo) has MEA L01 and L02 completed and L03 in progress, so the tests
+ * change MEA L04-L06, which start unread.
  */
 import type { BrowserContext, Page, Route } from '@playwright/test'
 import { test, expect, gotoAndSettle } from './fixtures'
@@ -200,10 +204,14 @@ async function open(page: Page, mock: ProgressMock, urlPath: string, fetched = t
   await storeReady(page, fetched)
 }
 
-const GROUP = '/g01/'
+const GROUP = '/mea/'
+/** Row indexes of the MEA lectures the seed leaves unread (L04, L05, L06). */
+const L04 = 3
+const L05 = 4
+const L06 = 5
 // P4a WP-H3: the group page is two maps now; the lecture map's chips carry `data-status` (unread / reading / read) and a lecture is
 // marked through the relation panel (track it with a double click, then "标为已读") or through batch marking
-const row = (page: Page, i: number) => page.locator(`.gp-lanes [data-lecture="g01-l${String(i + 1).padStart(2, '0')}"]`)
+const row = (page: Page, i: number) => page.locator(`.gp-lanes [data-lecture="mea-l${String(i + 1).padStart(2, '0')}"]`)
 const rowStatus = row
 const markRead = async (page: Page, i: number) => {
   await row(page, i).dblclick()
@@ -231,15 +239,16 @@ test.describe('progress (stateful mock backend)', () => {
     )
     const mock = new ProgressMock()
     await open(page, mock, GROUP)
-    await expect(rowStatus(page, 0)).toHaveAttribute('data-status', 'unread')
+    await expect(rowStatus(page, 0)).toHaveAttribute('data-status', 'read') // seeded
+    await expect(rowStatus(page, L04)).toHaveAttribute('data-status', 'unread')
 
-    await markRead(page, 0)
-    await expect(rowStatus(page, 0)).toHaveAttribute('data-status', 'read')
+    await markRead(page, L04)
+    await expect(rowStatus(page, L04)).toHaveAttribute('data-status', 'read')
     await expect.poll(() => mock.writesTo('PATCH').length).toBe(1)
     await expect.poll(() => outbox(page)).toBe(0)
 
     const [patch] = mock.writesTo('PATCH')
-    expect(patch?.path).toMatch(/\/api\/db\/progress\/g01-l01$/)
+    expect(patch?.path).toMatch(/\/api\/db\/progress\/mea-l04$/)
     expect(patch?.headers['idempotency-key']).toBeTruthy()
     expect((patch?.body as { status?: string }).status).toBe(COMPLETED)
     expect(mock.writes).toHaveLength(1)
@@ -248,7 +257,7 @@ test.describe('progress (stateful mock backend)', () => {
 
     await page.reload({ waitUntil: 'domcontentloaded' })
     await storeReady(page)
-    await expect(rowStatus(page, 0)).toHaveAttribute('data-status', 'read')
+    await expect(rowStatus(page, L04)).toHaveAttribute('data-status', 'read')
     expect((await panel(page))?.counts.server).toBeGreaterThan(0)
     expect(mock.writes).toHaveLength(1) // a reload alone writes nothing
   })
@@ -258,16 +267,16 @@ test.describe('progress (stateful mock backend)', () => {
     await open(page, mock, GROUP)
 
     mock.mode = 'offline'
-    await markRead(page, 1)
-    await expect(rowStatus(page, 1)).toHaveAttribute('data-status', 'read') // immediate
+    await markRead(page, L05)
+    await expect(rowStatus(page, L05)).toHaveAttribute('data-status', 'read') // immediate
     await expect.poll(() => outbox(page)).toBe(1)
     await expect.poll(async () => (await panel(page))?.syncState).toBe('offline')
     expect(mock.records.size).toBe(0)
 
     mock.mode = 'normal'
     await expect.poll(() => outbox(page), { message: 'the outbox drains by itself', timeout: 30_000 }).toBe(0)
-    await expect(rowStatus(page, 1)).toHaveAttribute('data-status', 'read')
-    expect(mock.records.get('g01-l02')?.status).toBe(COMPLETED)
+    await expect(rowStatus(page, L05)).toHaveAttribute('data-status', 'read')
+    expect(mock.records.get('mea-l05')?.status).toBe(COMPLETED)
     // every attempt carried the same Idempotency-Key (one operation, retried)
     const keys = mock.writesTo('PATCH').map((r) => r.headers['idempotency-key'])
     expect(keys.length).toBeGreaterThanOrEqual(2)
@@ -279,56 +288,58 @@ test.describe('progress (stateful mock backend)', () => {
     await open(page, mock, GROUP)
 
     mock.mode = 'reject'
-    await markRead(page, 2)
+    await markRead(page, L06)
     await expect(page.locator('.ai-toast-item', { hasText: '未能保存' })).toBeVisible()
-    await expect(rowStatus(page, 2)).toHaveAttribute('data-status', 'unread')
+    await expect(rowStatus(page, L06)).toHaveAttribute('data-status', 'unread')
     await expect.poll(() => outbox(page)).toBe(0)
     expect(mock.writesTo('PATCH')).toHaveLength(1) // refused writes are not retried
     expect(mock.records.size).toBe(0)
   })
 
-  test('4. marking 5 lectures in batch sends one POST /batch', async ({ page }) => {
+  test('4. marking 4 lectures in batch sends one POST /batch', async ({ page }) => {
     const mock = new ProgressMock()
     await open(page, mock, GROUP)
     const total = await page.locator('.gp-lanes [data-lecture]').count()
-    expect(total).toBeGreaterThanOrEqual(5)
+    expect(total).toBe(6)
+    // MEA L01-L02 are read in the seed; L03 (reading) and L04-L06 (unread) are marked together
+    await expect(page.locator('[data-gp-spec="read"]')).toContainText(`2 / ${total}`)
 
     await page.locator('[data-gp-batch-toggle]').click()
-    for (let i = 0; i < 5; i++) await row(page, i).click()
+    for (let i = 2; i < 6; i++) await row(page, i).click()
     await page.locator('[data-gp-batch="read"]').click()
 
-    for (let i = 0; i < 5; i++) await expect(rowStatus(page, i)).toHaveAttribute('data-status', 'read')
-    await expect(page.locator('[data-gp-spec="read"]')).toContainText(`5 / ${total}`)
+    for (let i = 0; i < 6; i++) await expect(rowStatus(page, i)).toHaveAttribute('data-status', 'read')
+    await expect(page.locator('[data-gp-spec="read"]')).toContainText(`6 / ${total}`)
     await expect.poll(() => mock.writesTo('POST', '/batch').length).toBe(1)
     await expect.poll(() => outbox(page)).toBe(0)
     expect(mock.writes).toHaveLength(1) // no PATCH next to it
     const [batch] = mock.writes
     expect(batch?.headers['idempotency-key']).toMatch(/^batch-/)
     const items = (batch?.body as { items: Array<{ lecture_id: string; status: string }> }).items
-    expect(items.map((i) => i.lecture_id).sort()).toEqual(['g01-l01', 'g01-l02', 'g01-l03', 'g01-l04', 'g01-l05'])
+    expect(items.map((i) => i.lecture_id).sort()).toEqual(['mea-l03', 'mea-l04', 'mea-l05', 'mea-l06'])
     expect(new Set(items.map((i) => i.status))).toEqual(new Set([COMPLETED]))
   })
 
   test('5. V1 local progress that differs from the seed is queued and sent on the first load (V1 keys stay)', async ({ page }) => {
     const mock = new ProgressMock()
-    // V1 wrote its own records; g01 is "not started" everywhere in the seed, so this one differs
-    const v1 = { lecture_id: 'g01-l03', group_id: 'g01', status: COMPLETED, completed_at: '2026-10-20T10:00:00.000Z', updated_at: '2026-10-20T10:00:00.000Z', notion_node_id: null, notion_page_id: null }
+    // V1 wrote its own records; MEA L04 is "not started" in the seed, so this one differs
+    const v1 = { lecture_id: 'mea-l04', group_id: 'mea', status: COMPLETED, completed_at: '2026-10-20T10:00:00.000Z', updated_at: '2026-10-20T10:00:00.000Z', notion_node_id: null, notion_page_id: null }
     await page.addInitScript((rec) => {
-      localStorage.setItem('tut_neon_progress_g01-l03', JSON.stringify(rec))
-      localStorage.setItem('tut_neon_progress_all_map', JSON.stringify({ 'g01-l03': rec }))
+      localStorage.setItem('tut_neon_progress_mea-l04', JSON.stringify(rec))
+      localStorage.setItem('tut_neon_progress_all_map', JSON.stringify({ 'mea-l04': rec }))
     }, v1)
     await open(page, mock, GROUP)
 
     await expect.poll(() => mock.writesTo('PATCH').length).toBe(1)
     await expect.poll(() => outbox(page)).toBe(0)
     const [patch] = mock.writesTo('PATCH')
-    expect(patch?.path).toMatch(/\/api\/db\/progress\/g01-l03$/)
+    expect(patch?.path).toMatch(/\/api\/db\/progress\/mea-l04$/)
     const body = patch?.body as { status: string; updated_at: string }
     expect(body.status).toBe(COMPLETED)
     expect(body.updated_at).toBe(v1.updated_at) // stamped with the time V1 recorded
-    await expect(rowStatus(page, 2)).toHaveAttribute('data-status', 'read')
+    await expect(rowStatus(page, L04)).toHaveAttribute('data-status', 'read')
     // V1 keys are only read, never removed
-    const left = await page.evaluate(() => [localStorage.getItem('tut_neon_progress_g01-l03'), localStorage.getItem('tut_neon_progress_all_map')])
+    const left = await page.evaluate(() => [localStorage.getItem('tut_neon_progress_mea-l04'), localStorage.getItem('tut_neon_progress_all_map')])
     expect(left[0]).not.toBeNull()
     expect(left[1]).not.toBeNull()
   })
@@ -339,11 +350,11 @@ test.describe('progress (stateful mock backend)', () => {
     const b = await context.newPage()
     await gotoAndSettle(b, GROUP)
     await storeReady(b)
-    await expect(rowStatus(b, 3)).toHaveAttribute('data-status', 'unread')
+    await expect(rowStatus(b, L04)).toHaveAttribute('data-status', 'unread')
 
-    await markRead(page, 3)
-    await expect(rowStatus(page, 3)).toHaveAttribute('data-status', 'read')
-    await expect(rowStatus(b, 3)).toHaveAttribute('data-status', 'read')
+    await markRead(page, L04)
+    await expect(rowStatus(page, L04)).toHaveAttribute('data-status', 'read')
+    await expect(rowStatus(b, L04)).toHaveAttribute('data-status', 'read')
     await expect.poll(() => mock.writesTo('PATCH').length).toBe(1) // only the tab that changed it sends
     await b.close()
   })
@@ -351,7 +362,7 @@ test.describe('progress (stateful mock backend)', () => {
   test('7. legacy backend: home and group page render and reading falls back to one request per group', async ({ page, pageErrors }) => {
     const mock = new ProgressMock()
     mock.mode = 'legacy'
-    mock.seed('g01-l01', IN_PROGRESS)
+    mock.seed('mea-l04', IN_PROGRESS)
     await open(page, mock, '/')
     await expect(page.locator('#groups a[data-slot="GroupCard"]').first()).toBeVisible()
     expect((await panel(page))?.unfilteredGet).toBe(false)
@@ -359,12 +370,12 @@ test.describe('progress (stateful mock backend)', () => {
     const perGroup = mock.reads.filter((r) => r.query.startsWith('?group_id='))
     expect(unfiltered.length).toBeGreaterThanOrEqual(1)
     expect(perGroup.length).toBeGreaterThan(1)
-    expect(perGroup.some((r) => r.query === '?group_id=g01')).toBe(true)
+    expect(perGroup.some((r) => r.query === '?group_id=mea')).toBe(true)
 
     await page.goto(GROUP, { waitUntil: 'domcontentloaded' })
     await storeReady(page)
     await expect(page.locator('.gp-lanes [data-lecture]').first()).toBeVisible()
-    await expect(rowStatus(page, 0)).toHaveAttribute('data-status', 'reading') // came from the per-group read
+    await expect(rowStatus(page, L04)).toHaveAttribute('data-status', 'reading') // came from the per-group read
     expect(pageErrors).toEqual([])
   })
 
@@ -377,7 +388,7 @@ test.describe('progress (stateful mock backend)', () => {
     await open(page, mock, GROUP)
     await expect(page.locator('.gp-lanes [data-lecture]').first()).toBeVisible()
 
-    await gotoAndSettle(page, '/g01/L01')
+    await gotoAndSettle(page, '/mea/L04')
     await storeReady(page)
     const card = page.locator('.lec-progress-card')
     await expect(card).toBeVisible()

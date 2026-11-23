@@ -36,7 +36,6 @@ export const en: Messages = {
   'search.loadingIdle': 'Loading body index ({loaded} / {total} MB)…',
   'search.groupCount': '{count}',
   'search.lectureNo': 'L{n}',
-  'search.groupExamples': 'Examples',
   'search.groupSite': 'Overview',
   'search.groupConcepts': 'Concepts',
   'search.conceptBadge': 'Concept',

@@ -107,6 +107,13 @@ function requireContentMode(paths: ContentPaths): void {
   if (paths.mode !== 'content') {
     throw new ScaffoldError('No content folder is active (in-place mode). Run `npm run init` first, or set LECTURE_CONTENT_DIR.')
   }
+  if (paths.demo) {
+    // S6: the fallback demo content ships with the engine; authoring commands never write into it
+    throw new ScaffoldError(
+      `No content folder yet: the site shows the engine's demo content (${paths.root}). ` +
+        'Run `npm run init` first, or set LECTURE_CONTENT_DIR.',
+    )
+  }
 }
 
 export async function loadContentGroups(paths: ContentPaths): Promise<GroupLike[]> {

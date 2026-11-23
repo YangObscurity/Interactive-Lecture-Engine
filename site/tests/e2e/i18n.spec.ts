@@ -2,17 +2,16 @@
  * P2d i18n (plan_v2_p2d_i18n.md 3.4 / 3.6 / 5): the reader's experience of the English side.
  *
  *   1. /en/: <html lang="en">, English hero and nav, no reading mode (even when the flag is stored);
- *   2. /en/g01/: group page, "Translated 0 / M", every row links to the Chinese original and carries the badge
- *      (translated rows are covered by tests/unit/lang-links.test.ts: the only translated lecture is the example
- *      group, which is not in this site's course groups, so it has no group page);
- *   3. /en/examples/g01/L01: English lecture; hreflang only exists when the build had SITE_URL;
+ *   2. /en/mea/: group page of a group without translations (the demo MEA), "Translated 0 / M", every row links to
+ *      the Chinese original and carries the badge (the demo LOG group is the translated one);
+ *   3. /en/log/L01: English lecture (demo LOG L01); hreflang only exists when the build had SITE_URL;
  *   4. language switcher: target per page kind, real href, click stores the reader-language preference;
  *   5. hint on root-language lectures: untranslated / available variants, "Continue in Chinese";
  *   6. reading progress is shared between a lecture and its translation (prefix-free key);
  *   7. English search index: English words hit under /en/, Chinese words do not;
  *   8. no hydration warnings and no console errors on the three English pages.
  *
- * Needs the prod build (`npm run build`) of a site with English enabled and the example translation in place.
+ * Runs on the e2e demo build (`npm run build:e2e`, templates/demo-content): MEA has no translation, LOG has lectures/en/log/.
  */
 import type { Page } from '@playwright/test'
 import { test, expect, gotoAndSettle } from './fixtures'
@@ -64,32 +63,33 @@ test.describe('i18n: English home', () => {
 })
 
 test.describe('i18n: English group page', () => {
-  test('/en/g01/ counts translated lectures and links untranslated ones to the original', async ({ page }) => {
-    await gotoAndSettle(page, '/en/g01/')
+  test('/en/mea/ counts translated lectures and links untranslated ones to the original', async ({ page }) => {
+    await gotoAndSettle(page, '/en/mea/')
     await expect(page.locator('html')).toHaveAttribute('lang', 'en')
     const rows = page.locator('.gp-lanes a[data-lecture]')
     const m = await rows.count()
     expect(m).toBeGreaterThan(0)
     await expect(page.locator('.gp-translated')).toHaveText(`Translated 0 / ${m} lectures`)
     const hrefs = await rows.evaluateAll((els) => els.map((e) => e.getAttribute('href')))
-    for (const h of hrefs) expect(h).toMatch(/^\/g01\/L\d+$/)
+    for (const h of hrefs) expect(h).toMatch(/^\/mea\/L\d+$/)
     await expect(page.locator('.gp-lanes .gp-lang')).toHaveCount(m)
     await expect(page.locator('.gp-lanes .gp-lang').first()).toHaveText('中文')
     await expect(page.locator('.gp-lanes .gp-lang').first()).toHaveAttribute('title', /original/i)
     // the start button follows the same rule
-    await expect(page.locator('a[data-gp-cta="start"]')).toHaveAttribute('href', /^\/g01\/L\d+$/)
+    await expect(page.locator('a[data-gp-cta="start"]')).toHaveAttribute('href', /^\/mea\/L\d+$/)
   })
 
   test('the Chinese group page has no translated-count line and no badge', async ({ page }) => {
-    await gotoAndSettle(page, '/g01/')
+    await gotoAndSettle(page, '/mea/')
     await expect(page.locator('.gp-translated')).toHaveCount(0)
     await expect(page.locator('.gp-lang')).toHaveCount(0)
   })
 })
 
 test.describe('i18n: English lecture', () => {
-  test('/en/examples/g01/L01 is English; hreflang exists only when the build had SITE_URL', async ({ page, request }) => {
-    await gotoAndSettle(page, '/en/examples/g01/L01')
+  test('/en/log/L01 is English; hreflang exists only when the build had SITE_URL', async ({ page, request }) => {
+    test.skip(test.info().project.name === 'dev', 'built site only: sitemap.xml and the hreflang links are written by the build (the dev server answers /sitemap.xml with the SPA page, not 404)')
+    await gotoAndSettle(page, '/en/log/L01')
     await expect(page.locator('html')).toHaveAttribute('lang', 'en')
     expect((await page.locator('.vp-doc h1').first().innerText()).trim()).not.toMatch(CJK)
     // the export button needs root-language asset paths: not offered on translated pages
@@ -104,45 +104,46 @@ test.describe('i18n: English lecture', () => {
 test.describe('i18n: language switcher', () => {
   test('target depends on the page kind and is a real link', async ({ page }) => {
     // lecture with a translation -> the translation
-    await gotoAndSettle(page, '/examples/g01/L01')
+    await gotoAndSettle(page, '/log/L01')
     await expect(switchLink(page)).toHaveCount(1)
     await expect(switchLink(page)).toHaveText('English')
-    await expect(switchLink(page)).toHaveAttribute('href', '/en/examples/g01/L01')
+    await expect(switchLink(page)).toHaveAttribute('href', '/en/log/L01')
     // lecture without one -> the group page of that language
-    await gotoAndSettle(page, '/g01/L01')
-    await expect(switchLink(page)).toHaveAttribute('href', '/en/g01/')
+    await gotoAndSettle(page, '/mea/L01')
+    await expect(switchLink(page)).toHaveAttribute('href', '/en/mea/')
     // group page -> same group; home -> home
-    await gotoAndSettle(page, '/g01/')
-    await expect(switchLink(page)).toHaveAttribute('href', '/en/g01/')
+    await gotoAndSettle(page, '/mea/')
+    await expect(switchLink(page)).toHaveAttribute('href', '/en/mea/')
     await gotoAndSettle(page, '/')
     await expect(switchLink(page)).toHaveAttribute('href', '/en/')
     // back from English: translation -> original lecture, home -> home
-    await gotoAndSettle(page, '/en/examples/g01/L01')
+    await gotoAndSettle(page, '/en/log/L01')
     await expect(switchLink(page)).toHaveText('中文')
-    await expect(switchLink(page)).toHaveAttribute('href', '/examples/g01/L01')
+    await expect(switchLink(page)).toHaveAttribute('href', '/log/L01')
     await gotoAndSettle(page, '/en/')
     await expect(switchLink(page)).toHaveAttribute('href', '/')
   })
 
   test('the link is in the server-rendered HTML (works without JS)', async ({ request }) => {
-    const html = await (await request.get('/g01/L01')).text()
-    expect(html).toMatch(/class="lang-switch-link"[^>]*href="\/en\/g01\/"|href="\/en\/g01\/"[^>]*class="lang-switch-link"/)
+    test.skip(test.info().project.name === 'dev', 'built site only: the dev server does not server-render pages, its HTML has no language link')
+    const html = await (await request.get('/mea/L01')).text()
+    expect(html).toMatch(/class="lang-switch-link"[^>]*href="\/en\/mea\/"|href="\/en\/mea\/"[^>]*class="lang-switch-link"/)
   })
 
   test('clicking stores the reader-language preference', async ({ page }) => {
-    await gotoAndSettle(page, '/g01/L01')
+    await gotoAndSettle(page, '/mea/L01')
     expect(await pref(page)).toBeNull()
     await switchLink(page).click()
-    await expect(page).toHaveURL(/\/en\/g01\/$/)
+    await expect(page).toHaveURL(/\/en\/mea\/$/)
     expect(await pref(page)).toBe('en')
     await switchLink(page).click()
-    await expect(page).toHaveURL(/\/g01\/$/)
+    await expect(page).toHaveURL(/\/mea\/$/)
     await expect(page).not.toHaveURL(/\/en\//)
     expect(await pref(page)).toBe('zh-CN')
   })
 
   test('any English page stores the preference when it is shown', async ({ page }) => {
-    await gotoAndSettle(page, '/en/g01/')
+    await gotoAndSettle(page, '/en/mea/')
     await expect.poll(() => pref(page)).toBe('en')
   })
 })
@@ -150,12 +151,12 @@ test.describe('i18n: language switcher', () => {
 test.describe('i18n: hint on Chinese lectures', () => {
   test('untranslated lecture: note, link back to the English course page, "Continue in Chinese" is remembered', async ({ page }) => {
     await setPref(page, 'en')
-    await gotoAndSettle(page, '/g01/L01')
+    await gotoAndSettle(page, '/mea/L01')
     const hint = page.locator('aside.lang-hint')
     await expect(hint).toHaveAttribute('data-lang-hint', 'untranslated')
     await expect(hint).toHaveAttribute('lang', 'en')
     await expect(hint).toContainText('has not been translated into English yet')
-    await expect(hint.locator('a')).toHaveAttribute('href', '/en/g01/')
+    await expect(hint.locator('a')).toHaveAttribute('href', '/en/mea/')
     await expect(hint.locator('a')).toHaveText('Back to the English course page')
     await hint.getByRole('button', { name: 'Continue in Chinese' }).click()
     await expect(hint).toHaveCount(0)
@@ -167,30 +168,30 @@ test.describe('i18n: hint on Chinese lectures', () => {
 
   test('translated lecture: "available in English" with a link to it', async ({ page }) => {
     await setPref(page, 'en')
-    await gotoAndSettle(page, '/examples/g01/L01')
+    await gotoAndSettle(page, '/log/L01')
     const hint = page.locator('aside.lang-hint')
     await expect(hint).toHaveAttribute('data-lang-hint', 'available')
     await expect(hint).toContainText('This lecture is available in English.')
     await expect(hint.locator('a')).toHaveText('Read in English')
-    await expect(hint.locator('a')).toHaveAttribute('href', '/en/examples/g01/L01')
+    await expect(hint.locator('a')).toHaveAttribute('href', '/en/log/L01')
   })
 
   test('no note without a stored preference, on the group page or on English pages', async ({ page }) => {
-    await gotoAndSettle(page, '/g01/L01')
+    await gotoAndSettle(page, '/mea/L01')
     await expect(page.locator('aside.lang-hint')).toHaveCount(0)
     await setPref(page, 'en')
-    await gotoAndSettle(page, '/g01/')
+    await gotoAndSettle(page, '/mea/')
     await expect(page.locator('aside.lang-hint')).toHaveCount(0)
-    await gotoAndSettle(page, '/en/examples/g01/L01')
+    await gotoAndSettle(page, '/en/log/L01')
     await expect(page.locator('aside.lang-hint')).toHaveCount(0)
   })
 })
 
 test.describe('i18n: shared reading progress', () => {
-  test('scrolling /en/examples/g01/L01 records progress under the prefix-free path', async ({ page }) => {
+  test('scrolling /en/log/L01 records progress under the prefix-free path', async ({ page }) => {
     test.setTimeout(120_000)
     await page.setViewportSize({ width: 1280, height: 800 })
-    await gotoAndSettle(page, '/en/examples/g01/L01')
+    await gotoAndSettle(page, '/en/log/L01')
     await page.mouse.move(640, 400)
     const target = await page.evaluate(() => Math.round((document.documentElement.scrollHeight - innerHeight) * 0.5))
     for (let i = 0; i < 200; i++) {
@@ -200,7 +201,7 @@ test.describe('i18n: shared reading progress', () => {
     }
     await expect
       .poll(() => page.evaluate(() => Object.keys(JSON.parse(localStorage.getItem('lecture-read-pos') || '{}'))))
-      .toContain('/examples/g01/L01')
+      .toContain('/log/L01')
     const keys = await page.evaluate(() => Object.keys(JSON.parse(localStorage.getItem('lecture-read-pos') || '{}')))
     expect(keys.filter((k) => k.startsWith('/en'))).toEqual([])
   })
@@ -211,20 +212,20 @@ test.describe('i18n: English search', () => {
     await gotoAndSettle(page, '/en/')
     await page.locator('.VPNavBarSearch button').first().click()
     const input = page.locator('#lec-search-input')
-    await input.fill('resistor')
+    await input.fill('proposition')
     const hits = page.locator('.sp-res a.sp-hit')
     await expect(hits.first()).toBeVisible({ timeout: 20_000 })
     const hrefs = await hits.evaluateAll((els) => els.map((e) => e.getAttribute('href') ?? ''))
     expect(hrefs.length).toBeGreaterThan(0)
     for (const h of hrefs) expect(h).toMatch(/^\/en\//)
-    await input.fill('电阻')
+    await input.fill('命题')
     await expect(page.locator('.sp-res .sp-empty')).toBeVisible({ timeout: 20_000 })
     await expect(hits).toHaveCount(0)
   })
 })
 
 test.describe('i18n: clean loads', () => {
-  for (const url of ['/en/', '/en/g01/', '/en/examples/g01/L01']) {
+  for (const url of ['/en/', '/en/mea/', '/en/log/L01']) {
     test(`${url}: no hydration warnings, no console errors`, async ({ page, consoleErrors, pageErrors }) => {
       const warnings: string[] = []
       page.on('console', (m) => {

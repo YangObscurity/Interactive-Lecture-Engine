@@ -1,0 +1,86 @@
+{
+  "mea_units": {
+    "desc": "示例说明：量与单位。",
+    "diff": 1,
+    "min": 20,
+    "url": "https://example.com/demo/mea_units"
+  },
+  "mea_sigfigs": {
+    "desc": "示例说明：有效数字。",
+    "diff": 1,
+    "min": 25,
+    "url": "https://example.com/demo/mea_sigfigs"
+  },
+  "mea_uncert": {
+    "desc": "示例说明：误差与不确定度。",
+    "diff": 2,
+    "min": 30,
+    "url": "https://example.com/demo/mea_uncert"
+  },
+  "mea_spread": {
+    "desc": "示例说明：平均值与离散程度。",
+    "diff": 2,
+    "min": 30,
+    "url": "https://example.com/demo/mea_spread"
+  },
+  "mea_plots": {
+    "desc": "示例说明：读图与插值。",
+    "diff": 2,
+    "min": 25,
+    "url": "https://example.com/demo/mea_plots"
+  },
+  "mea_dims": {
+    "desc": "示例说明：量纲检查。",
+    "diff": 3,
+    "min": 20,
+    "url": "https://example.com/demo/mea_dims"
+  },
+  "log_truth": {
+    "desc": "示例说明：命题与真值表。",
+    "diff": 1,
+    "min": 20,
+    "url": "https://example.com/demo/log_truth"
+  },
+  "log_cond": {
+    "desc": "示例说明：条件语句与逆否。",
+    "diff": 2,
+    "min": 25,
+    "url": "https://example.com/demo/log_cond"
+  },
+  "log_proofs": {
+    "desc": "示例说明：从例子到证明。",
+    "diff": 3,
+    "min": 30,
+    "url": "https://example.com/demo/log_proofs"
+  },
+  "pln_split": {
+    "desc": "示例说明：拆分任务。",
+    "diff": 1,
+    "min": 20,
+    "url": "https://example.com/demo/pln_split"
+  },
+  "pln_crit": {
+    "desc": "示例说明：依赖与关键路径。",
+    "diff": 2,
+    "min": 30,
+    "url": "https://example.com/demo/pln_crit"
+  },
+  "pln_buffer": {
+    "desc": "示例说明：估算与缓冲。",
+    "diff": 3,
+    "min": 25,
+    "url": "https://example.com/demo/pln_buffer"
+  },
+  "dat_tidy": {
+    "desc": "示例说明：一行一条记录。",
+    "diff": 1,
+    "min": 20,
+    "url": "https://example.com/demo/dat_tidy"
+  },
+  "dat_group": {
+    "desc": "示例说明：汇总与分组。",
+    "diff": 2,
+    "min": 25,
+    "url": "https://example.com/demo/dat_group"
+  }
+}

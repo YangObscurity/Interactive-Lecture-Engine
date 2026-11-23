@@ -26,7 +26,7 @@ import { checkThemePacks } from '../../scripts/config/doctor.mts'
 
 const SITE = path.resolve(__dirname, '../..')
 const THEMES_DIR = path.join(SITE, 'docs/.vitepress/themes')
-const EXAMPLE_REL = 'docs/examples/themes/minimal-slot'
+const EXAMPLE_REL = 'tests/fixtures/theme-packs/minimal-slot'
 const EXTENSION = 'org.lecture-engine'
 
 const readJson = (file: string): Record<string, unknown> => JSON.parse(fs.readFileSync(file, 'utf8')) as Record<string, unknown>

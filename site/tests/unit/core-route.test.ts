@@ -21,8 +21,8 @@ describe('normalisePath', () => {
     ['/g05/L19?debug=1#sec', '/g05/L19'],
     ['/g01/', '/g01'],
     ['/g01/index.html', '/g01'],
-    ['/lr/', '/lr'],
-    ['/examples/g01/L01.html', '/examples/g01/L01'],
+    ['/xr/', '/xr'],
+    ['/courses/g01/L01.html', '/courses/g01/L01'],
     ['/docs/g05/L19.html', '/g05/L19', '/docs/'],
     ['/docs/', '/', '/docs/'],
     ['/Tutorial', '/', '/Tutorial'],
@@ -39,14 +39,14 @@ describe('isHome / isGroupIndex / isLecture', () => {
     { path: '/index.html', home: true, group: false, lecture: false },
     { path: '/g01/', home: false, group: true, lecture: false },
     { path: '/g01/index', home: false, group: true, lecture: false },
-    { path: '/lr/', home: false, group: true, lecture: false },
-    { path: '/examples/g01/', home: false, group: true, lecture: false },
+    { path: '/xr/', home: false, group: true, lecture: false },
+    { path: '/courses/g01/', home: false, group: true, lecture: false },
     { path: '/g05/L19', home: false, group: false, lecture: true },
     { path: '/g05/L19.html', home: false, group: false, lecture: true },
     { path: '/g05/L19/', home: false, group: false, lecture: true },
-    { path: '/lr/L53', home: false, group: false, lecture: true },
+    { path: '/xr/L53', home: false, group: false, lecture: true },
     { path: '/spi/L00', home: false, group: false, lecture: true },
-    { path: '/examples/g01/L01', home: false, group: false, lecture: true },
+    { path: '/courses/g01/L01', home: false, group: false, lecture: true },
     { path: '/g05/L19x', home: false, group: false, lecture: false },
     { path: '/L19', home: false, group: false, lecture: false },
     { path: '/g05/intro', home: false, group: false, lecture: false },
@@ -85,11 +85,11 @@ describe('parseLecture', () => {
     expect(r?.path).toBe('/G05/l19')
   })
   it('nested dirs: group = last segment, topSegment = first (V1 reading-progress group)', () => {
-    const r = parseLecture('/examples/g01/L01/')
-    expect(r).toMatchObject({ dir: 'examples/g01', group: 'g01', topSegment: 'examples', lectureId: 'g01-L01' })
+    const r = parseLecture('/courses/g01/L01/')
+    expect(r).toMatchObject({ dir: 'courses/g01', group: 'g01', topSegment: 'courses', lectureId: 'g01-L01' })
   })
   it('base path is stripped', () => {
-    expect(parseLecture('/docs/lr/L53.html', '/docs/')?.lectureId).toBe('lr-L53')
+    expect(parseLecture('/docs/xr/L53.html', '/docs/')?.lectureId).toBe('xr-L53')
   })
   it('rejects non-lecture paths', () => {
     for (const p of ['/', '/g01/', '/g05/L19x', '/L19', '/g05/notes', '/a b/L01', '/../L01']) {
@@ -126,26 +126,26 @@ describe('locale prefix (P2d)', () => {
 
   it('isGroupIndex / isLecture look behind the prefix', () => {
     expect(isGroupIndex('/en/g01/', '/', keys)).toBe(true)
-    expect(isGroupIndex('/en/examples/g01/index.html', '/', keys)).toBe(true)
+    expect(isGroupIndex('/en/courses/g01/index.html', '/', keys)).toBe(true)
     expect(isGroupIndex('/en/g01/L03', '/', keys)).toBe(false)
     expect(isLecture('/en/g01/L03.html', '/', keys)).toBe(true)
     expect(isLecture('/en/', '/', keys)).toBe(false)
   })
 
   it('parseLecture gives the same path for both languages and tags the locale', () => {
-    const zh = parseLecture('/examples/g01/L01', '/', keys)
-    const en = parseLecture('/en/examples/g01/L01.html', '/', keys)
+    const zh = parseLecture('/courses/g01/L01', '/', keys)
+    const en = parseLecture('/en/courses/g01/L01.html', '/', keys)
     expect(zh?.locale).toBeUndefined()
     expect(en?.locale).toBe('en')
-    expect(en?.path).toBe('/examples/g01/L01')
+    expect(en?.path).toBe('/courses/g01/L01')
     expect(en?.path).toBe(zh?.path)
-    expect(en).toMatchObject({ dir: 'examples/g01', group: 'g01', topSegment: 'examples', lectureId: 'g01-L01' })
+    expect(en).toMatchObject({ dir: 'courses/g01', group: 'g01', topSegment: 'courses', lectureId: 'g01-L01' })
     expect(en?.lectureId).toBe(zh?.lectureId)
   })
 
   it('base and locale prefix combine', () => {
-    const r = parseLecture('/docs/en/lr/L53.html', '/docs/', keys)
-    expect(r).toMatchObject({ locale: 'en', path: '/lr/L53', lectureId: 'lr-L53' })
+    const r = parseLecture('/docs/en/xr/L53.html', '/docs/', keys)
+    expect(r).toMatchObject({ locale: 'en', path: '/xr/L53', lectureId: 'xr-L53' })
     expect(isHome('/docs/en/', '/docs/', keys)).toBe(true)
   })
 

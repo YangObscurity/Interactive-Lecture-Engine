@@ -1,6 +1,6 @@
 /**
  * English group pages (/en/<dir>/): one page per resolved course group, `group` = the group's `dir`
- * (it may contain `/`, e.g. `examples/g01`). A group that has a real `docs/en/<dir>/index.md` keeps it.
+ * (it may contain `/`, e.g. `courses/g01`). A group that has a real `docs/en/<dir>/index.md` keeps it.
  * `title` / `description` are applied by `transformPageData` in config.v2.mts (frontmatter cannot use params).
  *
  * Another language adds its own copy of this folder (`docs/<localeKeyOf(lang)>/[group]/`) with `LANG`

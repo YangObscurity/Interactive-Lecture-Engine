@@ -1,7 +1,7 @@
 /**
  * WP-F1 owner additions (spec board 07 and the page chrome), both skins:
  *   1. a chart figure has the picture and the caption only: no type tag, no tool bar, no source button / "chart source" fold, no
- *      literal "&#" text; one enlarge icon that shows on hover only;
+ *      literal "&#" text; one enlarge icon that shows on hover only (the dev server adds the author's "chart source" fold, the build none);
  *   2. text inside charts cannot be selected, inline or in the viewer (computed `user-select: none`, and a drag selects nothing);
  *   3. the home group cards never show a horizontal scrollbar;
  *   4. the page scrollbar is thin, themed, and its thumb is hidden at idle (shown while scrolling or near the right edge).
@@ -11,7 +11,9 @@ import { test, expect, gotoAndSettle } from './fixtures'
 import { useTheme, type ThemeId } from './theme-helpers'
 
 const SKINS: ThemeId[] = ['reader', 'datasheet']
-const LECTURES = ['/lr/L06', '/g05/L10'] as const
+// S6: demo lectures with charts: MEA L05 (Mermaid, a figure pack figure, ECharts, WaveDrom), MEA L03 (ECharts next to
+// an SVG and a WebP figure of the figure pack)
+const LECTURES = ['/mea/L05', '/mea/L03'] as const
 
 interface Box {
   x: number
@@ -34,7 +36,17 @@ for (const theme of SKINS) {
         const figs = page.locator('figure.chart')
         const n = await figs.count()
         expect(n, `${path} has charts`).toBeGreaterThan(0)
-        await expect(page.locator('figure.chart .chart-tag, figure.chart .chart-tools, figure.chart details.chart-code')).toHaveCount(0)
+        await expect(page.locator('figure.chart .chart-tag, figure.chart .chart-tools')).toHaveCount(0)
+        // the "chart source" fold is the local author's tool: the dev server adds it (charts/dom.ts injectSource, DEV only),
+        // readers of the built site never get it
+        const folds = page.locator('figure.chart details.chart-code')
+        if (test.info().project.name === 'dev') {
+          const k = await folds.count()
+          expect(k, `${path}: dev shows the author's source fold`).toBeGreaterThan(0)
+          expect(k).toBeLessThanOrEqual(n)
+        } else {
+          await expect(folds).toHaveCount(0)
+        }
         await expect(page.locator('figure.chart button:not(.chart-enlarge)')).toHaveCount(0)
         const text = await page.locator('figure.chart').evaluateAll((els) => els.map((e) => (e as HTMLElement).innerText + ' ' + e.innerHTML.replace(/<[^>]*>/g, '')).join('\n'))
         expect(text, 'literal HTML entity text on a figure').not.toMatch(/&#\d+;?|&amp;#/)
@@ -128,7 +140,7 @@ for (const theme of SKINS) {
 
     test('page scrollbar: thin and themed, thumb hidden at idle, shown while scrolling and near the right edge, no layout shift', async ({ page }) => {
       test.setTimeout(120_000)
-      await gotoAndSettle(page, '/g05/L10')
+      await gotoAndSettle(page, '/mea/L04')
       const state = (): Promise<{ on: boolean; thumb: string; radius: string; width: string; clientWidth: number }> =>
         page.evaluate(() => {
           const t = getComputedStyle(document.documentElement, '::-webkit-scrollbar-thumb')

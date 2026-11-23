@@ -137,6 +137,7 @@ export function resolveDomPurifyFn(purifyModule: unknown, win: unknown): DomPuri
 export function sanitizeHtmlFailClosed(
   rawHtml: string,
   purify: DomPurifySanitizeFn | DomPurifyInstance | null,
+  config: Readonly<SanitizeConfig> = SANITIZE_CONFIG,
 ): string {
   if (typeof window === 'undefined' || !purify) {
     return `<pre class="ai-sanitize-fallback">${escapeHtml(rawHtml)}</pre>`
@@ -153,11 +154,11 @@ export function sanitizeHtmlFailClosed(
       return `<pre class="ai-sanitize-fallback">${escapeHtml(rawHtml)}</pre>`
     }
     return fn(rawHtml, {
-      USE_PROFILES: { ...(SANITIZE_CONFIG.USE_PROFILES ?? {}) },
-      ADD_TAGS: [...(SANITIZE_CONFIG.ADD_TAGS ?? [])],
-      ADD_ATTR: [...(SANITIZE_CONFIG.ADD_ATTR ?? [])],
-      FORBID_TAGS: [...(SANITIZE_CONFIG.FORBID_TAGS ?? [])],
-      FORBID_ATTR: [...(SANITIZE_CONFIG.FORBID_ATTR ?? [])],
+      USE_PROFILES: { ...(config.USE_PROFILES ?? {}) },
+      ADD_TAGS: [...(config.ADD_TAGS ?? [])],
+      ADD_ATTR: [...(config.ADD_ATTR ?? [])],
+      FORBID_TAGS: [...(config.FORBID_TAGS ?? [])],
+      FORBID_ATTR: [...(config.FORBID_ATTR ?? [])],
     })
   } catch {
     return `<pre class="ai-sanitize-fallback">${escapeHtml(rawHtml)}</pre>`

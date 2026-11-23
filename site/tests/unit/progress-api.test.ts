@@ -30,7 +30,7 @@ describe('wire conversion', () => {
       notionNodeId: 'n',
       notionPageId: 'p',
     })
-    expect(fromWireRecord({ lecture_id: 'lr-l03', group_id: 'LR', status: W.not_started })).toMatchObject({ groupId: 'lr', status: 'not_started', updatedAt: null, completedAt: null })
+    expect(fromWireRecord({ lecture_id: 'xr-l03', group_id: 'XR', status: W.not_started })).toMatchObject({ groupId: 'xr', status: 'not_started', updatedAt: null, completedAt: null })
     expect(fromWireRecord({ lecture_id: 'x-l1', status: 'unknown' as never })).toBeNull()
   })
 
@@ -93,9 +93,9 @@ describe('rest backend: reading', () => {
   })
 
   it('upper-case and duplicate group ids are normalised in the fallback', async () => {
-    const { backend, calls } = rest((req) => (req.url === '/api/db/progress' ? { status: 400 } : { status: 200, body: [] }), ['G01', 'g01', 'LR'])
+    const { backend, calls } = rest((req) => (req.url === '/api/db/progress' ? { status: 400 } : { status: 200, body: [] }), ['G01', 'g01', 'XR'])
     await backend.fetchAll()
-    expect(calls.slice(1).map((c) => c.url)).toEqual(['/api/db/progress?group_id=g01', '/api/db/progress?group_id=lr'])
+    expect(calls.slice(1).map((c) => c.url)).toEqual(['/api/db/progress?group_id=g01', '/api/db/progress?group_id=xr'])
   })
 
   it('a failing group request fails the read instead of silently dropping that group', async () => {

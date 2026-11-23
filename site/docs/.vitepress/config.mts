@@ -7,6 +7,7 @@ import { mathPlugin } from './math.mts'
 // ⚠️ 它只在 **dev** 生效；生产构建时其 apply='serve' 自会跳过，不影响静态产物。
 import { lectureExportPlugin } from './plugins/lectureExportPlugin.mjs'
 import { apiModePlugin } from './plugins/apiModePlugin.mjs'
+import { crossDriveFsPlugin } from './plugins/crossDriveFsPlugin.mts'
 import { v2ChromeStrings, v2Head, v2Home, v2Modules, v2IgnoreDeadLinks, v2Lang, v2LectureFallback, v2LocaleConfig, v2LocaleLinks, v2NavLabels, v2LocaleKeys, v2OtherLangs, v2ReadingModeHead, v2HomeMapHead, v2Search, v2SearchPlugin, v2ViteAlias, v2VitePlugins, v2WriteSearchDist, emitCompanionPromptsDist, withCategorySlots } from './config.v2.mts'
 import { FALLBACK_SITE_META, resolveGroups } from './groups-source.mts'
 import { assertSiteTexts, fillLecturesToken, listEmptyFields, loadSiteTexts, siteTextsProblems } from './site-texts.mts'
@@ -66,7 +67,7 @@ for (const e of listEmptyFields(siteTexts)) {
 
 /** P3b: tiers of this build (config block + LECTURE_AUDIENCE / LECTURE_BUILD_GROUPS / LECTURE_ACCESS_JSON); both guards run here. */
 const accessPlan = resolveBuildAccess(lectureConfig.access, GROUPS)
-const figureGroupDirs = Array.from(new Set([...GROUPS.map((g) => g.dir), 'examples/g01']))
+const figureGroupDirs = Array.from(new Set(GROUPS.map((g) => g.dir)))
 const groupIdByDir = new Map(GROUPS.map((g) => [g.dir, g.id]))
 const builtGroupIds = new Set(GROUPS.map((g) => g.id))
 
@@ -244,7 +245,7 @@ function countChartTypes(fullPath: string, out: ChartStats) {
 /**
  * 统计某组图表数量与类型分布。
  *
- * 参数是**组目录**（`dir`，如 `examples/g01`）而非组 id —— 因为判据来自
+ * 参数是**组目录**（`dir`，如 `courses/g01`）而非组 id —— 因为判据来自
  * 该目录下讲义正文里的 `data-lecture`，不再依赖组 id 的命名约定。
  * 读 sidecar JSON 而非手写数字，避免「写死的数字与实际不同步」。
  */
@@ -252,8 +253,6 @@ function scanCharts(dir: string) {
   const out: ChartStats = { total: 0, mermaid: 0, echarts: 0, wavedrom: 0 }
   const d = path.join(docsRoot, dir)
   if (!fs.existsSync(d)) return out // 目录不存在（引擎裸奔形态）→ 0，不报错
-
-  const exampleChartsRoot = contentPaths.exampleChartsDir
 
   for (const f of fs.readdirSync(d)) {
     if (!/^L\d+\.md$/.test(f)) continue
@@ -264,14 +263,8 @@ function scanCharts(dir: string) {
       continue
     }
     for (const lecture of readLectureIds(src)) {
-      const sidecar = `${lecture}.json`
-      const p1 = path.join(chartsRoot, sidecar)
-      const p2 = path.join(exampleChartsRoot, sidecar)
-      if (fs.existsSync(p1)) {
-        countChartTypes(p1, out)
-      } else if (fs.existsSync(p2)) {
-        countChartTypes(p2, out)
-      }
+      const p1 = path.join(chartsRoot, `${lecture}.json`)
+      if (fs.existsSync(p1)) countChartTypes(p1, out)
     }
   }
   return out
@@ -557,6 +550,8 @@ export default async () =>
         conceptsVitePlugin({ docsRoot, allGroups: GROUPS, localeKeys: v2LocaleKeys, accessPlan }),
         v2SearchPlugin({ docsRoot, allGroups: GROUPS, conceptsDir: contentPaths.conceptsDir, accessPlan }),
         ...v2VitePlugins,
+        // dev, Windows: /@fs assets on another drive than the server's (node_modules junction), see the plugin
+        crossDriveFsPlugin(),
       ],
       server: {
         watch: {

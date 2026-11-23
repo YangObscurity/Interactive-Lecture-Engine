@@ -1,6 +1,6 @@
 /**
- * A small static server for the `access` e2e project: serves a built dist with VitePress' clean URLs
- * (`/g06/L01` -> `g06/L01.html`, `/g09/` -> `g09/index.html`) and its 404 page. No gateway here: the tests put theirs
+ * A small static server for the `prod` and `access` e2e projects: serves a built dist with VitePress' clean URLs
+ * (`/mea/L01` -> `mea/L01.html`, `/mea/` -> `mea/index.html`) and its 404 page. No gateway here: the access tests put theirs
  * in front with `page.route`.
  *
  *   node tests/e2e/access-server.mjs --dir <dist> --port <port>
@@ -18,6 +18,10 @@ const TYPES = {
   '.json': 'application/json; charset=utf-8',
   '.svg': 'image/svg+xml',
   '.png': 'image/png',
+  '.webp': 'image/webp',
+  '.jpg': 'image/jpeg',
+  '.webmanifest': 'application/manifest+json',
+  '.wasm': 'application/wasm',
   '.ico': 'image/x-icon',
   '.woff2': 'font/woff2',
   '.woff': 'font/woff',
@@ -58,7 +62,12 @@ export function createServer(root) {
         res.end('not found')
         return
       }
-      res.writeHead(status, { 'Content-Type': TYPES[path.extname(target).toLowerCase()] ?? 'application/octet-stream', 'Cache-Control': 'no-store' })
+      // HEAD gets the same headers as GET (Content-Length included), only without the body.
+      res.writeHead(status, {
+        'Content-Type': TYPES[path.extname(target).toLowerCase()] ?? 'application/octet-stream',
+        'Content-Length': data.length,
+        'Cache-Control': 'no-store',
+      })
       res.end(req.method === 'HEAD' ? undefined : data)
     })
   })
@@ -78,7 +87,7 @@ function main() {
   }
   const root = path.resolve(dir)
   if (!fs.existsSync(path.join(root, 'index.html'))) {
-    console.error(`[access-server] no index.html in ${root}: run npm run build:e2e:access first`)
+    console.error(`[access-server] no index.html in ${root}: run npm run build:e2e (prod) or npm run build:e2e:access (access) first`)
     process.exit(2)
   }
   createServer(root).listen(port, '127.0.0.1', () => console.log(`[access-server] ${root} on http://127.0.0.1:${port}/`))

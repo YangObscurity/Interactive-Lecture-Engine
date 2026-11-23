@@ -7,7 +7,7 @@
  */
 import { test, expect, gotoAndSettle } from './fixtures'
 
-const LECTURE = '/g01/L01'
+const LECTURE = '/mea/L02'
 
 test.describe('WP-K3 Item 5: reader own-key tool loop (prod)', () => {
   test('executes OpenAI tool_calls against /api/tools, shows progress mark without args/results, and renders final answer', async ({
@@ -73,7 +73,7 @@ test.describe('WP-K3 Item 5: reader own-key tool loop (prod)', () => {
         status: 200,
         contentType: 'application/json',
         body: JSON.stringify([
-          { slug: 'actuation-lease', term: '执行租约', summary: 'TOOL_SECRET_RESULT_NOT_SHOWN_IN_PILL' },
+          { slug: 'significant-figures', term: '有效数字', summary: 'TOOL_SECRET_RESULT_NOT_SHOWN_IN_PILL' },
         ]),
       })
     })
@@ -102,11 +102,11 @@ test.describe('WP-K3 Item 5: reader own-key tool loop (prod)', () => {
 
       expect(
         reqJson.messages.some(
-          (m) => m.role === 'tool' && m.tool_call_id === 'call_e2e_1' && m.content?.includes('actuation-lease'),
+          (m) => m.role === 'tool' && m.tool_call_id === 'call_e2e_1' && m.content?.includes('significant-figures'),
         ),
       ).toBe(true)
       const finalSse = [
-        'data: {"choices":[{"delta":{"content":"已查到相关概念：执行租约用于限定执行权限。"}}]}\n\n',
+        'data: {"choices":[{"delta":{"content":"已查到相关概念：有效数字表示测量结果中可靠的位数。"}}]}\n\n',
         'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\n',
         'data: [DONE]\n\n',
       ].join('')
@@ -127,14 +127,14 @@ test.describe('WP-K3 Item 5: reader own-key tool loop (prod)', () => {
     // Open AI sidebar & ask question that triggers tool_calls
     await page.keyboard.press('Alt+a')
     await expect(page.locator('[data-ai-source]')).toHaveAttribute('data-ai-status', 'byok-unverified')
-    await page.locator('.chat-textarea').fill('帮我查一下执行租约')
+    await page.locator('.chat-textarea').fill('帮我查一下有效数字')
     await page.locator('.send-btn').click()
 
     const toolPill = page.locator('[data-ai-tool-call="search_concepts"]')
     await expect(toolPill).toBeVisible()
     // Tool progress ends cleanly and final answer appears
     await expect(toolPill).toHaveAttribute('data-ai-tool-state', 'done')
-    await expect(page.locator('.assistant-body')).toContainText('已查到相关概念：执行租约用于限定执行权限。')
+    await expect(page.locator('.assistant-body')).toContainText('已查到相关概念：有效数字表示测量结果中可靠的位数。')
 
     // Progress pill shows ONLY tool name/status, NEVER arguments or tool JSON results
     const pillContainerText = await page.locator('[data-ai-tool-calls]').innerText()

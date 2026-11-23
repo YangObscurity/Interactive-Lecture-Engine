@@ -12,9 +12,9 @@ import { getReaderLang, readerLang, setReaderLang } from '../../docs/.vitepress/
 
 const locales: SiteLocales = {
   root: { lang: 'zh-CN' },
-  en: { lang: 'en', themeConfig: { i18nPages: { '/examples/g01/L01': { title: 'Ohm' } } } },
+  en: { lang: 'en', themeConfig: { i18nPages: { '/courses/g01/L01': { title: 'Ohm' } } } },
 }
-const ctx = { locales, groupDirs: ['g01', 'examples/g01'] }
+const ctx = { locales, groupDirs: ['g01', 'courses/g01'] }
 const [zh, en] = siteLangs(locales)
 
 afterEach(() => {
@@ -33,21 +33,21 @@ describe('core/langLinks', () => {
   })
 
   it('knows which lectures exist in which language', () => {
-    expect(hasTranslation(locales, 'en', '/examples/g01/L01')).toBe(true)
+    expect(hasTranslation(locales, 'en', '/courses/g01/L01')).toBe(true)
     expect(hasTranslation(locales, 'en', '/g01/L01')).toBe(false)
     expect(hasTranslation(locales, '', '/g01/L01')).toBe(true)
   })
 
   it('switches a lecture to its translation, else to the group page of that language', () => {
-    expect(switchTarget('/examples/g01/L01', en!, ctx)).toBe('/en/examples/g01/L01')
+    expect(switchTarget('/courses/g01/L01', en!, ctx)).toBe('/en/courses/g01/L01')
     expect(switchTarget('/g01/L01', en!, ctx)).toBe('/en/g01/')
-    expect(switchTarget('/en/examples/g01/L01', zh!, ctx)).toBe('/examples/g01/L01')
-    expect(switchTarget('/en/examples/g01/L01.html', zh!, ctx)).toBe('/examples/g01/L01')
+    expect(switchTarget('/en/courses/g01/L01', zh!, ctx)).toBe('/courses/g01/L01')
+    expect(switchTarget('/en/courses/g01/L01.html', zh!, ctx)).toBe('/courses/g01/L01')
   })
 
   it('switches group pages, the home page and any other page', () => {
     expect(switchTarget('/g01/', en!, ctx)).toBe('/en/g01/')
-    expect(switchTarget('/en/examples/g01/', zh!, ctx)).toBe('/examples/g01/')
+    expect(switchTarget('/en/courses/g01/', zh!, ctx)).toBe('/courses/g01/')
     expect(switchTarget('/', en!, ctx)).toBe('/en/')
     expect(switchTarget('/en/', zh!, ctx)).toBe('/')
     expect(switchTarget('/en', zh!, ctx)).toBe('/')
@@ -62,9 +62,9 @@ describe('core/langLinks', () => {
 
   it('maps a lecture row of a locale group page', () => {
     const pages = locales.en!.themeConfig!.i18nPages!
-    expect(localizedLecture('/examples/g01/L01', 'orig', 'en', pages)).toEqual({ path: '/en/examples/g01/L01', title: 'Ohm', translated: true })
-    expect(localizedLecture('/examples/g01/L02', 'orig', 'en', pages)).toEqual({ path: '/examples/g01/L02', title: 'orig', translated: false })
-    expect(localizedLecture('/examples/g01/L02', 'orig', '', pages)).toEqual({ path: '/examples/g01/L02', title: 'orig', translated: true })
+    expect(localizedLecture('/courses/g01/L01', 'orig', 'en', pages)).toEqual({ path: '/en/courses/g01/L01', title: 'Ohm', translated: true })
+    expect(localizedLecture('/courses/g01/L02', 'orig', 'en', pages)).toEqual({ path: '/courses/g01/L02', title: 'orig', translated: false })
+    expect(localizedLecture('/courses/g01/L02', 'orig', '', pages)).toEqual({ path: '/courses/g01/L02', title: 'orig', translated: true })
   })
 })
 

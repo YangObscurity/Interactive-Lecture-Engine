@@ -2,13 +2,13 @@
  * P4b canvas layout unit & stress tests:
  *   1. Cross-process byte determinism + zero wall-clock `ms` fields;
  *   2. 7 synthetic stress cases ported from the home-canvas prototype (overlap=0, through=0, diagonal=0, endErr=0);
- *   3. Real site curriculum build (`map: false` excludes LR & SPI, metrics hold for reader + datasheet compact & zones);
- *   4. P3b access-tier slice isolation (`inline` excludes restricted group/lecture ids, `tier` contains only `inline + tier`).
+ *   3. Demo site curriculum build (templates/demo-content: every group on the map, metrics hold for reader + datasheet compact & zones);
+ *   4. P3b access-tier slice isolation on the demo's access e2e tiers (`inline` excludes restricted group/lecture ids, `tier` contains only `inline + tier`).
  */
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { resolveBuildAccess } from '../../docs/.vitepress/access/build.mts'
 import { measureDatasheetBoard, measureReaderBoard } from '../../docs/.vitepress/curriculum/canvasMetrics'
 import { buildCanvasFromCurriculum, canvasCacheKey, canvasSliceOf, runCanvasWorker } from '../../docs/.vitepress/curriculum/canvasNode.mts'
@@ -16,9 +16,8 @@ import type { CanvasWorkerInput } from '../../docs/.vitepress/curriculum/canvasT
 import { buildCurriculumFromDisk } from '../../docs/.vitepress/curriculum/node.mts'
 import { splitCurriculum } from '../../docs/.vitepress/curriculum/split'
 import { resolveGroups } from '../../docs/.vitepress/groups-source.mts'
-import { E2E_BUILD_ENV } from '../../scripts/build_access_e2e.mjs'
-
-const SITE = path.resolve(__dirname, '../..')
+import { DEMO_ACCESS_JSON, DEMO_ENV, demoContentPaths, setEnv, syncDemoDocs } from './demo-content'
+import type { DemoDocs } from './demo-content'
 
 function rng(seed: number): () => number {
   let a = seed >>> 0
@@ -100,6 +99,35 @@ afterEach(() => {
   }
 })
 
+// S6: the real-site cases run on the engine's demo content (templates/demo-content), synced into a temporary docs folder
+let demo: DemoDocs
+let restoreDemoEnv: () => void
+beforeAll(async () => {
+  demo = await syncDemoDocs()
+  restoreDemoEnv = setEnv({ ...DEMO_ENV })
+})
+afterAll(() => {
+  restoreDemoEnv?.()
+  demo?.cleanup()
+})
+
+/** The root-locale curriculum of the demo content with the current access environment. */
+async function demoCurriculum() {
+  const { GROUPS } = await resolveGroups()
+  const plan = resolveBuildAccess(undefined, GROUPS)
+  const paths = demoContentPaths()
+  const cur = buildCurriculumFromDisk({
+    docsRoot: demo.docsRoot,
+    graphFile: paths.graphDir.graph,
+    notionFile: paths.graphDir.graphNotion,
+    allGroups: GROUPS,
+    keptGroupIds: plan.keptGroupIds,
+    rootLang: 'zh-CN',
+    otherLangs: [],
+  }).byLocale.root!
+  return { GROUPS, plan, cur }
+}
+
 describe('canvas layout worker', () => {
   it('runs deterministically across two separate child processes with zero ms fields', () => {
     const inp = mkInput([10, 14, 6], 0.75, 0.4, 19)
@@ -128,23 +156,15 @@ describe('canvas layout worker', () => {
     }, 120_000)
   }
 
-  it('real site curriculum: excludes LR and SPI (map: false) and satisfies all quality gates', async () => {
+  it('demo site curriculum: every group is on the map (all have prerequisite edges) and all quality gates hold', async () => {
     delete process.env.LECTURE_BUILD_GROUPS
     delete process.env.LECTURE_ACCESS_JSON
-    const { GROUPS } = await resolveGroups()
-    const plan = resolveBuildAccess(undefined, GROUPS)
-    const cur = buildCurriculumFromDisk({
-      docsRoot: path.join(SITE, 'docs'),
-      graphFile: path.join(SITE, 'data', 'graph.json'),
-      notionFile: path.join(SITE, 'data', 'graph-notion.json'),
-      allGroups: GROUPS,
-      keptGroupIds: plan.keptGroupIds,
-      rootLang: 'zh-CN',
-      otherLangs: [],
-    }).byLocale.root!
+    const { GROUPS, cur } = await demoCurriculum()
+    expect(GROUPS.map((g) => g.id)).toEqual(['MEA', 'LOG', 'PLN', 'DAT'])
+    expect(cur.stats.lectures).toBe(14)
 
     const bundle = buildCanvasFromCurriculum(cur)
-    expect(bundle.reader.offMap.sort()).toEqual(['GC', 'LR', 'SDM', 'SPI'])
+    expect(bundle.reader.offMap).toEqual([])
     expect(bundle.reader.groups.map((g) => g.id)).toEqual(GROUPS.filter((g) => g.map !== false).map((g) => g.id))
 
     const rm = measureReaderBoard(bundle.reader)
@@ -164,40 +184,31 @@ describe('canvas layout worker', () => {
   }, 30_000)
 
   it('access split: inline canvas excludes restricted ids and per-tier slice covers only inline + own tier', async () => {
-    process.env.LECTURE_BUILD_GROUPS = E2E_BUILD_ENV.LECTURE_BUILD_GROUPS
-    process.env.LECTURE_ACCESS_JSON = E2E_BUILD_ENV.LECTURE_ACCESS_JSON
-    const { GROUPS } = await resolveGroups()
-    const plan = resolveBuildAccess(undefined, GROUPS)
-    const full = buildCurriculumFromDisk({
-      docsRoot: path.join(SITE, 'docs'),
-      graphFile: path.join(SITE, 'data', 'graph.json'),
-      notionFile: path.join(SITE, 'data', 'graph-notion.json'),
-      allGroups: GROUPS,
-      keptGroupIds: plan.keptGroupIds,
-      rootLang: 'zh-CN',
-      otherLangs: [],
-    }).byLocale.root!
+    // the access e2e tiers of the demo: MEA and LOG inline, PLN authenticated, DAT the gateway group staff
+    delete process.env.LECTURE_BUILD_GROUPS
+    process.env.LECTURE_ACCESS_JSON = DEMO_ACCESS_JSON
+    const { plan, cur: full } = await demoCurriculum()
 
     const inlineCur = splitCurriculum(full, { tierOfGroup: (id) => plan.tierOfGroup[id] ?? plan.inlineTier, inlineTier: plan.inlineTier }).inline
     const inlineBundle = buildCanvasFromCurriculum(inlineCur)
     const inlineText = JSON.stringify(inlineBundle)
-    expect(inlineBundle.reader.groups.map((g) => g.id)).toEqual(['G06'])
-    expect(inlineText).not.toContain('G09')
-    expect(inlineText).not.toContain('g09-')
-    expect(inlineText).not.toContain('G12')
-    expect(inlineText).not.toContain('g12-')
+    expect(inlineBundle.reader.groups.map((g) => g.id)).toEqual(['MEA', 'LOG'])
+    expect(inlineText).not.toContain('PLN')
+    expect(inlineText).not.toContain('pln-')
+    expect(inlineText).not.toContain('DAT')
+    expect(inlineText).not.toContain('dat-')
 
-    const authTier = plan.tiers.find((t) => t.groupIds.includes('G09'))!.id
-    const staffTier = plan.tiers.find((t) => t.groupIds.includes('G12'))!.id
+    const authTier = plan.tiers.find((t) => t.groupIds.includes('PLN'))!.id
+    const staffTier = plan.tiers.find((t) => t.groupIds.includes('DAT'))!.id
     const authSlice = canvasSliceOf(full, plan, authTier)
-    expect(authSlice.boardWithInline.reader.groups.map((g) => g.id).sort()).toEqual(['G06', 'G09'])
-    expect(JSON.stringify(authSlice)).not.toContain('g12-')
-    expect(authSlice.tierOwn.reader.groups.map((g) => g.id)).toEqual(['G09'])
+    expect(authSlice.boardWithInline.reader.groups.map((g) => g.id).sort()).toEqual(['LOG', 'MEA', 'PLN'])
+    expect(JSON.stringify(authSlice)).not.toContain('dat-')
+    expect(authSlice.tierOwn.reader.groups.map((g) => g.id)).toEqual(['PLN'])
 
     const staffSlice = canvasSliceOf(full, plan, staffTier)
-    expect(staffSlice.boardWithInline.reader.groups.map((g) => g.id).sort()).toEqual(['G06', 'G12'])
-    expect(JSON.stringify(staffSlice)).not.toContain('g09-')
-    expect(staffSlice.tierOwn.reader.groups.map((g) => g.id)).toEqual(['G12'])
+    expect(staffSlice.boardWithInline.reader.groups.map((g) => g.id).sort()).toEqual(['DAT', 'LOG', 'MEA'])
+    expect(JSON.stringify(staffSlice)).not.toContain('pln-')
+    expect(staffSlice.tierOwn.reader.groups.map((g) => g.id)).toEqual(['DAT'])
   }, 30_000)
 
   it('auto-excludes groups without any prerequisite edge while keeping map: false as manual override', () => {

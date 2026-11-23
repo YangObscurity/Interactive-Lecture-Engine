@@ -29,7 +29,7 @@ export default defineLectureConfig({
 
 - 种子来自构建时的 `docs/public/notion_knowledge_graph.json`，只作用于既没有服务端记录、也没有待发写入的讲次；种子版本变化不会清掉任何东西。
 - 完成时间 `completedAtOf(id)` 同样的顺序：待发写入是「已完成」时取写入时间，是其它状态则没有；否则有服务端记录就只看它（它不是「已完成」就没有完成时间，不会落到种子里的旧时间）；都没有才看种子。
-- 讲次 id 一律小写，组取组目录的**最后一段**：`examples/g01/L01` 是 `g01-l01`，与 `core/route.ts`、后端契约 §2.1 一致（`progress/types.ts` 的 `groupOfDir`）。组页、讲义页进度卡片、写入时的 `groupId` 都按这条规则，嵌套组的同一讲不会变成两条记录。
+- 讲次 id 一律小写，组取组目录的**最后一段**：`courses/g01/L01` 是 `g01-l01`，与 `core/route.ts`、后端契约 §2.1 一致（`progress/types.ts` 的 `groupOfDir`）。组页、讲义页进度卡片、写入时的 `groupId` 都按这条规则，嵌套组的同一讲不会变成两条记录。
 - `ready` 之前（SSR 与首次客户端渲染）组件一律按「未开始」渲染，保证水合一致。
 
 ### 写入与发件箱

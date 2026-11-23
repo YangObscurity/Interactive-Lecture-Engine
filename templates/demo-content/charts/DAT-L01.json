@@ -1,0 +1,6 @@
+{
+  "c1": {
+    "type": "echarts",
+    "code": "{\n  \"title\": {\n    \"text\": \"按类别计数\"\n  },\n  \"tooltip\": {\n    \"trigger\": \"axis\"\n  },\n  \"xAxis\": {\n    \"type\": \"category\",\n    \"data\": [\n      \"甲\",\n      \"乙\",\n      \"丙\"\n    ]\n  },\n  \"yAxis\": {\n    \"type\": \"value\"\n  },\n  \"series\": [\n    {\n      \"name\": \"记录数\",\n      \"type\": \"bar\",\n      \"data\": [\n        4,\n        7,\n        3\n      ]\n    }\n  ]\n}"
+  }
+}

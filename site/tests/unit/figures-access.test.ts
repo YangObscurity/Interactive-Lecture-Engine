@@ -24,7 +24,6 @@ describe('figures/access tiers & gallery isolation', () => {
     const root = mkTmp()
     const docsRoot = path.join(root, 'docs')
     const figuresDir = path.join(root, 'figures')
-    const exampleFiguresDir = path.join(root, 'example-figures')
     const outDir = path.join(root, 'dist')
 
     const pubSvg = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="120" height="80"/>')
@@ -34,13 +33,11 @@ describe('figures/access tiers & gallery isolation', () => {
 
     fs.mkdirSync(path.join(docsRoot, 'g06'), { recursive: true })
     fs.mkdirSync(path.join(docsRoot, 'g09'), { recursive: true })
-    fs.mkdirSync(path.join(docsRoot, 'examples/g01'), { recursive: true })
     fs.writeFileSync(path.join(docsRoot, 'g06/L01.md'), '# G06\nSee [](fig:pub-fig).\n<LectureFigure id="pub-fig" />\n')
     fs.writeFileSync(path.join(docsRoot, 'g09/L01.md'), '# G09\nSee [](fig:priv-fig).\n<LectureFigure id="priv-fig" />\n')
 
     fs.mkdirSync(path.join(figuresDir, 'g06'), { recursive: true })
     fs.mkdirSync(path.join(figuresDir, 'g09'), { recursive: true })
-    fs.mkdirSync(path.join(exampleFiguresDir, 'examples/g01'), { recursive: true })
     fs.writeFileSync(path.join(figuresDir, 'g06/pub.svg'), pubSvg)
     fs.writeFileSync(path.join(figuresDir, 'g09/secret-chip.svg'), privSvg)
     fs.writeFileSync(
@@ -125,7 +122,7 @@ describe('figures/access tiers & gallery isolation', () => {
     }
 
     emitFiguresDistArtifacts(outDir, {
-      paths: { figuresDir, exampleFiguresDir, lecturesDir: docsRoot, docsRoot },
+      paths: { figuresDir, lecturesDir: docsRoot, docsRoot },
       groups: GROUPS,
       localeKeys: [],
       accessPlan: plan,
@@ -174,7 +171,7 @@ describe('figures/access tiers & gallery isolation', () => {
     // Public page citing restricted figure must fail buildFigureAuditAndGallery
     fs.writeFileSync(path.join(docsRoot, 'g06/L01.md'), '# G06\nLeak [](fig:g09/priv-fig).\n')
     const crossTier = buildFigureAuditAndGallery({
-      paths: { figuresDir, exampleFiguresDir, lecturesDir: docsRoot, docsRoot },
+      paths: { figuresDir, lecturesDir: docsRoot, docsRoot },
       groups: GROUPS,
       localeKeys: [],
       accessPlan: plan,

@@ -100,7 +100,7 @@ describe('documents and ids', () => {
     expect(docIdOf('en/g01/index.md')).toBe('/en/g01/')
     expect(docIdOf('g01/L01.md', '/', false)).toBe('/g01/L01.html')
     expect(docIdOf('g01/L01.md', '/docs/')).toBe('/docs/g01/L01')
-    expect(docIdOf('examples/g01/L01.md')).toBe('/examples/g01/L01')
+    expect(docIdOf('courses/g01/L01.md')).toBe('/courses/g01/L01')
   })
 
   it('localeOfPath: the first non-root locale key that prefixes the path, else root', () => {

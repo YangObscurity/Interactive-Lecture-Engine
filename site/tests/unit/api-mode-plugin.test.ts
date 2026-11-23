@@ -114,7 +114,7 @@ describe('mock mode', () => {
     const r = await fetch(`${s.url}/api/db/progress/batch`, {
       method: 'POST',
       headers: json,
-      body: JSON.stringify({ items: [{ lecture_id: 'lr-l01', status: '学习中', group_id: 'lr' }] }),
+      body: JSON.stringify({ items: [{ lecture_id: 'xr-l01', status: '学习中', group_id: 'xr' }] }),
     })
     expect(r.status).toBe(200)
     const state = (await (await fetch(`${s.url}/__debug/api/state`)).json()) as {
@@ -122,14 +122,14 @@ describe('mock mode', () => {
       state: { progress: Record<string, unknown> }
     }
     expect(state.mode).toBe('mock')
-    expect(state.state.progress['lr-l01']).toBeTruthy()
+    expect(state.state.progress['xr-l01']).toBeTruthy()
 
     const reset = await fetch(`${s.url}/__debug/api/reset`, { method: 'POST' })
     expect(reset.status).toBe(200)
     const again = (await (await fetch(`${s.url}/__debug/api/state`)).json()) as {
       state: { progress: Record<string, unknown> }
     }
-    expect(again.state.progress['lr-l01']).toBeUndefined()
+    expect(again.state.progress['xr-l01']).toBeUndefined()
   })
 
   it('sessions + messages CRUD', async () => {
@@ -325,13 +325,13 @@ describe('mock mode: backend contract (P3)', () => {
   it('batch is atomic: one invalid item writes nothing', async () => {
     const before = await progressCount()
     const r = await batch([
-      { lecture_id: 'lr-l01', status: '已完成', group_id: 'lr' },
-      { lecture_id: 'lr-l02', status: 'not-a-status', group_id: 'lr' },
+      { lecture_id: 'xr-l01', status: '已完成', group_id: 'xr' },
+      { lecture_id: 'xr-l02', status: 'not-a-status', group_id: 'xr' },
     ])
     expect(r.status).toBe(400)
     expect(((await r.json()) as { error: string }).error).toBe('invalid_status')
     expect((await progressCount()).progress).toBe(before.progress)
-    expect((await fetch(`${s.url}/api/db/progress?lecture_id=lr-l01`)).status).toBe(404)
+    expect((await fetch(`${s.url}/api/db/progress?lecture_id=xr-l01`)).status).toBe(404)
     expect((await batch([{ status: '已完成' }])).status).toBe(400) // item without lecture_id
     expect((await batch('nope')).status).toBe(400)
   })
@@ -348,14 +348,14 @@ describe('mock mode: backend contract (P3)', () => {
   })
 
   it('batch honours Idempotency-Key like PATCH', async () => {
-    const items = [{ lecture_id: 'lr-l01', status: '已完成', group_id: 'lr' }]
+    const items = [{ lecture_id: 'xr-l01', status: '已完成', group_id: 'xr' }]
     const first = await batch(items, { 'idempotency-key': 'b-1' })
     const body = await first.json()
     clockMs += 1000
     const replay = await batch(items, { 'idempotency-key': 'b-1' })
     expect(replay.headers.get('idempotency-replayed')).toBe('true')
     expect(await replay.json()).toEqual(body)
-    expect((await batch([{ lecture_id: 'lr-l01', status: '学习中', group_id: 'lr' }], { 'idempotency-key': 'b-1' })).status).toBe(422)
+    expect((await batch([{ lecture_id: 'xr-l01', status: '学习中', group_id: 'xr' }], { 'idempotency-key': 'b-1' })).status).toBe(422)
   })
 
   it('scenario legacy-backend: unfiltered GET is 400, filtered reads work, session is 404, Idempotency-Key is ignored', async () => {
@@ -377,7 +377,7 @@ describe('mock mode: backend contract (P3)', () => {
   it('scenario reject-writes: progress writes are 422, reads are unaffected', async () => {
     const h = { 'x-lecture-scenario': 'reject-writes' }
     expect((await patch('g01-l03', { status: '已完成' }, h)).status).toBe(422)
-    expect((await batch([{ lecture_id: 'lr-l01', status: '已完成' }], h)).status).toBe(422)
+    expect((await batch([{ lecture_id: 'xr-l01', status: '已完成' }], h)).status).toBe(422)
     expect((await fetch(`${s.url}/api/db/progress`, { headers: h })).status).toBe(200)
     expect((await progressOf('g01-l03')).status).toBe('未开始')
   })

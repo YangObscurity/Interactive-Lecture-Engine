@@ -8,12 +8,14 @@
  *   3. Dashboard "站点文案 / Site texts" tab: hints as placeholders, empty-field rules, a required name,
  *      a round-trip change in the dev project; dev-only note in the prod project.
  */
-import { test, expect, gotoAndSettle } from './fixtures'
+import path from 'node:path'
+import { test, expect, gotoAndSettle, SITE_ROOT } from './fixtures'
 import { SITE_TEXT_HINTS } from '../../docs/.vitepress/site-texts-schema.ts'
 import { loadSiteTexts } from '../../docs/.vitepress/site-texts.mts'
 
-// the active site's own texts (content/site-texts.json), so the test carries no site's wording
-const T = loadSiteTexts()
+// the texts of the site under test: the engine's demo content (templates/demo-content/site-texts.json, what build:e2e
+// builds), read at test time so the test carries no site's wording
+const T = loadSiteTexts({ siteDir: path.join(SITE_ROOT, '..', 'templates', 'demo-content') })
 const re = (s: string) => new RegExp(s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
 
 test.describe('WP-F10: Site texts and branding', () => {

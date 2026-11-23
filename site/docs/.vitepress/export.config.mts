@@ -72,11 +72,10 @@ export const LECTURE_EXPORT = {
   /**
    * 允许导出的课程组目录白名单。
    *
-   * **留空（默认）= 自动推断**：只要 `site/docs/<组>/` 或
-   * `site/docs/examples/<组>/` 目录真实存在就允许导出 —— 引擎不知道、
-   * 也不该知道第三方的目录命名。
+   * **留空（默认）= 自动推断**：只要 `site/docs/<组>/` 目录真实存在就允许导出
+   * —— 引擎不知道、也不该知道第三方的目录命名。
    * 若部署希望**收窄**范围（例如只让正式课程可导出），在此显式列出目录名
-   * （相对 site/docs 的路径，如 'guide' 或 'examples/g01'）。
+   * （相对 site/docs 的路径，如 'guide' 或 'courses/g01'）。
    */
   groupDirs: [] as string[],
 

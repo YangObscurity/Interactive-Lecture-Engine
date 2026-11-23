@@ -15,7 +15,6 @@ export interface LoadedGroupRegistry {
   registry: FiguresRegistry
   byId: Map<string, FigureEntry>
   warnings: string[]
-  isExample: boolean
 }
 
 export function figuresRegistryFile(groupDir: string, figuresRoot: string): string {
@@ -35,66 +34,48 @@ export function resolveGroupForPage(
   const parts = norm.split('/')
   const stripped = parts[0] && localeKeys.includes(parts[0]) ? parts.slice(1).join('/') : norm
 
-  // Longest directory prefix wins so nested dirs like `examples/g01` match cleanly.
+  // Longest directory prefix wins so nested dirs like `courses/g01` match cleanly.
   const sortedDirs = [...groupDirs].sort((a, b) => b.length - a.length)
   for (const dir of sortedDirs) {
     if (stripped.startsWith(dir + '/') || stripped === dir) return dir
   }
-  if (stripped.startsWith('examples/g01/')) return 'examples/g01'
   const firstSlash = stripped.lastIndexOf('/')
   if (firstSlash <= 0) return null
   return stripped.slice(0, firstSlash)
 }
 
-function findRegistryRoots(
-  group: string,
-  paths: Pick<ContentPaths, 'figuresDir' | 'exampleFiguresDir'>,
-): Array<{ root: string; isExample: boolean }> {
-  const candidates: Array<{ root: string; isExample: boolean }> = [
-    { root: paths.figuresDir, isExample: group === 'examples' || group.startsWith('examples/') },
-  ]
-  if (group === 'examples' || group.startsWith('examples/')) {
-    candidates.push({ root: paths.exampleFiguresDir, isExample: true })
-  }
-  return candidates
-}
-
 export function loadGroupRegistry(
   group: string,
-  paths: Pick<ContentPaths, 'figuresDir' | 'exampleFiguresDir'>,
+  paths: Pick<ContentPaths, 'figuresDir'>,
   opts: { verifyFiles?: boolean } = {},
 ): LoadedGroupRegistry | null {
-  for (const cand of findRegistryRoots(group, paths)) {
-    const regPath = figuresRegistryFile(group, cand.root)
-    if (!existsSync(regPath)) continue
-    let raw: unknown
-    try {
-      raw = JSON.parse(readFileSync(regPath, 'utf8'))
-    } catch (err) {
-      throw new Error(`[figures] failed to parse ${regPath}: ${err instanceof Error ? err.message : String(err)}`)
-    }
-    const groupDir = figureDiskDir(group, cand.root)
-    const res = validateFiguresRegistry(raw, {
-      expectedGroup: group,
-      groupDir,
-      verifyFiles: opts.verifyFiles ?? false,
-    })
-    if (!res.ok || !res.registry) {
-      throw new Error(`[figures] invalid registry ${regPath}:\n  - ${res.errors.join('\n  - ')}`)
-    }
-    const byId = new Map<string, FigureEntry>()
-    for (const f of res.registry.figures) byId.set(f.id, f)
-    return {
-      group,
-      groupDir,
-      registryPath: regPath,
-      registry: res.registry,
-      byId,
-      warnings: res.warnings,
-      isExample: cand.isExample,
-    }
+  const regPath = figuresRegistryFile(group, paths.figuresDir)
+  if (!existsSync(regPath)) return null
+  let raw: unknown
+  try {
+    raw = JSON.parse(readFileSync(regPath, 'utf8'))
+  } catch (err) {
+    throw new Error(`[figures] failed to parse ${regPath}: ${err instanceof Error ? err.message : String(err)}`)
   }
-  return null
+  const groupDir = figureDiskDir(group, paths.figuresDir)
+  const res = validateFiguresRegistry(raw, {
+    expectedGroup: group,
+    groupDir,
+    verifyFiles: opts.verifyFiles ?? false,
+  })
+  if (!res.ok || !res.registry) {
+    throw new Error(`[figures] invalid registry ${regPath}:\n  - ${res.errors.join('\n  - ')}`)
+  }
+  const byId = new Map<string, FigureEntry>()
+  for (const f of res.registry.figures) byId.set(f.id, f)
+  return {
+    group,
+    groupDir,
+    registryPath: regPath,
+    registry: res.registry,
+    byId,
+    warnings: res.warnings,
+  }
 }
 
 /** Discover every directory containing a `figures.json` under a root directory. */
@@ -117,12 +98,11 @@ export function discoverFigureGroups(figuresRoot: string): string[] {
 }
 
 export function loadAllGroupRegistries(
-  paths: Pick<ContentPaths, 'figuresDir' | 'exampleFiguresDir'>,
+  paths: Pick<ContentPaths, 'figuresDir'>,
   opts: { verifyFiles?: boolean; extraGroups?: readonly string[] } = {},
 ): Map<string, LoadedGroupRegistry> {
   const discovered = new Set<string>([
     ...discoverFigureGroups(paths.figuresDir),
-    ...discoverFigureGroups(paths.exampleFiguresDir),
     ...(opts.extraGroups ?? []),
   ])
   const out = new Map<string, LoadedGroupRegistry>()

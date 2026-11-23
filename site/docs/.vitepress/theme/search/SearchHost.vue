@@ -44,7 +44,6 @@ const currentGroupId = computed<string | null>(() => {
   for (const g of sorted) {
     if (clean.startsWith(`/${g.dir}/`) || clean === `/${g.dir}`) return g.id
   }
-  if (clean.startsWith('/examples/')) return 'EXAMPLES'
   return null
 })
 
@@ -70,7 +69,6 @@ const engine = new LectureSearchEngine({
   labels: {
     lectureNo: (n) => t('search.lectureNo', { n }),
     groupCount: (n) => t('search.groupCount', { count: n }),
-    groupExamples: t('search.groupExamples'),
     groupSite: t('search.groupSite'),
     groupConcepts: t('search.groupConcepts'),
     conceptBadge: t('search.conceptBadge'),

@@ -12,7 +12,7 @@
 import type { Page } from '@playwright/test'
 import { test, expect, gotoAndSettle } from './fixtures'
 
-const LECTURES = ['/g01/L01', '/g01/L06', '/g13/L01', '/g13/L06', '/g10/L08'] as const
+const LECTURES = ['/mea/L01', '/mea/L05', '/log/L01', '/pln/L02', '/dat/L01'] as const
 const ROUNDS = 10
 
 interface ChartsPanel {
@@ -51,7 +51,8 @@ async function snapshot(page: Page): Promise<Snapshot> {
         .filter((f) => f.dataset.chartStatus !== 'ok')
         .map((f) => `${f.id || f.dataset.id}=${f.dataset.chartStatus ?? 'none'}`),
       echartsFigs: figs.filter((f) => f.dataset.type === 'echarts').length,
-      liveEcharts: panel?.live.echarts ?? -1,
+      // the panel lists only renderer kinds that have lived on this site: no `echarts` key = none alive
+      liveEcharts: panel ? (panel.live.echarts ?? 0) : -1,
       generation: panel?.generation ?? -1,
     }
   })
@@ -148,9 +149,9 @@ test.describe('charts lifecycle (SPA)', () => {
 
   test('navigating away mid-render still renders the destination fully', async ({ page, pageErrors }) => {
     test.setTimeout(3 * 60_000)
-    await gotoAndSettle(page, '/g13/L06')
+    await gotoAndSettle(page, '/mea/L05')
     for (let i = 0; i < 3; i++) {
-      const [mid, dest] = i % 2 === 0 ? (['/g13/L01', '/g10/L08'] as const) : (['/g10/L08', '/g13/L01'] as const)
+      const [mid, dest] = i % 2 === 0 ? (['/log/L01', '/dat/L01'] as const) : (['/dat/L01', '/log/L01'] as const)
       await armAndClick(page, mid)
       // do not wait: leave `mid` while its charts are still loading
       await page.waitForFunction((u) => location.pathname.replace(/\.html$/, '') === u, mid)

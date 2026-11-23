@@ -113,6 +113,19 @@ describe('npm run init', () => {
     expect(() => initContent({ paths: resolveContent({ repoRoot: repo, env: { LECTURE_CONTENT_DIR: busy } }) })).toThrow(/not empty/)
     expect(fs.readdirSync(busy)).toEqual(['notes.txt'])
   })
+
+  it('S6: with only the engine demo content, init creates <repo>/content and new:group refuses to write into the demo', async () => {
+    const repo = repoWithTemplate()
+    const demoDir = path.join(repo, 'templates', 'demo-content')
+    fs.mkdirSync(demoDir, { recursive: true })
+    fs.writeFileSync(path.join(demoDir, 'groups.ts'), 'export const GROUPS = []\n', 'utf8')
+    const paths = resolveContent({ repoRoot: repo, env: {} })
+    expect(paths.demo).toBe(true)
+    await expect(newGroup({ id: 'AB', dir: 'ab', title: 'A' }, { paths })).rejects.toThrow(/demo content/)
+    expect(fs.readFileSync(path.join(demoDir, 'groups.ts'), 'utf8')).toBe('export const GROUPS = []\n')
+    expect(initContent({ paths }).root).toBe(path.join(repo, 'content'))
+    expect(resolveContent({ repoRoot: repo, env: {} }).demo).toBeUndefined()
+  })
 })
 
 describe('groups.ts editing', () => {
@@ -167,7 +180,7 @@ describe('npm run new:group / new:lecture', () => {
     expect(fs.readFileSync(path.join(paths.lecturesDir, 'digital', 'index.md'), 'utf8')).toContain('<GroupIndex />')
     await expect(newGroup({ id: 'dc', dir: 'other', title: 'x' }, { paths })).rejects.toThrow(/already used/)
     await expect(newGroup({ id: 'X1', dir: 'digital', title: 'x' }, { paths })).rejects.toThrow(/already used/)
-    for (const dir of ['en', 'public', 'examples/x', 'Bad Dir']) {
+    for (const dir of ['en', 'public', 'concepts/x', 'Bad Dir']) {
       await expect(newGroup({ id: 'Y1', dir, title: 'x' }, { paths })).rejects.toThrow(ScaffoldError)
     }
     await expect(newGroup({ id: 'Z1', dir: 'z', title: 'x', accent: 'red' }, { paths })).rejects.toThrow(/accent/)

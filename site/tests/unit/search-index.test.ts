@@ -138,7 +138,7 @@ describe('search markdown pruner', () => {
 describe('search index builder, access split & budget gates', () => {
   const sampleGroups = [
     { id: 'G01', dir: 'g01', title: '基础电路', catSlot: 1 },
-    { id: 'G05', dir: 'g05', title: '数据库与 T-SQL', catSlot: 2 },
+    { id: 'G04', dir: 'g04', title: '表格与关系数据', catSlot: 2 },
     { id: 'G09', dir: 'g09', title: '云网络与 VPC', catSlot: 3 },
   ]
 
@@ -146,9 +146,9 @@ describe('search index builder, access split & budget gates', () => {
     const docs = makeTempDir('search-corpus-')
     writeMd(docs, 'index.md', '# 总览\n\n首页导读正文。')
     writeMd(docs, 'g01/L01.md', '---\ntitle: "第1讲 · 电阻与分压"\n---\n\n# 第1讲 · 电阻\n\n## 欧姆定律\n\n电阻把电压降到 LED 安全工作区间。')
-    writeMd(docs, 'g05/L19.md', '---\ntitle: "第19讲 · 外键连接"\n---\n\n# 第19讲 · 外键\n\n## 外键约束\n\n### 外键只「连」不「合」\n\n数据库通过 FOREIGN KEY 维持参照完整性。')
+    writeMd(docs, 'g04/L07.md', '---\ntitle: "第7讲 · 外键连接"\n---\n\n# 第7讲 · 外键\n\n## 外键约束\n\n### 外键只「连」不「合」\n\n数据库通过 FOREIGN KEY 维持参照完整性。')
     writeMd(docs, 'g09/L03.md', '---\ntitle: "第3讲 · VPC 虚拟私有云与混合网络"\n---\n\n# VPC\n\n## 私有子网\n\nSECRET_VPC_BODY_TEXT_4481 只给认证用户阅读。')
-    writeMd(docs, 'en/examples/g01/L01.md', '---\ntitle: "Example Lecture 1 · Ohm Law"\n---\n\n# Ohm Law\n\n## Limiting Resistor\n\nKeep current safely below LED limits.')
+    writeMd(docs, 'en/courses/g01/L01.md', '---\ntitle: "Example Lecture 1 · Ohm Law"\n---\n\n# Ohm Law\n\n## Limiting Resistor\n\nKeep current safely below LED limits.')
     return docs
   }
 
@@ -169,7 +169,7 @@ describe('search index builder, access split & budget gates', () => {
     write(outDir, 'index.html', '<html></html>')
     writeSearchArtifacts(outDir, built)
 
-    // Public artifacts must have G01 & G05, never G09 titles/paths/body text
+    // Public artifacts must have G01 & G04, never G09 titles/paths/body text
     const pubTitles = JSON.parse(fs.readFileSync(path.join(outDir, 'search/root/titles.json'), 'utf8')) as TitleIndexFile
     expect(pubTitles.groups.map((g) => g.id)).not.toContain('G09')
     expect(JSON.stringify(pubTitles)).not.toContain('VPC')
@@ -182,11 +182,11 @@ describe('search index builder, access split & budget gates', () => {
       expect(JSON.stringify(payload)).not.toContain('SECRET_VPC_BODY_TEXT_4481')
     }
 
-    // G05 headings inflate cleanly with parent breadcrumb
-    const g05Page = pubTitles.pages.find((p) => p[3] === '/g05/L19')
-    expect(g05Page).toBeDefined()
-    const g05Headings = inflateTitleHeadings(g05Page![5])
-    expect(g05Headings.map((h) => ({ text: h.text, path: h.path }))).toEqual([
+    // G04 headings inflate cleanly with parent breadcrumb
+    const g04Page = pubTitles.pages.find((p) => p[3] === '/g04/L07')
+    expect(g04Page).toBeDefined()
+    const g04Headings = inflateTitleHeadings(g04Page![5])
+    expect(g04Headings.map((h) => ({ text: h.text, path: h.path }))).toEqual([
       { text: '外键约束', path: [] },
       { text: '外键只「连」不「合」', path: ['外键约束'] },
     ])
@@ -200,7 +200,7 @@ describe('search index builder, access split & budget gates', () => {
 
     // Non-root English locale contains only English example pages, 0 CJK
     const enTitles = JSON.parse(fs.readFileSync(path.join(outDir, 'search/en/titles.json'), 'utf8')) as TitleIndexFile
-    expect(enTitles.pages.map((p) => p[3])).toEqual(['/en/examples/g01/L01'])
+    expect(enTitles.pages.map((p) => p[3])).toEqual(['/en/courses/g01/L01'])
     expect(JSON.stringify(enTitles)).not.toMatch(/[㐀-鿿]/)
   })
 
@@ -255,25 +255,25 @@ describe('client LectureSearchEngine: instant title results, progress, scope and
       locale: 'root',
       groups: [
         { id: 'G01', dir: 'g01', title: '电子基础', catSlot: 1 },
-        { id: 'G05', dir: 'g05', title: '数据库与 T-SQL', catSlot: 2 },
+        { id: 'G04', dir: 'g04', title: '表格与关系数据', catSlot: 2 },
       ],
       pages: [
         [0, 1, 'G01-L01', '/g01/L01', '第1讲 · 分压电阻', [[2, '欧姆定律应用']]],
-        [1, 19, 'G05-L19', '/g05/L19', '第19讲 · 外键设计', [[2, '外键只连不合']]],
+        [1, 7, 'G04-L07', '/g04/L07', '第7讲 · 外键设计', [[2, '外键只连不合']]],
       ],
     }
 
-    const g05ShardRaw = Buffer.from(
+    const g04ShardRaw = Buffer.from(
       JSON.stringify({
         v: 1,
-        shardId: 'g05',
-        groupId: 'G05',
-        pages: ['/g05/L19'],
+        shardId: 'g04',
+        groupId: 'G04',
+        pages: ['/g04/L07'],
         sections: [[0, 's1', ['外键只连不合'], '在关系数据库设计里通过 FOREIGN KEY 连接两张表，实现外键约束。']],
       }),
       'utf8',
     )
-    const g05Compressed = zlib.deflateRawSync(g05ShardRaw, { level: 9 })
+    const g04Compressed = zlib.deflateRawSync(g04ShardRaw, { level: 9 })
 
     const g01ShardRaw = Buffer.from(
       JSON.stringify({
@@ -292,17 +292,17 @@ describe('client LectureSearchEngine: instant title results, progress, scope and
       locale: 'root',
       titleFile: 'titles.json',
       titleBytes: Buffer.byteLength(JSON.stringify(titlePayload)),
-      totalShardBytes: g01Compressed.byteLength + g05Compressed.byteLength,
-      totalRawShardBytes: g01ShardRaw.byteLength + g05ShardRaw.byteLength,
+      totalShardBytes: g01Compressed.byteLength + g04Compressed.byteLength,
+      totalRawShardBytes: g01ShardRaw.byteLength + g04ShardRaw.byteLength,
       shards: [
         { shardId: 'g01', groupId: 'G01', url: 'shards/g01.sz', bytes: g01Compressed.byteLength, rawBytes: g01ShardRaw.byteLength, pageCount: 1 },
-        { shardId: 'g05', groupId: 'G05', url: 'shards/g05.sz', bytes: g05Compressed.byteLength, rawBytes: g05ShardRaw.byteLength, pageCount: 1 },
+        { shardId: 'g04', groupId: 'G04', url: 'shards/g04.sz', bytes: g04Compressed.byteLength, rawBytes: g04ShardRaw.byteLength, pageCount: 1 },
       ],
     }
 
-    let releaseG05!: () => void
-    const g05Gate = new Promise<void>((r) => {
-      releaseG05 = r
+    let releaseG04!: () => void
+    const g04Gate = new Promise<void>((r) => {
+      releaseG04 = r
     })
     const fetchedUrls: string[] = []
 
@@ -312,9 +312,9 @@ describe('client LectureSearchEngine: instant title results, progress, scope and
       if (url.endsWith('/manifest.json')) return new Response(JSON.stringify(manifestPayload), { status: 200 })
       if (url.endsWith('/titles.json')) return new Response(JSON.stringify(titlePayload), { status: 200 })
       if (url.endsWith('/shards/g01.sz')) return new Response(new Uint8Array(g01Compressed), { status: 200 })
-      if (url.endsWith('/shards/g05.sz')) {
-        await g05Gate
-        return new Response(new Uint8Array(g05Compressed), { status: 200 })
+      if (url.endsWith('/shards/g04.sz')) {
+        await g04Gate
+        return new Response(new Uint8Array(g04Compressed), { status: 200 })
       }
       return new Response('not found', { status: 404 })
     }
@@ -324,11 +324,10 @@ describe('client LectureSearchEngine: instant title results, progress, scope and
       base: '/',
       localeKeys: ['en'],
       siteData: () => ({ themeConfig: { lectureAccess: { inlineTier: 'public', tiers: [] } } }),
-      statusOf: (id) => (id === 'g05-L19' ? 'in_progress' : 'completed'),
+      statusOf: (id) => (id === 'g04-L07' ? 'in_progress' : 'completed'),
       labels: {
         lectureNo: (n) => `第${n}讲`,
         groupCount: (n) => `${n} 条`,
-        groupExamples: '示例',
         groupSite: '概览',
         loadingBar: (l, t) => `loading ${l}/${t}`,
         loadingIdle: (l, t) => `idle ${l}/${t}`,
@@ -340,35 +339,35 @@ describe('client LectureSearchEngine: instant title results, progress, scope and
       },
     })
 
-    // Open while preferring G05: title phase finishes immediately; G05 shard blocks until gate opens
-    await engine.ensureLoaded('root', 'G05')
+    // Open while preferring G04: title phase finishes immediately; G04 shard blocks until gate opens
+    await engine.ensureLoaded('root', 'G04')
     expect(fetchedUrls.some((u) => u.includes('/_access/'))).toBe(false)
 
     const earlyState = engine.getLoadState('root', true)
     expect(earlyState.loading).toBe(true)
 
-    const earlyHits = engine.query('root', '外键', 'all', 'G05')
+    const earlyHits = engine.query('root', '外键', 'all', 'G04')
     expect(earlyHits.totalHits).toBeGreaterThan(0)
     expect(earlyHits.elapsedMs).toBeLessThan(100)
     expect(earlyHits.groups[0]?.items[0]?.status).toBe('in_progress')
 
     // Before shard finishes, body-only query misses
-    expect(engine.query('root', 'FOREIGN KEY', 'all', 'G05').totalHits).toBe(0)
+    expect(engine.query('root', 'FOREIGN KEY', 'all', 'G04').totalHits).toBe(0)
 
-    releaseG05()
+    releaseG04()
     // Allow shard worker to decompress & commit (wait for the state, not for a fixed time: a busy machine needs longer)
     await vi.waitFor(() => expect(engine.getLoadState('root', true).loading).toBe(false), { timeout: 10_000, interval: 10 })
 
     expect(engine.getLoadState('root', true).loading).toBe(false)
-    const bodyHits = engine.query('root', 'FOREIGN KEY', 'all', 'G05')
+    const bodyHits = engine.query('root', 'FOREIGN KEY', 'all', 'G04')
     expect(bodyHits.totalHits).toBe(1)
     const item = bodyHits.groups[0]?.items[0]
-    expect(item?.code).toBe('G05-L19')
+    expect(item?.code).toBe('G04-L07')
     expect(item?.snippetParts.some((p) => p.hit && p.text.toLowerCase() === 'foreign key')).toBe(true)
 
     // Scope filter restricts hits to active group
-    expect(engine.query('root', '电阻', 'all', 'G05').totalHits).toBeGreaterThanOrEqual(1)
-    expect(engine.query('root', '电阻', 'group', 'G05').totalHits).toBe(0)
+    expect(engine.query('root', '电阻', 'all', 'G04').totalHits).toBeGreaterThanOrEqual(1)
+    expect(engine.query('root', '电阻', 'group', 'G04').totalHits).toBe(0)
     expect(changes).toBeGreaterThan(0)
   })
 

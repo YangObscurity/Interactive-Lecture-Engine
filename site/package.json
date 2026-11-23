@@ -43,9 +43,12 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
+    "build:e2e": "node scripts/build_e2e.mjs",
+    "test:e2e:prod": "node scripts/build_e2e.mjs && playwright test --project prod",
     "build:e2e:access": "node scripts/build_access_e2e.mjs",
     "test:e2e:access": "node scripts/build_access_e2e.mjs && playwright test --project access",
     "test:e2e:update": "playwright test --update-snapshots",
+    "screenshots:readme": "node scripts/readme_screenshots.mjs",
     "auth:export": "node scripts/auth_export.mjs",
     "check": "npm run typecheck && npm run typecheck:legacy && npm run lint && npm run check:figures && npm run check:content && npm test"
   },

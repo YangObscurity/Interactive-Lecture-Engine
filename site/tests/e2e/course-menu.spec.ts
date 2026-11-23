@@ -23,14 +23,14 @@ const SKINS: ReadonlyArray<readonly [ThemeId, string]> = [
 
 const WIRE = { not_started: '未开始', in_progress: '学习中', completed: '已完成' } as const
 
-/** Server records for group g05. */
+/** Server records for group pln of the demo content (templates/demo-content): L01 completed, L02 in progress. */
 async function mockProgress(page: Page): Promise<void> {
-  const records = Array.from({ length: 60 }, (_, i) => {
+  const records = Array.from({ length: 3 }, (_, i) => {
     const n = i + 1
-    const status = n === 1 ? 'completed' : n === 19 ? 'in_progress' : 'not_started'
+    const status = n === 1 ? 'completed' : n === 2 ? 'in_progress' : 'not_started'
     return {
-      lecture_id: `g05-l${String(n).padStart(2, '0')}`,
-      group_id: 'g05',
+      lecture_id: `pln-l${String(n).padStart(2, '0')}`,
+      group_id: 'pln',
       status: WIRE[status],
       completed_at: status === 'completed' ? '2026-11-01T00:00:00.000Z' : null,
       updated_at: '2026-11-01T00:00:00.000Z',
@@ -49,7 +49,7 @@ async function mockProgress(page: Page): Promise<void> {
         contentType: 'application/json; charset=utf-8',
         body: JSON.stringify({
           lecture_id: id,
-          group_id: 'g05',
+          group_id: 'pln',
           status: body.status ?? WIRE.not_started,
           completed_at: null,
           updated_at: new Date().toISOString(),
@@ -87,7 +87,7 @@ for (const [theme, expectedImpl] of SKINS) {
       await useTheme(page, theme, 'light')
       await mockProgress(page)
       await page.context().addInitScript(() => localStorage.setItem('lecture:debug', '1'))
-      await gotoAndSettle(page, '/g05/L19')
+      await gotoAndSettle(page, '/pln/L02')
       await storeReady(page)
 
       const menuSlot = page.locator('.VPNavBar [data-slot="NavCourseMenu"]')
@@ -112,37 +112,37 @@ for (const [theme, expectedImpl] of SKINS) {
       // Two columns present: groups on left, lectures on right
       const groupLinks = page.locator('.cm-groups li a')
       const groupCount = await groupLinks.count()
-      expect(groupCount).toBe(17)
+      expect(groupCount).toBe(4) // the demo content has 4 groups
 
-      // Initial active group on /g05/L19 is G05
+      // Initial active group on /pln/L02 is PLN
       const activeGroupLink = page.locator('.cm-groups li a.is-active')
-      await expect(activeGroupLink).toContainText('G05')
+      await expect(activeGroupLink).toContainText('PLN')
 
       // 2. Hover preview: hovering another group previews its lectures in the right column without navigating
-      const g01Link = groupLinks.first()
-      await g01Link.hover()
-      await expect(page.locator('.cm-groups li a.is-active')).toContainText('G01')
-      await expect(page.locator('.cm-lec header b')).toContainText('G01')
-      // the current lecture mark belongs to the current group only (G01 also has a lecture 19)
+      const meaLink = groupLinks.first()
+      await meaLink.hover()
+      await expect(page.locator('.cm-groups li a.is-active')).toContainText('MEA')
+      await expect(page.locator('.cm-lec header b')).toContainText('MEA')
+      // the current lecture mark belongs to the current group only (MEA also has a lecture 2)
       await expect(page.locator('.cm-lec ol li a[aria-current="page"]')).toHaveCount(0)
       // URL has NOT navigated
-      expect(page.url()).toContain('/g05/L19')
+      expect(page.url()).toContain('/pln/L02')
 
       // 3. Click group row opens group page
       await page.locator('.cm-lec header a').click()
-      await expect(page).toHaveURL(/\/g01\/?$/)
+      await expect(page).toHaveURL(/\/mea\/?$/)
       await expect(dialog).toBeHidden()
       await expect(trigger).toHaveAttribute('aria-expanded', 'false')
 
       // 4. Click lecture row opens lecture
-      await gotoAndSettle(page, '/g05/L19')
+      await gotoAndSettle(page, '/pln/L02')
       await storeReady(page)
       await trigger.click()
       await expect(dialog).toBeVisible()
 
       const firstLec = page.locator('.cm-lec ol li a').first()
       await firstLec.click()
-      await expect(page).toHaveURL(/\/g05\/L0?1\/?$/)
+      await expect(page).toHaveURL(/\/pln\/L0?1\/?$/)
       await expect(dialog).toBeHidden()
 
       expect(pageErrors.map(String)).toEqual([])
@@ -153,7 +153,7 @@ for (const [theme, expectedImpl] of SKINS) {
       await useTheme(page, theme, 'light')
       await mockProgress(page)
       await page.context().addInitScript(() => localStorage.setItem('lecture:debug', '1'))
-      await gotoAndSettle(page, '/g05/L19')
+      await gotoAndSettle(page, '/pln/L02')
       await storeReady(page)
 
       const trigger = page.locator('.cm-trigger')
@@ -161,24 +161,24 @@ for (const [theme, expectedImpl] of SKINS) {
       const dialog = page.locator('.cm[role="dialog"]')
       await expect(dialog).toBeVisible()
 
-      // G05-L01 is completed ('read'), G05-L19 is in_progress ('reading'), G05-L02 is not_started ('unread')
+      // PLN-L01 is completed ('read'), PLN-L02 is in_progress ('reading'), PLN-L03 is not_started ('unread')
       const lecL01 = page.locator('.cm-lec ol li a', { hasText: '01' }).first()
       await expect(lecL01.locator('.mk')).toHaveAttribute('data-status', 'read')
 
-      const lecL19 = page.locator('.cm-lec ol li a', { hasText: '19' }).first()
-      await expect(lecL19.locator('.mk')).toHaveAttribute('data-status', 'reading')
+      const lecL02 = page.locator('.cm-lec ol li a', { hasText: '02' }).first()
+      await expect(lecL02.locator('.mk')).toHaveAttribute('data-status', 'reading')
 
       // Close menu by clicking trigger again
       await trigger.click()
       await expect(dialog).toBeHidden()
 
-      // Mark G05-L19 as completed via the lecture progress card
+      // Mark PLN-L02 as completed via the lecture progress card
       await page.locator('.lpc-seg-btn', { hasText: '已完成' }).click()
 
-      // Re-open course menu: status of L19 is live updated to 'read'
+      // Re-open course menu: status of L02 is live updated to 'read'
       await trigger.click()
       await expect(dialog).toBeVisible()
-      await expect(page.locator('.cm-lec ol li a', { hasText: '19' }).first().locator('.mk')).toHaveAttribute('data-status', 'read')
+      await expect(page.locator('.cm-lec ol li a', { hasText: '02' }).first().locator('.mk')).toHaveAttribute('data-status', 'read')
 
       expect(pageErrors.map(String)).toEqual([])
     })
@@ -188,7 +188,7 @@ for (const [theme, expectedImpl] of SKINS) {
       await useTheme(page, theme, 'light')
       await mockProgress(page)
       await page.context().addInitScript(() => localStorage.setItem('lecture:debug', '1'))
-      await gotoAndSettle(page, '/g05/L19')
+      await gotoAndSettle(page, '/pln/L02')
       await storeReady(page)
 
       const trigger = page.locator('.cm-trigger')
@@ -237,7 +237,7 @@ for (const [theme, expectedImpl] of SKINS) {
       await useTheme(page, theme, 'light')
       await mockProgress(page)
       await page.context().addInitScript(() => localStorage.setItem('lecture:debug', '1'))
-      await gotoAndSettle(page, '/g05/L19')
+      await gotoAndSettle(page, '/pln/L02')
       await storeReady(page)
 
       // Desktop trigger is hidden on phone
@@ -249,25 +249,25 @@ for (const [theme, expectedImpl] of SKINS) {
       const mobileList = page.locator('.cm-mobile-list')
       await expect(mobileList).toBeVisible()
 
-      // On /g05/L19, current group G05 is pre-expanded
-      const g05Row = page.locator('.cm-mob-group', { hasText: 'G05' })
-      const g05Btn = g05Row.locator('.cm-mob-btn')
-      await expect(g05Btn).toHaveAttribute('aria-expanded', 'true')
-      const g05Lecs = g05Row.locator('.cm-mob-lectures')
-      await expect(g05Lecs).toBeVisible()
+      // On /pln/L02, current group PLN is pre-expanded
+      const curRow = page.locator('.cm-mob-group', { hasText: 'PLN' })
+      const curBtn = curRow.locator('.cm-mob-btn')
+      await expect(curBtn).toHaveAttribute('aria-expanded', 'true')
+      const curLecs = curRow.locator('.cm-mob-lectures')
+      await expect(curLecs).toBeVisible()
 
-      // Toggling G05 collapses it
-      await g05Btn.click()
-      await expect(g05Btn).toHaveAttribute('aria-expanded', 'false')
+      // Toggling PLN collapses it
+      await curBtn.click()
+      await expect(curBtn).toHaveAttribute('aria-expanded', 'false')
 
-      // Other groups (e.g. G01) start collapsed; clicking expands them
-      const g01Row = page.locator('.cm-mob-group', { hasText: 'G01' })
-      const g01Btn = g01Row.locator('.cm-mob-btn')
-      await expect(g01Btn).toHaveAttribute('aria-expanded', 'false')
-      await g01Btn.click()
-      await expect(g01Btn).toHaveAttribute('aria-expanded', 'true')
-      const g01Lecs = g01Row.locator('.cm-mob-lectures')
-      await expect(g01Lecs).toBeVisible()
+      // Other groups (e.g. MEA) start collapsed; clicking expands them
+      const meaRow = page.locator('.cm-mob-group', { hasText: 'MEA' })
+      const meaBtn = meaRow.locator('.cm-mob-btn')
+      await expect(meaBtn).toHaveAttribute('aria-expanded', 'false')
+      await meaBtn.click()
+      await expect(meaBtn).toHaveAttribute('aria-expanded', 'true')
+      const meaLecs = meaRow.locator('.cm-mob-lectures')
+      await expect(meaLecs).toBeVisible()
 
       // Test horizontal overflow at 320, 360, 390 px while drawer and group are open
       for (const w of [320, 360, 390]) {
@@ -278,9 +278,9 @@ for (const [theme, expectedImpl] of SKINS) {
       }
 
       // Clicking lecture link navigates and closes drawer
-      const targetLec = g01Lecs.locator('li a').first()
+      const targetLec = meaLecs.locator('li a').first()
       await targetLec.click()
-      await expect(page).toHaveURL(/\/g01\/L0?1\/?$/)
+      await expect(page).toHaveURL(/\/mea\/L0?1\/?$/)
 
       expect(pageErrors.map(String)).toEqual([])
     })

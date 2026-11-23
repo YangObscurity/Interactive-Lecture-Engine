@@ -3,10 +3,16 @@
  *   plugins/lectureExportPlugin.mjs, scripts/pregenerate_assets.mjs, scripts/check_body_links.py and site audit scripts.
  * V2 may restyle anything, but every assertion here must keep passing. Expected counts are
  * derived from the markdown sources at test time — no hard-coded numbers, no vacuous passes.
+ *
+ * S6: the sources are the engine's demo content (templates/demo-content/lectures, the content build:e2e builds),
+ * not site/docs (which content:sync refills with whatever content folder the last owner build used).
  */
 import fs from 'node:fs'
 import path from 'node:path'
-import { test, expect, gotoAndSettle, DOCS_ROOT } from './fixtures'
+import { test, expect, gotoAndSettle, SITE_ROOT } from './fixtures'
+
+/** Lecture sources of the demo content: lectures/<dir>/ is served at /<dir>/. */
+const LECTURES_ROOT = path.join(SITE_ROOT, '..', 'templates', 'demo-content', 'lectures')
 
 // ---------------------------------------------------------------- markdown-derived expectations
 
@@ -45,7 +51,7 @@ interface LectureInfo {
 }
 
 function readLecture(rel: string): LectureInfo {
-  const raw = fs.readFileSync(path.join(DOCS_ROOT, rel), 'utf8')
+  const raw = fs.readFileSync(path.join(LECTURES_ROOT, rel), 'utf8')
   const body = stripFences(raw)
   const count = (re: RegExp) => (body.match(re) || []).length
   return {
@@ -60,7 +66,7 @@ function readLecture(rel: string): LectureInfo {
 }
 
 function lecturesIn(dir: string): LectureInfo[] {
-  const abs = path.join(DOCS_ROOT, dir)
+  const abs = path.join(LECTURES_ROOT, dir)
   if (!fs.existsSync(abs)) return []
   return fs
     .readdirSync(abs)
@@ -71,18 +77,22 @@ function lecturesIn(dir: string): LectureInfo[] {
 
 /** group dirs whose index.md mounts <GroupIndex /> */
 const GROUP_DIRS = fs
-  .readdirSync(DOCS_ROOT, { withFileTypes: true })
+  .readdirSync(LECTURES_ROOT, { withFileTypes: true })
   .filter((d) => d.isDirectory() && !d.name.startsWith('.'))
   .map((d) => d.name)
   .filter((d) => {
-    const idx = path.join(DOCS_ROOT, d, 'index.md')
+    const idx = path.join(LECTURES_ROOT, d, 'index.md')
     return fs.existsSync(idx) && /<GroupIndex\b/.test(fs.readFileSync(idx, 'utf8'))
   })
   .sort()
 
-// Primary contract lecture: first G01 lecture that has chart placeholders, cites AND math.
-const G01 = lecturesIn('g01')
-const PRIMARY = G01.find((l) => l.figures > 0 && l.cites > 0 && l.mathBlocks + l.mathInline > 0)
+// Primary contract lecture: the first lecture of the first group (MEA in the demo) that has chart placeholders and
+// math, preferring one that also has cites. The demo content has no .cite capsule yet (requested from line A2), so
+// the cite counts below are then 0 and the SSR test self-checks on chart placeholders until a demo lecture has a cite.
+const FIRST_DIR = GROUP_DIRS.includes('mea') ? 'mea' : GROUP_DIRS[0]!
+const FIRST = lecturesIn(FIRST_DIR)
+const withChartsAndMath = FIRST.filter((l) => l.figures > 0 && l.mathBlocks + l.mathInline > 0)
+const PRIMARY = withChartsAndMath.find((l) => l.cites > 0) ?? withChartsAndMath[0]
 
 // ---------------------------------------------------------------- shared helpers
 
@@ -120,14 +130,14 @@ async function assertChartsContract(page: import('@playwright/test').Page, info:
 
 test.describe('DOM contract', () => {
   test('preconditions: lecture & group lists are non-empty (no vacuous pass)', () => {
-    expect(G01.length, 'docs/g01/L*.md').toBeGreaterThan(0)
-    expect(PRIMARY, 'a g01 lecture with charts + cites + math').toBeDefined()
+    expect(FIRST.length, `lectures/${FIRST_DIR}/L*.md`).toBeGreaterThan(0)
+    expect(PRIMARY, `a ${FIRST_DIR} lecture with charts + math`).toBeDefined()
     expect(GROUP_DIRS.length, 'group index pages with <GroupIndex />').toBeGreaterThan(0)
   })
 
   test('lecture page: shell hooks, charts, cites, math, body-link gate', async ({ page, pageErrors, consoleErrors }) => {
     const info = PRIMARY
-    if (!info) throw new Error('no primary g01 lecture (see preconditions test)')
+    if (!info) throw new Error('no primary lecture (see preconditions test)')
     const done = await gotoAndSettle(page, info.url)
     expect(done, '__CHARTS_DONE__ observed').toBe(true)
 
@@ -156,11 +166,16 @@ test.describe('DOM contract', () => {
 
   test('lecture SSR HTML: no <a href="http…"> anywhere in the shipped page (check_body_links gate)', async ({ request }, testInfo) => {
     test.skip(testInfo.project.name !== 'prod', 'gate applies to built HTML only')
-    if (!PRIMARY) throw new Error('no primary g01 lecture (see preconditions test)')
+    if (!PRIMARY) throw new Error('no primary lecture (see preconditions test)')
     const res = await request.get(PRIMARY.url)
     expect(res.status()).toBe(200)
     const html = await res.text()
-    expect(html.match(/class="cite"/g)?.length ?? 0, 'instrument self-check: cites present').toBeGreaterThan(0)
+    if (PRIMARY.cites > 0) {
+      expect(html.match(/class="cite"/g)?.length ?? 0, 'instrument self-check: cites present').toBeGreaterThan(0)
+    } else {
+      // no demo lecture has a .cite capsule yet (requested from line A2): self-check on the lecture's charts instead
+      expect(html.match(/<figure class="chart"/g)?.length ?? 0, 'instrument self-check: chart placeholders present').toBe(PRIMARY.figures)
+    }
     expect(html.match(/<a\s[^>]*href="https?:\/\/[^"]*"[^>]*>/g) ?? []).toEqual([])
   })
 
@@ -185,9 +200,9 @@ test.describe('DOM contract', () => {
   for (const dir of GROUP_DIRS) {
     test(`group ${dir}: first charted lecture renders every figure`, async ({ page, pageErrors, consoleErrors }) => {
       const lecs = lecturesIn(dir)
-      expect(lecs.length, `docs/${dir}/L*.md`).toBeGreaterThan(0)
+      expect(lecs.length, `lectures/${dir}/L*.md`).toBeGreaterThan(0)
       const info = lecs.find((l) => l.figures > 0) ?? lecs[0]
-      if (!info) throw new Error(`docs/${dir}: no lecture found`)
+      if (!info) throw new Error(`lectures/${dir}: no lecture found`)
       await gotoAndSettle(page, info.url)
       if (info.figures + info.inlineMermaid > 0) await assertChartsContract(page, info)
       await expect(page.locator('.vp-doc a[href^="http"]')).toHaveCount(0)

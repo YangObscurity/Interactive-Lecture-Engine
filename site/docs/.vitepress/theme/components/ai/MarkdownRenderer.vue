@@ -23,12 +23,12 @@
 
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { Marked } from 'marked'
-import katex from 'katex'
 import DOMPurify from 'dompurify'
 import { createHighlighter, type Highlighter } from 'shiki'
 import { currentLang, translate } from '../../../i18n/index.ts'
 import { ICONS } from './icons'
-import { resolveDomPurifyInstance, sanitizeHtmlFailClosed } from './markdownSanitize'
+import { resolveDomPurifyInstance } from './markdownSanitize'
+import { codeSlot, mathSlot, renderMarkdownWithMath } from './markdownMath'
 
 interface Props {
   /** 待渲染的 Markdown 源码 */
@@ -186,13 +186,17 @@ function renderCodeHighlight(code: string, rawLang: string): string {
         themes: {
           light: 'github-light',
           dark: 'github-dark'
-        }
+        },
+        // both themes as --shiki-light / --shiki-dark variables (as in lectures); the scoped CSS picks one
+        defaultColor: false
       })
     } catch {
       htmlResult = `<pre class="shiki-fallback"><code>${escapeHtml(code)}</code></pre>`
     }
   } else {
-    htmlResult = `<pre class="shiki-fallback"><code>${escapeHtml(code)}</code></pre>`
+    // the highlighter is still loading: do not cache this plain fallback, or the re-render that follows
+    // highlighterReady would get it back from the cache and the block would never be coloured
+    return `<pre class="shiki-fallback"><code>${escapeHtml(code)}</code></pre>`
   }
 
   if (highlightCache.size >= MAX_CACHE_SIZE) {
@@ -204,20 +208,10 @@ function renderCodeHighlight(code: string, rawLang: string): string {
 }
 
 /**
- * 封装 KaTeX 渲染
+ * KaTeX 渲染：先占位，消毒后再填入（见 markdownMath.ts，KaTeX 输出不经过模型内容消毒配置）
  */
 function renderLatex(tex: string, displayMode: boolean): string {
-  try {
-    return katex.renderToString(tex, {
-      displayMode,
-      throwOnError: false,
-      errorColor: 'currentColor',
-      strict: false,
-      output: 'htmlAndMathml'
-    })
-  } catch {
-    return `<span class="katex-fallback">${escapeHtml(tex)}</span>`
-  }
+  return mathSlot(tex, displayMode)
 }
 
 /**
@@ -330,7 +324,7 @@ function buildMarkedInstance(): Marked {
           `      <span class="btn-text">${copyLabel}</span>\n` +
           `    </button>\n` +
           `  </div>\n` +
-          `  <div class="ai-code-body">${highlighted}</div>\n` +
+          `  <div class="ai-code-body">${codeSlot(highlighted, text)}</div>\n` +
           `</div>\n`
       }
     }
@@ -342,11 +336,16 @@ function buildMarkedInstance(): Marked {
 const parser = buildMarkedInstance()
 
 /**
- * XSS 安全清洗过滤（fail-closed，禁止 style 属性注入、禁止 img、强制 rel="noopener noreferrer"）
+ * XSS 安全清洗过滤（fail-closed，禁止 style 属性注入、禁止 img、强制 rel="noopener noreferrer"）。
+ * 顺序：marked 解析（公式只留占位）→ 模型内容消毒 → 填入 KaTeX 输出（仅经 KaTeX 专用消毒）。
  */
-function sanitizeHtmlSafe(rawHtml: string): string {
+function renderAndSanitize(markdown: string): string {
   const win = typeof window !== 'undefined' ? window : null
-  return sanitizeHtmlFailClosed(rawHtml, resolveDomPurifyInstance(DOMPurify, win))
+  return renderMarkdownWithMath(
+    markdown,
+    (md) => parser.parse(md) as string,
+    resolveDomPurifyInstance(DOMPurify, win),
+  )
 }
 
 /**
@@ -370,8 +369,7 @@ const renderedHtml = computed(() => {
     .replace(/\{\{\s*selection\s*\}\}/gi, translate(locale, 'ai.noSelection'))
 
   try {
-    const rawParsed = parser.parse(raw) as string
-    return sanitizeHtmlSafe(rawParsed)
+    return renderAndSanitize(raw)
   } catch {
     return `<p class="render-error">${escapeHtml(raw)}</p>`
   }
@@ -644,12 +642,17 @@ onUnmounted(() => {
   background-color: var(--lec-accent-tint);
 }
 
-/* 行内公式 */
+/* 行内公式：伴读消息不用正文的 --lec-math-inline-size（.81em，为正文行距统一而缩小），
+   否则叠上 custom.css 的 .math-inline .katex 1.02em，公式只有消息字号的 0.83 倍 */
 .ai-markdown-content :deep(.math-inline) {
   display: inline-block;
   vertical-align: middle;
   padding: 0 0.15em;
-  font-size: var(--lec-math-inline-size, 0.9em);
+  font-size: 1em;
+}
+
+.ai-markdown-content :deep(.math-inline .katex) {
+  font-size: 1.1em;
 }
 
 /* 行间公式独立容器 */

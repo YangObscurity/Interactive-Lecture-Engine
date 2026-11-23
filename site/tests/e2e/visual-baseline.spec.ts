@@ -1,21 +1,23 @@
 /**
- * Visual baseline (plan §7 P0 / §8 "视觉"): home, LR group page, one G05 lecture, and the AI
+ * Visual baseline (plan §7 P0 / §8 "视觉"): home, the MEA group page, one MEA lecture, and the AI
  * companion sidebar opened on that lecture — desktop 1440x900 / mobile 390x844 × light / dark.
  *
- * Baselines were recorded on V1 (main b5e6c2e6) with
- *   npx playwright test --project prod --update-snapshots tests/e2e/visual-baseline.spec.ts
+ * The P0 references were recorded on V1, on the site owner's lectures; S6 moved the suites to the demo content
+ * (templates/demo-content) and those pictures were removed, since V1 never rendered the demo. No baselines are
+ * committed for this file: a run with VISUAL_V1=1 records them on the first pass (`--update-snapshots`) and
+ * compares later runs against that recording.
  * Tolerance: VISUAL_TOLERANCE env (maxDiffPixelRatio, default 0 — see playwright.config.ts).
  * Home / group pages are full-page; lecture + sidebar are viewport-only.
  */
 import type { Page, Locator } from '@playwright/test'
 import { test, expect, gotoAndSettle } from './fixtures'
 
-const LECTURE = '/g05/L19' // G05 databases, 4 charts (2 mermaid + 2 echarts)
+const LECTURE = '/mea/L04' // MEA (demo content): a chart, inline formulas, a table and code
+const GROUP = '/mea/'
 
-// P2b (theme packs, fonts, typography) intentionally changes every page, so these V1 screenshots are
-// kept as a frozen reference only — they no longer describe the expected V2 look. V2 baselines live in
-// visual-v2.spec.ts. Run this file explicitly with VISUAL_V1=1 to diff V2 against V1.
-test.skip(!process.env.VISUAL_V1, 'V1 reference baselines (P0); set VISUAL_V1=1 to compare')
+// P2b (theme packs, fonts, typography) intentionally changes every page; the V2 baselines live in
+// visual-v2.spec.ts. Run this file explicitly with VISUAL_V1=1.
+test.skip(!process.env.VISUAL_V1, 'P0 reference set (no committed baselines); set VISUAL_V1=1 to record or compare')
 
 const VIEWPORTS = {
   desktop: { width: 1440, height: 900 },
@@ -65,23 +67,23 @@ for (const [vpName, viewport] of Object.entries(VIEWPORTS)) {
         })
       })
 
-      test(`lr group @visual`, async ({ page }) => {
-        await gotoAndSettle(page, '/lr/')
-        await expect(page).toHaveScreenshot(`lr-group-${vpName}-${theme}.png`, {
+      test(`mea group @visual`, async ({ page }) => {
+        await gotoAndSettle(page, GROUP)
+        await expect(page).toHaveScreenshot(`mea-group-${vpName}-${theme}.png`, {
           fullPage: true,
           mask: dynamicMasks(page),
         })
       })
 
-      test(`g05 lecture @visual`, async ({ page }) => {
+      test(`mea lecture @visual`, async ({ page }) => {
         const done = await gotoAndSettle(page, LECTURE)
         expect(done, '__CHARTS_DONE__').toBe(true)
-        await expect(page).toHaveScreenshot(`g05-L19-${vpName}-${theme}.png`, {
+        await expect(page).toHaveScreenshot(`mea-L04-${vpName}-${theme}.png`, {
           mask: dynamicMasks(page),
         })
       })
 
-      test(`g05 lecture + AI sidebar @visual`, async ({ page }) => {
+      test(`mea lecture + AI sidebar @visual`, async ({ page }) => {
         await gotoAndSettle(page, LECTURE)
         const trigger = page.locator('.ai-trigger-tab')
         await expect(trigger).toBeVisible()
@@ -96,7 +98,7 @@ for (const [vpName, viewport] of Object.entries(VIEWPORTS)) {
         }
         await expect(page.locator('.ai-sidebar-shell.is-open')).toBeVisible()
         await page.waitForLoadState('networkidle', { timeout: 10_000 }).catch(() => {})
-        await expect(page).toHaveScreenshot(`g05-L19-ai-sidebar-${vpName}-${theme}.png`, {
+        await expect(page).toHaveScreenshot(`mea-L04-ai-sidebar-${vpName}-${theme}.png`, {
           mask: dynamicMasks(page),
         })
       })

@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="480" height="180" viewBox="0 0 480 180">
+  <rect x="0" y="0" width="480" height="180" fill="#F8FAFC"/>
+  <line x1="60" y1="60" x2="190" y2="60" stroke="#334155" stroke-width="3"/>
+  <line x1="60" y1="120" x2="190" y2="120" stroke="#334155" stroke-width="3"/>
+  <path d="M190 30 H250 A60 60 0 0 1 250 150 H190 Z" fill="#E0F2FE" stroke="#1E3A8A" stroke-width="3"/>
+  <line x1="310" y1="90" x2="420" y2="90" stroke="#334155" stroke-width="3"/>
+  <text x="44" y="65" font-size="16" text-anchor="middle" fill="#334155">P</text>
+  <text x="44" y="125" font-size="16" text-anchor="middle" fill="#334155">Q</text>
+  <text x="438" y="95" font-size="16" text-anchor="start" fill="#334155">R</text>
+  <text x="230" y="96" font-size="16" text-anchor="middle" fill="#1E3A8A">AND</text>
+</svg>

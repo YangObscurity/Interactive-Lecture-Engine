@@ -96,8 +96,6 @@ describe('V/content/paths.mts root resolution', () => {
     expect(fromRelEnv.lecturesDir).toBe(path.join(customDir, 'lectures'))
     expect(fromRelEnv.chartsDir).toBe(path.join(customDir, 'charts'))
     expect(fromRelEnv.figuresDir).toBe(path.join(customDir, 'figures'))
-    // the engine's own example figures stay in the engine tree in content mode (like the example charts)
-    expect(fromRelEnv.exampleFiguresDir).toBe(path.join(repo, 'site', 'docs', 'examples', 'public', 'figures'))
     expect(fromRelEnv.conceptsDir).toBe(path.join(customDir, 'concepts'))
     expect(fromRelEnv.promptsFile).toBe(path.join(customDir, 'prompts', 'companion.json'))
     expect(fromRelEnv.promptsExample).toBe(path.join(repo, 'site', 'prompts', 'companion.example.json'))
@@ -146,7 +144,6 @@ describe('V/content/paths.mts root resolution', () => {
     expect(inPlace.lecturesDir).toBe(path.join(repoInPlace, 'site', 'docs'))
     expect(inPlace.chartsDir).toBe(path.join(repoInPlace, 'site', 'docs', 'public', 'charts'))
     expect(inPlace.figuresDir).toBe(path.join(repoInPlace, 'site', 'docs', 'public', 'figures'))
-    expect(inPlace.exampleFiguresDir).toBe(path.join(repoInPlace, 'site', 'docs', 'examples', 'public', 'figures'))
     expect(inPlace.conceptsDir).toBe(path.join(repoInPlace, 'site', 'docs', 'concepts'))
     expect(inPlace.themeDir).toBe(path.join(repoInPlace, 'site', 'docs', '.vitepress', 'themes'))
     expect(inPlace.publicDir).toBe(path.join(repoInPlace, 'site', 'docs', 'public'))
@@ -157,16 +154,39 @@ describe('V/content/paths.mts root resolution', () => {
       graphBindings: path.join(repoInPlace, 'site', 'data', 'graph-bindings.json'),
       notionKnowledgeGraph: path.join(repoInPlace, 'site', 'docs', 'public', 'notion_knowledge_graph.json'),
     })
+
+    // 5. S6: no env, no content root, but the engine's demo content -> content mode on it (demo: true); init still
+    // targets <repo>/content, a content/ that is not a content root is still reported; LECTURE_DEMO=0 keeps in-place
+    const demoDir = path.join(repoInPlace, 'templates', 'demo-content')
+    fs.mkdirSync(demoDir, { recursive: true })
+    fs.writeFileSync(path.join(demoDir, 'groups.ts'), 'export const GROUPS = []\n', 'utf8')
+    const demo = resolveContent({ repoRoot: repoInPlace, env: {} })
+    expect(demo.mode).toBe('content')
+    expect(demo.demo).toBe(true)
+    expect(demo.root).toBe(demoDir)
+    expect(demo.lecturesDir).toBe(path.join(demoDir, 'lectures'))
+    expect(demo.initTarget).toBe(path.join(repoInPlace, 'content'))
+    expect(demo.ignoredContentDir).toBe(path.join(repoInPlace, 'content'))
+    expect(resolveContent({ repoRoot: repoInPlace, env: { LECTURE_DEMO: '0' } }).mode).toBe('in-place')
+    // a real content root and LECTURE_CONTENT_DIR both win over the demo
+    expect(resolveContent({ repoRoot: repoInPlace, env: { LECTURE_CONTENT_DIR: 'elsewhere' } }).demo).toBeUndefined()
+    fs.writeFileSync(path.join(repoInPlace, 'content', 'groups.ts'), 'export const GROUPS = []\n', 'utf8')
+    const own = resolveContent({ repoRoot: repoInPlace, env: {} })
+    expect(own.root).toBe(path.join(repoInPlace, 'content'))
+    expect(own.demo).toBeUndefined()
   })
 
   it('current repository resolves by its own layout (content mode once content/ is a content root, S2)', () => {
     const paths = resolveContent({ env: {} })
     const contentDir = path.join(REPO_ROOT, 'content')
     const isContent = ['site.config.ts', 'groups.ts'].some((m) => fs.existsSync(path.join(contentDir, m)))
-    expect(paths.mode).toBe(isContent ? 'content' : 'in-place')
+    // S6: without content of its own the repository shows the engine's demo content (templates/demo-content)
+    const demoDir = path.join(REPO_ROOT, 'templates', 'demo-content')
+    const isDemo = !isContent && fs.existsSync(path.join(demoDir, 'groups.ts'))
+    expect(paths.mode).toBe(isContent || isDemo ? 'content' : 'in-place')
     expect(paths.repoRoot).toBe(REPO_ROOT)
     expect(paths.ignoredContentDir).toBeNull()
-    const base = isContent ? contentDir : SITE_DIR
+    const base = isContent ? contentDir : isDemo ? demoDir : SITE_DIR
     expect(paths.siteTexts).toBe(path.join(base, 'site-texts.json'))
     expect(paths.promptsFile).toBe(path.join(base, 'prompts', 'companion.json'))
   })
@@ -270,7 +290,6 @@ describe('groups-source.mts candidate order', () => {
       'content/groups.ts',
       'content-groups.mts',
       'groups.mts',
-      'groups.example.mts',
     ])
   })
 
@@ -495,7 +514,7 @@ describe('scripts/content/sync.mts', () => {
 
     // Engine top-level collision in lectures/ (`en` is a translation tree, tested in content-authoring.test.ts;
     // a file directly under it is refused like a collision)
-    for (const reserved of ['index.md', 'dashboard.md', 'en', 'examples', 'public', '.vitepress']) {
+    for (const reserved of ['index.md', 'dashboard.md', 'en', 'concepts', 'public', '.vitepress']) {
       const target = path.join(contentRoot, 'lectures', reserved)
       if (reserved.endsWith('.md')) {
         fs.writeFileSync(target, 'clash\n', 'utf8')
@@ -534,7 +553,6 @@ describe('engine source separation invariants (Deliverable 1)', () => {
       /['"]public\/charts['"]|path\.(?:join|resolve)\([^)]*['"]public['"],\s*['"]charts['"]/,
       /['"]site-texts(?:\.example)?\.json['"]/,
       /['"]companion(?:\.example)?\.json['"]|['"]prompts\/companion(?:\.example)?\.json['"]/,
-      /['"]examples\/public\/charts['"]|path\.(?:join|resolve)\([^)]*['"]examples['"],\s*['"]public['"],\s*['"]charts['"]/,
     ]
 
     for (const file of allFiles) {

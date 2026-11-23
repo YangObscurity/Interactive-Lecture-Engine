@@ -2,11 +2,11 @@
  * P3b WP-A2: access tiers in the browser (docs-dev/ACCESS.md).
  *
  * Runs only in the `access` Playwright project, against a dist built by `npm run build:e2e:access`
- * (groups G06 inline, G09 `authenticated`, G12 for the gateway group `staff`), served by tests/e2e/access-server.mjs.
+ * (demo content templates/demo-content, access.e2e.json: MEA and LOG inline, PLN `authenticated`, DAT for the gateway group `staff`), served by tests/e2e/access-server.mjs.
  * The authenticating gateway is simulated with `context.route`: a denied path answers 403, everything else goes through.
  *
- *   anonymous  : `/_access/authenticated/**`, `/_access/grp-*` and the pages and page chunks of G09 and G12 are denied
- *   signed-in  : only `/_access/grp-*` and G12 are denied
+ *   anonymous  : `/_access/authenticated/**`, `/_access/grp-*` and the pages and page chunks of PLN and DAT are denied
+ *   signed-in  : only `/_access/grp-*` and DAT are denied
  *   staff      : nothing is denied
  */
 import fs from 'node:fs'
@@ -26,18 +26,20 @@ interface ManifestTier {
 }
 const manifest = JSON.parse(fs.readFileSync(path.join(ROOT, 'access-manifest.json'), 'utf8')) as { tiers: ManifestTier[] }
 const tierOf = (groupId: string): string => manifest.tiers.find((t) => t.groupIds.includes(groupId))?.id as string
-const TIER = { G09: tierOf('G09'), G12: tierOf('G12') }
-const DIR = { G06: 'g06', G09: 'g09', G12: 'g12' } as const
+const TIER = { PLN: tierOf('PLN'), DAT: tierOf('DAT') }
+const DIR = { MEA: 'mea', LOG: 'log', PLN: 'pln', DAT: 'dat' } as const
 type GroupId = keyof typeof DIR
-const ALL: GroupId[] = ['G06', 'G09', 'G12']
+const ALL: GroupId[] = ['MEA', 'LOG', 'PLN', 'DAT']
+/** The groups without a restricted tier (access.e2e.json of the demo content). */
+const INLINE: GroupId[] = ['MEA', 'LOG']
 
 type Who = 'anonymous' | 'signed-in' | 'staff'
-const ALLOWED: Record<Who, GroupId[]> = { anonymous: ['G06'], 'signed-in': ['G06', 'G09'], staff: ALL }
+const ALLOWED: Record<Who, GroupId[]> = { anonymous: INLINE, 'signed-in': [...INLINE, 'PLN'], staff: ALL }
 
 /** The paths the simulated gateway refuses for each reader. */
 const DENIED: Record<Who, RegExp[]> = {
-  anonymous: [/^\/_access\/(authenticated|grp-[0-9a-f]+)\//, /^\/(en\/)?g09(\/|$)/, /^\/(en\/)?g12(\/|$)/, /^\/assets\/(g09|g12|en_g09|en_g12)_/],
-  'signed-in': [/^\/_access\/grp-[0-9a-f]+\//, /^\/(en\/)?g12(\/|$)/, /^\/assets\/(g12|en_g12)_/],
+  anonymous: [/^\/_access\/(authenticated|grp-[0-9a-f]+)\//, /^\/(en\/)?pln(\/|$)/, /^\/(en\/)?dat(\/|$)/, /^\/assets\/(pln|dat|en_pln|en_dat)_/],
+  'signed-in': [/^\/_access\/grp-[0-9a-f]+\//, /^\/(en\/)?dat(\/|$)/, /^\/assets\/(dat|en_dat)_/],
   staff: [],
 }
 
@@ -46,14 +48,14 @@ const readJson = <T>(...parts: string[]): T => JSON.parse(fs.readFileSync(path.j
 interface Slice {
   totals: { lectures: number; charts: number }
 }
-const slice = (g: 'G09' | 'G12') => readJson<Slice>('_access', TIER[g], 'site-data.json')
-const tierGraph = (g: 'G09' | 'G12') => readJson<unknown[]>('_access', TIER[g], 'graph.json')
+const slice = (g: 'PLN' | 'DAT') => readJson<Slice>('_access', TIER[g], 'site-data.json')
+const tierGraph = (g: 'PLN' | 'DAT') => readJson<unknown[]>('_access', TIER[g], 'graph.json')
 const lectureFiles = (g: GroupId): string[] => fs.readdirSync(path.join(DIST, DIR[g])).filter((f) => /^L\d+\.html$/.test(f)).sort()
 
 /** What the page must show for a reader: inline numbers (read from the SSR home page) plus the allowed tiers' slices. */
 function expectedHome(who: Who, inlineHome: { lectures: number; charts: number }) {
   const allowed = ALLOWED[who]
-  const restricted = allowed.filter((g): g is 'G09' | 'G12' => g !== 'G06')
+  const restricted = allowed.filter((g): g is 'PLN' | 'DAT' => !INLINE.includes(g))
   const inlineNodes = readJson<unknown[]>('notion_knowledge_graph.json').length
   return {
     groups: allowed,
@@ -110,7 +112,7 @@ async function searchLinks(page: Page, query: string): Promise<string[]> {
   return hrefs
 }
 
-const SEARCH_WORD: Record<'G09' | 'G12', string> = { G09: 'VPC', G12: 'FreeRTOS' }
+const SEARCH_WORD: Record<'PLN' | 'DAT', string> = { PLN: '关键路径', DAT: '汇总' }
 
 for (const who of ['anonymous', 'signed-in', 'staff'] as const) {
   test.describe(`gateway: ${who}`, () => {
@@ -160,7 +162,7 @@ for (const who of ['anonymous', 'signed-in', 'staff'] as const) {
 
       // merged graph: the inline graph plus the graph.json of the allowed tiers, nothing of the others
       const graphs = gw.requested.filter((p) => p.endsWith('/graph.json')).sort()
-      const expectGraphs = allowed.filter((g): g is 'G09' | 'G12' => g !== 'G06').map((g) => `/_access/${TIER[g]}/graph.json`).sort()
+      const expectGraphs = allowed.filter((g): g is 'PLN' | 'DAT' => !INLINE.includes(g)).map((g) => `/_access/${TIER[g]}/graph.json`).sort()
       expect(graphs).toEqual(expectGraphs)
 
       // P4b dependency canvas (`graph` mode): only allowed groups & `/_access/<T>/canvas.json` requests
@@ -175,7 +177,7 @@ for (const who of ['anonymous', 'signed-in', 'staff'] as const) {
         await expect(page.locator(`.cv-node[data-id^="${DIR[deniedGroup]}-"]`)).toHaveCount(0)
       }
       const canvases = gw.requested.filter((p) => p.endsWith('/canvas.json')).sort()
-      const expectCanvases = allowed.filter((g): g is 'G09' | 'G12' => g !== 'G06').map((g) => `/_access/${TIER[g]}/canvas.json`).sort()
+      const expectCanvases = allowed.filter((g): g is 'PLN' | 'DAT' => !INLINE.includes(g)).map((g) => `/_access/${TIER[g]}/canvas.json`).sort()
       expect(canvases).toEqual(expectCanvases)
 
       // sidebar of an allowed lecture page (restricted tiers: it appears when the slice has arrived)
@@ -189,16 +191,16 @@ for (const who of ['anonymous', 'signed-in', 'staff'] as const) {
       // search: an allowed group's distinctive word finds pages of the group, a denied one finds nothing of it
       await gotoAndSettle(page, '/')
       await page.waitForSelector('html[data-hydrated="1"]')
-      for (const g of ['G09', 'G12'] as const) {
+      for (const g of ['PLN', 'DAT'] as const) {
         const links = await searchLinks(page, SEARCH_WORD[g])
         const mine = links.filter((h) => h.startsWith(`/${DIR[g]}/`))
         if (allowed.includes(g)) expect(mine.length, `search for ${SEARCH_WORD[g]} finds ${g}`).toBeGreaterThan(0)
         else expect(mine, `search for ${SEARCH_WORD[g]} must not find ${g}`).toEqual([])
-        for (const other of ['G09', 'G12'] as const) if (!allowed.includes(other)) expect(links.filter((h) => h.startsWith(`/${DIR[other]}/`))).toEqual([])
+        for (const other of ['PLN', 'DAT'] as const) if (!allowed.includes(other)) expect(links.filter((h) => h.startsWith(`/${DIR[other]}/`))).toEqual([])
       }
 
       // nothing outside the allowed tiers was ever delivered
-      for (const g of ['G09', 'G12'] as const) {
+      for (const g of ['PLN', 'DAT'] as const) {
         if (allowed.includes(g)) expect(gw.denied.filter((p) => p.startsWith(`/_access/${TIER[g]}/`))).toEqual([])
       }
       expect(hydration).toEqual([])
@@ -209,13 +211,13 @@ for (const who of ['anonymous', 'signed-in', 'staff'] as const) {
       test('denied pages answer 403 and the home page never asks for a denied page chunk', async ({ page, pageErrors }) => {
         const hydration = watchHydration(page)
         const gw = await installGateway(page, who)
-        for (const p of ['/g09/L01', '/g09/', '/g12/L01', '/en/g09/', '/en/g12/']) {
+        for (const p of ['/pln/L01', '/pln/', '/dat/L01', '/en/pln/', '/en/dat/']) {
           const res = await page.goto(p)
           expect(res?.status(), p).toBe(403)
         }
         await gotoAndSettle(page, '/')
       await page.waitForSelector('html[data-hydrated="1"]')
-        expect(gw.requested.filter((p) => /^\/assets\/(g09|g12|en_g09|en_g12)_/.test(p))).toEqual([])
+        expect(gw.requested.filter((p) => /^\/assets\/(pln|dat|en_pln|en_dat)_/.test(p))).toEqual([])
         expect(hydration).toEqual([])
         expect(pageErrors).toEqual([])
       })
@@ -223,12 +225,12 @@ for (const who of ['anonymous', 'signed-in', 'staff'] as const) {
       test('the group page is rendered on the server, hydrates cleanly and lists every lecture', async ({ page, request, pageErrors }) => {
         const hydration = watchHydration(page)
         await installGateway(page, who)
-        const g = 'G09' as const
+        const g = 'PLN' as const
         const meta = readJson<{ groups: Array<{ value: { title: string; lectures: Array<{ text: string; link: string }> } }> }>('_access', TIER[g], 'site-data.json').groups[0]?.value
         expect(meta).toBeTruthy()
 
         // the server HTML (not the hydrated DOM): the group title and every lecture of the group
-        const res = await request.get('/g09/')
+        const res = await request.get('/pln/')
         expect(res.status()).toBe(200)
         const html = await res.text()
         expect(html).toContain(escapeHtml(meta?.title ?? ''))
@@ -239,7 +241,7 @@ for (const who of ['anonymous', 'signed-in', 'staff'] as const) {
         }
         const ssrRows = (html.match(/class="gp-lc/g) ?? []).length
 
-        await gotoAndSettle(page, '/g09/')
+        await gotoAndSettle(page, '/pln/')
         const rows = page.locator('.gp-lanes a.gp-lc')
         await expect(rows).toHaveCount(meta?.lectures.length ?? -1)
         expect(ssrRows).toBe(meta?.lectures.length)
@@ -250,9 +252,9 @@ for (const who of ['anonymous', 'signed-in', 'staff'] as const) {
       test('a lecture of the restricted tier loads its chart from /_access/<tier>/charts/ and the layout shift is measured', async ({ page, pageErrors }) => {
         const hydration = watchHydration(page)
         const gw = await installGateway(page, who)
-        const chartFile = fs.readdirSync(path.join(DIST, '_access', TIER.G09, 'charts')).sort()[0] as string
-        const lecture = /^G09-(L\d+)\.json$/.exec(chartFile)?.[1]
-        expect(lecture, `a G09 chart file (${chartFile})`).toBeTruthy()
+        const chartFile = fs.readdirSync(path.join(DIST, '_access', TIER.PLN, 'charts')).sort()[0] as string
+        const lecture = /^PLN-(L\d+)\.json$/.exec(chartFile)?.[1]
+        expect(lecture, `a PLN chart file (${chartFile})`).toBeTruthy()
 
         // layout-shift entries and the position of the article, before the page scripts run
         await page.addInitScript(() => {
@@ -271,9 +273,9 @@ for (const who of ['anonymous', 'signed-in', 'staff'] as const) {
           setInterval(sample, 50)
         })
 
-        const done = await gotoAndSettle(page, `/g09/${lecture}`)
+        const done = await gotoAndSettle(page, `/pln/${lecture}`)
         expect(done, 'charts settled').toBe(true)
-        await expect(page.locator('.VPSidebar a.link')).toHaveCount(lectureFiles('G09').length)
+        await expect(page.locator('.VPSidebar a.link')).toHaveCount(lectureFiles('PLN').length)
 
         const chartRequests = gw.requested.filter((p) => p.endsWith('.json') && p.includes('/charts/'))
         expect(chartRequests, 'chart data comes from the tier path').toContain(`/_access/authenticated/charts/${chartFile}`)
@@ -288,7 +290,7 @@ for (const who of ['anonymous', 'signed-in', 'staff'] as const) {
           const near = at === undefined ? [] : w.__LS__.filter((e) => e.t <= at + 150 && e.t >= at - 150)
           return { cls: w.__LS__.reduce((n, e) => n + e.value, 0), sidebarCls: near.reduce((n, e) => n + e.value, 0), sidebarAt: at === undefined ? null : Math.round(at), entries: w.__LS__.length, firstLeft: lefts[0]?.left ?? null, lastLeft: lefts.at(-1)?.left ?? null, viewport: window.innerWidth }
         })
-        const info = { page: `/g09/${lecture}`, who, cumulativeLayoutShift: Number(m.cls.toFixed(4)), shiftOfSidebarAppearing: Number(m.sidebarCls.toFixed(4)), sidebarAppearedAtMs: m.sidebarAt, shiftEntries: m.entries, articleLeftBeforeSidebarPx: m.firstLeft, articleLeftAfterSidebarPx: m.lastLeft, viewportWidthPx: m.viewport }
+        const info = { page: `/pln/${lecture}`, who, cumulativeLayoutShift: Number(m.cls.toFixed(4)), shiftOfSidebarAppearing: Number(m.sidebarCls.toFixed(4)), sidebarAppearedAtMs: m.sidebarAt, shiftEntries: m.entries, articleLeftBeforeSidebarPx: m.firstLeft, articleLeftAfterSidebarPx: m.lastLeft, viewportWidthPx: m.viewport }
         test.info().annotations.push({ type: 'layout-shift', description: JSON.stringify(info) })
         console.warn(`[access-e2e] layout shift ${JSON.stringify(info)}`)
         // the inline sidebar placeholder lays the page out with its sidebar column from the server render:
@@ -308,8 +310,8 @@ for (const who of ['anonymous', 'signed-in', 'staff'] as const) {
         await installGateway(page, who)
         // the page itself came through the gateway, but the tier's site data does not (network error)
         await page.route('**/_access/*/site-data.json', (route) => route.abort())
-        const lecture = (lectureFiles('G09')[0] as string).replace(/\.html$/, '')
-        await page.goto(`/g09/${lecture}`)
+        const lecture = (lectureFiles('PLN')[0] as string).replace(/\.html$/, '')
+        await page.goto(`/pln/${lecture}`)
         await page.waitForSelector('html[data-hydrated="1"]')
         await expect(page.locator('.lec-tb-ph')).toHaveCount(0)
         await expect(page.locator('.lec-tb')).toHaveCount(0)
@@ -334,7 +336,9 @@ interface CurriculumSliceFile {
 
 test.describe('curriculum slices', () => {
   test('every restricted tier has one valid file per locale with only its own groups, and its titles', () => {
-    for (const g of ['G09', 'G12'] as const) {
+    // the English group titles of the demo content (groups.ts `en.title`); the root locale uses the site data title
+    const EN_TITLE = { PLN: 'Planning and Scheduling', DAT: 'Tables and Tidy Data' } as const
+    for (const g of ['PLN', 'DAT'] as const) {
       const site = readJson<{ groups: Array<{ value: { title: string; lectures: Array<{ text: string }> } }> }>('_access', TIER[g], 'site-data.json').groups[0]?.value
       for (const locale of ['root', 'en']) {
         const s = readJson<CurriculumSliceFile>('_access', TIER[g], `curriculum.${locale}.json`)
@@ -342,7 +346,7 @@ test.describe('curriculum slices', () => {
         expect(s.tier).toBe(TIER[g])
         expect(s.locale).toBe(locale)
         expect(s.groups.map((p) => p.value.id)).toEqual([g])
-        expect(s.groups[0]?.value.title).toBe(site?.title)
+        expect(s.groups[0]?.value.title).toBe(locale === 'root' ? site?.title : EN_TITLE[g])
         expect(s.groups[0]?.value.lectures.length).toBe(lectureFiles(g).length)
         // every edge has an end in this tier, and the lecture ids of the tier follow the lecture folder
         const mine = (id: string): boolean => id.startsWith(`${DIR[g]}-l`)
@@ -357,18 +361,18 @@ test.describe('curriculum slices', () => {
 
   // P4a WP-H3: the Notion fields (说明 ...) of a restricted group's lectures travel with its tier file only
   test('the 说明 of a restricted lecture is in its tier file and in no inline or other tier file', () => {
-    const descs = (g: 'G09' | 'G12'): string[] =>
+    const descs = (g: 'PLN' | 'DAT'): string[] =>
       readJson<{ groups: Array<{ value: { lectures: Array<{ desc?: string }> } }> }>('_access', TIER[g], 'curriculum.root.json')
         .groups[0]?.value.lectures.flatMap((l) => (l.desc ? [l.desc] : [])) ?? []
-    const g09 = descs('G09')
-    expect(g09.length, 'G09 lectures have a 说明 in the Notion snapshot').toBeGreaterThan(0)
-    const needles = g09.map((d) => Array.from(d).slice(0, 12).join(''))
-    const others = [path.join(DIST, '_access', TIER.G12, 'curriculum.root.json'), path.join(DIST, '_access', TIER.G12, 'site-data.json')]
+    const pln = descs('PLN')
+    expect(pln.length, 'PLN lectures have a 说明 in the Notion snapshot').toBeGreaterThan(0)
+    const needles = pln.map((d) => Array.from(d).slice(0, 12).join(''))
+    const others = [path.join(DIST, '_access', TIER.DAT, 'curriculum.root.json'), path.join(DIST, '_access', TIER.DAT, 'site-data.json')]
     const walk = (dir: string, out: string[] = []): string[] => {
       for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
         const f = path.join(dir, e.name)
         if (e.isDirectory()) {
-          if (e.name === '_access' || e.name === 'g09') continue
+          if (e.name === '_access' || e.name === 'pln') continue
           walk(f, out)
         } else if (/\.(js|json|html)$/.test(e.name)) out.push(f)
       }
@@ -376,10 +380,10 @@ test.describe('curriculum slices', () => {
     }
     for (const f of [...others, ...walk(DIST)]) {
       const text = fs.readFileSync(f, 'utf8')
-      for (const n of needles) expect(text.includes(n), `${path.relative(DIST, f)} must not contain a G09 说明 (${n})`).toBe(false)
+      for (const n of needles) expect(text.includes(n), `${path.relative(DIST, f)} must not contain a PLN 说明 (${n})`).toBe(false)
     }
     // ... and the tier's own file does carry them, so the checks above are not vacuous
-    const own = fs.readFileSync(path.join(DIST, '_access', TIER.G09, 'curriculum.root.json'), 'utf8')
+    const own = fs.readFileSync(path.join(DIST, '_access', TIER.PLN, 'curriculum.root.json'), 'utf8')
     for (const n of needles) expect(own.includes(n)).toBe(true)
   })
 
@@ -388,19 +392,19 @@ test.describe('curriculum slices', () => {
       await installGateway(page, who)
       await gotoAndSettle(page, '/')
       await page.waitForSelector('html[data-hydrated="1"]')
-      const urls = (['G09', 'G12'] as const).flatMap((g) => [
+      const urls = (['PLN', 'DAT'] as const).flatMap((g) => [
         ...['root', 'en'].map((l) => `/_access/${TIER[g]}/curriculum.${l}.json`),
         `/_access/${TIER[g]}/canvas.json`,
       ])
       const status = await page.evaluate(async (list) => Promise.all(list.map(async (u) => (await fetch(u, { cache: 'no-store' })).status)), urls)
-      const want = urls.map((u) => (ALLOWED[who].some((g) => g !== 'G06' && u.includes(`/${TIER[g as 'G09' | 'G12']}/`)) ? 200 : 403))
+      const want = urls.map((u) => (ALLOWED[who].some((g) => !INLINE.includes(g) && u.includes(`/${TIER[g as 'PLN' | 'DAT']}/`)) ? 200 : 403))
       expect(status).toEqual(want)
     })
   }
 
   test('canvas.json per restricted tier has zero cross-tier leakage', () => {
-    for (const g of ['G09', 'G12'] as const) {
-      const other = g === 'G09' ? 'g12-' : 'g09-'
+    for (const g of ['PLN', 'DAT'] as const) {
+      const other = g === 'PLN' ? 'dat-' : 'pln-'
       const raw = fs.readFileSync(path.join(DIST, '_access', TIER[g], 'canvas.json'), 'utf8')
       expect(raw.includes(other), `${g} canvas.json must not leak ${other}`).toBe(false)
       const s = JSON.parse(raw) as {
@@ -411,7 +415,7 @@ test.describe('curriculum slices', () => {
       }
       expect(s.version).toBe(1)
       expect(s.tier).toBe(TIER[g])
-      expect(s.boardWithInline.reader.groups.map((x) => x.id).sort()).toEqual(['G06', g].sort())
+      expect(s.boardWithInline.reader.groups.map((x) => x.id).sort()).toEqual([...INLINE, g].sort())
       expect(s.tierOwn.reader.groups.map((x) => x.id)).toEqual([g])
     }
   })

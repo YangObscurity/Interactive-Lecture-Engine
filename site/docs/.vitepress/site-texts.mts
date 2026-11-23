@@ -39,19 +39,20 @@ function readTextsFile(file: string): SiteTexts {
 }
 
 /**
- * Texts of the engine's own example site: used only in in-place mode (no content folder) when neither
- * `site/site-texts.json` nor a filled template names the site, so a fresh clone builds its examples.
- * A content folder never falls back to these: its owner fills `site-texts.json` (`npm run init` leaves it empty).
+ * Texts of an unnamed in-place site (`LECTURE_DEMO=0` and no content folder): used only when neither
+ * `site/site-texts.json` nor a filled template names the site, so such a build still passes `assertSiteTexts`
+ * and its home page says what to do. A content folder (and the demo fallback) never falls back to these:
+ * its owner fills `site-texts.json` (`npm run init` leaves it empty).
  */
-export const EXAMPLE_SITE_TEXTS: SiteTexts = {
-  zh: { name: '交互式讲义引擎示例', shortName: '讲义示例', navText: '', tagline: '引擎自带的示例讲义', description: '' },
-  en: { name: 'Interactive Lecture Engine examples', shortName: 'Examples', navText: '', tagline: 'The example lectures that ship with the engine', description: '' },
+export const IN_PLACE_SITE_TEXTS: SiteTexts = {
+  zh: { name: '交互式讲义引擎', shortName: '讲义引擎', navText: '', tagline: '原位模式：讲义放在 site/docs。运行 npm run init 创建自己的内容目录', description: '' },
+  en: { name: 'Interactive Lecture Engine', shortName: 'Lecture Engine', navText: '', tagline: 'In-place mode: lectures live in site/docs. Run npm run init to create a content folder', description: '' },
 }
 
 /**
  * The texts of this site: `site-texts.json`, else the example template, else all empty.
  * Missing or non-string fields read as "". A file that exists but is not valid JSON throws (names the file).
- * In-place mode without a named site reads `EXAMPLE_SITE_TEXTS`.
+ * In-place mode without a named site reads `IN_PLACE_SITE_TEXTS`.
  */
 export function loadSiteTexts(options?: { siteDir?: string }): SiteTexts {
   let texts: SiteTexts | null = null
@@ -62,7 +63,7 @@ export function loadSiteTexts(options?: { siteDir?: string }): SiteTexts {
     }
   }
   const unnamed = !texts || (!texts.zh.name.trim() && !texts.en.name.trim())
-  if (unnamed && !options?.siteDir && resolveContent().mode === 'in-place') return structuredClone(EXAMPLE_SITE_TEXTS)
+  if (unnamed && !options?.siteDir && resolveContent().mode === 'in-place') return structuredClone(IN_PLACE_SITE_TEXTS)
   return texts ?? emptySiteTexts()
 }
 

@@ -181,13 +181,13 @@ describe('extendSeed (P3b: lectures of a restricted tier arrive after the first 
 
 describe('writes', () => {
   it('a group directory becomes its last segment, like core/route.ts (nested groups do not split a lecture in two)', async () => {
-    expect(groupOfDir('examples/g01')).toBe('g01')
+    expect(groupOfDir('courses/g01')).toBe('g01')
     expect(groupOfDir('G05')).toBe('g05')
     expect(groupOfDir('/a/b/')).toBe('b')
     expect(groupOfDir('')).toBe('')
     const r = rig({ backend: new ScriptedBackend('local') })
     await r.store.load()
-    r.store.set('g01-l01', 'completed', { groupId: 'examples/g01' })
+    r.store.set('g01-l01', 'completed', { groupId: 'courses/g01' })
     await r.store.flush()
     const server = stored(r.storage).server as Record<string, ProgressRecord>
     expect(server['g01-l01']?.groupId).toBe('g01')

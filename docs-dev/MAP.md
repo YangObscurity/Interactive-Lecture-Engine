@@ -42,7 +42,7 @@ CurriculumData {
 | prerequisites | union of the graph file (`<content>/graph/graph.json`; in-place `site/data/graph.json`; path from `content/paths.mts`) (node `lecture` -> lecture; edge `[from, to]`) and the frontmatter `requires: [g05/L18, ...]` |
 | phases | frontmatter `phase: <name>` (consecutive lectures with one name = one phase; a lecture without one joins the phase before it; lectures before the first name form a phase named by their range); else groups of more than 8 lectures are cut automatically: `nc = ceil(n/4)` phases, the first `n % nc` one lecture bigger, named `1-4` (en dash); groups of 8 or fewer have no phases |
 
-`requires` accepts `g05/L18`, `/g05/L18`, `examples/g01/L01`, `L18` (same group) and `g05-L18`. An edge that points at a lecture
+`requires` accepts `g05/L18`, `/g05/L18`, `courses/g01/L01`, `L18` (same group) and `g05-L18`. An edge that points at a lecture
 that does not exist, or a `requires` entry that is not a reference, is dropped and the build prints a warning; edges into a group
 that is not part of the build (`LECTURE_BUILD_GROUPS`) and edges of a lecture to itself are dropped quietly. The build prints one
 statistics line (`[access] curriculum: ...`) and at most 20 warnings.

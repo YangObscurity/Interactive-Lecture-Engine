@@ -2,7 +2,7 @@
  * Build-time markdown compiler & scanner for `<LectureFigure ... />` and `[](fig:id)` / `[](tab:id)` (WP-F8).
  *
  * Design:
- * - Resolves registries strictly from `paths.mts` (`figuresDir` + `exampleFiguresDir`).
+ * - Resolves registries strictly from `paths.mts` (`figuresDir`).
  * - Assigns sequential per-lecture numbers separately for `figure` (`图 N` / `Fig. N`) and `table` (`表 N` / `Table N`).
  * - Replaces empty `[](fig:id)` / `[](tab:id)` link text with the SSR final label (preserving custom link text).
  * - Fails the build on unknown id, kind mismatch (`fig:` vs `tab:`), or public-tier citing a restricted-tier figure.
@@ -46,7 +46,7 @@ export interface LectureCitationRef {
 }
 
 export interface FiguresMarkdownOptions {
-  paths: Pick<ContentPaths, 'figuresDir' | 'exampleFiguresDir'>
+  paths: Pick<ContentPaths, 'figuresDir'>
   groupDirs: readonly string[]
   groupIdByDir: ReadonlyMap<string, string>
   localeKeys: readonly string[]
@@ -466,9 +466,9 @@ export function collectLectureCitationsFromMarkdown(source: string, defaultGroup
 }
 
 export interface PageFigureUsage {
-  /** Normalized route path without locale/extension, e.g. `/lr/L01` or `/examples/g01/L01`. */
+  /** Normalized route path without locale/extension, e.g. `/g01/L01` or `/courses/g01/L01`. */
   route: string
-  /** Relative file path under docsRoot / lecturesDir, e.g. `lr/L01.md`. */
+  /** Relative file path under docsRoot / lecturesDir, e.g. `g01/L01.md`. */
   relPath: string
   /** Page title parsed from frontmatter/heading if present. */
   title: string

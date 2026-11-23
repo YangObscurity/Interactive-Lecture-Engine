@@ -4,23 +4,23 @@ import { chartSourceOf } from '../../docs/.vitepress/theme/charts/sidecar'
 
 describe('reading/lectureMeta', () => {
   it('strips zh and en lecture prefixes while preserving plain titles', () => {
-    expect(parseLectureTitle('第19讲 · 多表连接查询与子查询')).toBe('多表连接查询与子查询')
-    expect(parseLectureTitle('第01讲 · HearthNet：边缘智能')).toBe('HearthNet：边缘智能')
+    expect(parseLectureTitle('第12讲 · 单位换算与量纲')).toBe('单位换算与量纲')
+    expect(parseLectureTitle('第01讲 · 示例站点：传感与采样')).toBe('示例站点：传感与采样')
     expect(parseLectureTitle("Example Lecture 1 · Understanding Ohm's Law")).toBe("Understanding Ohm's Law")
-    expect(parseLectureTitle('Lecture 19 · Joins and Subqueries')).toBe('Joins and Subqueries')
+    expect(parseLectureTitle('Lecture 12 · Units and Dimensions')).toBe('Units and Dimensions')
     expect(parseLectureTitle('无前缀标题')).toBe('无前缀标题')
   })
 
   it('extracts nodeId, difficulty stars and estimated minutes across formats', () => {
     expect(
-      parseLectureDescription('节点 `db_joins` ｜ 亚组: G05 ｜ 难度 ★★ ｜ 预估 30min ｜ 前置: a ｜ 后续: b'),
-    ).toEqual({ nodeId: 'db_joins', difficulty: 2, maxStars: 3, estimated: '30 min' })
+      parseLectureDescription('节点 `mea_units` ｜ 亚组: MEA ｜ 难度 ★★ ｜ 预估 30min ｜ 前置: a ｜ 后续: b'),
+    ).toEqual({ nodeId: 'mea_units', difficulty: 2, maxStars: 3, estimated: '30 min' })
 
     expect(
       parseLectureDescription('Node `example_led` | Subgroup: EX | Difficulty ★ | Estimated 45 min'),
     ).toEqual({ nodeId: 'example_led', difficulty: 1, maxStars: 3, estimated: '45 min' })
 
-    expect(parseLectureDescription('SAPI架构定位、感测与策略解耦')).toEqual({
+    expect(parseLectureDescription('没有节点信息的一段普通描述')).toEqual({
       nodeId: '',
       difficulty: 0,
       maxStars: 0,

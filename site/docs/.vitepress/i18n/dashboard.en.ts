@@ -573,6 +573,7 @@ export const dashboardEn: Record<keyof typeof dashboardZhCN, string> = {
   'dsh.tl.save': 'Save tool switches',
   'dsh.tl.saved': 'Tool switches saved',
   'dsh.tl.saveFailed': 'Not saved: {e}',
+  'dsh.demoReadOnly': 'The demo content is read only: run npm run init first to create your own content folder',
   'dsh.rt.tabSync': 'Sync and index',
   'dsh.rt.syncTitle': 'Content sync',
   'dsh.rt.syncHint': 'content/ is copied one way to site/docs/, checked against the manifest',

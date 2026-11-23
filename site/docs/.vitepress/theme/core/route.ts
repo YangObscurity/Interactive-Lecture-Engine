@@ -11,20 +11,20 @@
  *     stores (it lower-cases ids itself: `g05-l19`). Group = LAST directory segment, lower-cased;
  *     number zero-padded to 2 digits (`L100` stays `L100`).
  *
- * Nested group directories (`dir: 'examples/g01'` → `/examples/g01/L01`) are supported: the
+ * Nested group directories (`dir: 'courses/g01'` → `/courses/g01/L01`) are supported: the
  * directory part may have any depth; the lecture is always the last segment `L<digits>`.
  */
 
 export interface LectureRoute {
-  /** Normalised page path WITHOUT the locale prefix, e.g. `/examples/g01/L01` (also for `/en/examples/g01/L01`). */
+  /** Normalised page path WITHOUT the locale prefix, e.g. `/courses/g01/L01` (also for `/en/courses/g01/L01`). */
   path: string
   /** Locale key of the URL (`en`); absent for root-language pages (and when no `localeKeys` were given). */
   locale?: string
-  /** Full directory part as written in the URL (case preserved), e.g. `examples/g01`. */
+  /** Full directory part as written in the URL (case preserved), e.g. `courses/g01`. */
   dir: string
   /** Last directory segment, lower-cased — the V1 "groupDir", e.g. `g01`. */
   group: string
-  /** First path segment as written (V1 reading-progress `entry.group`), e.g. `examples`. */
+  /** First path segment as written (V1 reading-progress `entry.group`), e.g. `courses`. */
   topSegment: string
   /** Lecture code as written in the URL, upper-cased `L` + digits, e.g. `L01`. */
   lectureCode: string

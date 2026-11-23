@@ -15,7 +15,9 @@
  * The real backend is never reached: every `/api/**` request goes to the fixtures, the progress read to a local mock.
  */
 import type { Page } from '@playwright/test'
-import { test, expect, gotoAndSettle } from './fixtures'
+import fs from 'node:fs'
+import path from 'node:path'
+import { test, expect, gotoAndSettle, SITE_ROOT } from './fixtures'
 import { useTheme, type Mode, type ThemeId } from './theme-helpers'
 
 /** theme -> `data-slot-impl` its SidebarStatus must report. reader has no component of its own: the engine default. */
@@ -23,12 +25,21 @@ const THEMES: ReadonlyArray<readonly [ThemeId, string]> = [
   ['reader', 'default'],
   ['datasheet', 'datasheet'],
 ]
-const LECTURE = '/g05/L19'
+// S6: the demo content (templates/demo-content): MEA L04 (node mea_spread) has a chart and a quiz; the sidebar lists MEA
+const GROUP = 'mea'
+const LECTURE_NO = 4
+const LECTURE = `/${GROUP}/L${String(LECTURE_NO).padStart(2, '0')}`
+const LECTURE_CODE = 'MEA-L04'
+const LECTURE_NODE = 'mea_spread'
+/** lectures of the group in the demo content = the sidebar's lecture links */
+const GROUP_LECTURES = fs
+  .readdirSync(path.join(SITE_ROOT, '..', 'templates', 'demo-content', 'lectures', GROUP))
+  .filter((f) => /^L\d+\.md$/.test(f)).length
 const LABEL = { not_started: '未读', in_progress: '在读', completed: '已读' } as const
 type Status = keyof typeof LABEL
 const WIRE: Record<Status, string> = { not_started: '未开始', in_progress: '学习中', completed: '已完成' }
 
-/** Deterministic states for g05-l01 .. g05-l60: l % 3 = 0 completed, 1 in progress, 2 not started. */
+/** Deterministic states for mea-l01 .. mea-l60: l % 3 = 0 completed, 1 in progress, 2 not started. */
 function stateOf(n: number): Status {
   return n % 3 === 0 ? 'completed' : n % 3 === 1 ? 'in_progress' : 'not_started'
 }
@@ -39,8 +50,8 @@ async function mockProgress(page: Page): Promise<void> {
     const n = i + 1
     const status = stateOf(n)
     return {
-      lecture_id: `g05-l${String(n).padStart(2, '0')}`,
-      group_id: 'g05',
+      lecture_id: `${GROUP}-l${String(n).padStart(2, '0')}`,
+      group_id: GROUP,
       status: WIRE[status],
       completed_at: status === 'completed' ? '2026-11-01T00:00:00.000Z' : null,
       updated_at: '2026-11-01T00:00:00.000Z',
@@ -57,7 +68,7 @@ async function mockProgress(page: Page): Promise<void> {
       return route.fulfill({
         status: 200,
         contentType: 'application/json; charset=utf-8',
-        body: JSON.stringify({ lecture_id: id, group_id: 'g05', status: body.status ?? WIRE.not_started, completed_at: null, updated_at: new Date().toISOString(), notion_node_id: null, notion_page_id: null }),
+        body: JSON.stringify({ lecture_id: id, group_id: GROUP, status: body.status ?? WIRE.not_started, completed_at: null, updated_at: new Date().toISOString(), notion_node_id: null, notion_page_id: null }),
       })
     }
     return route.fulfill({ status: 200, contentType: 'application/json; charset=utf-8', body: JSON.stringify(records) })
@@ -145,7 +156,7 @@ for (const [theme, impl] of THEMES) {
       await expect.poll(async () => (await readLinks(page)).every((l) => l.status === stateOf(lectureNo(l.href))), { message: 'markers follow the store' }).toBe(true)
 
       const infos = await readLinks(page)
-      expect(infos.length).toBeGreaterThan(10)
+      expect(infos.length, 'one sidebar link per lecture of the group').toBe(GROUP_LECTURES)
       for (const l of infos) {
         expect(l.markers, `${l.href}: markers inside the link`).toBe(1)
         expect(l.text, `${l.href}: the link keeps its text`).not.toBe('')
@@ -165,7 +176,7 @@ for (const [theme, impl] of THEMES) {
       // the current page's link is the active one and carries the current marker state
       const active = page.locator('.VPSidebar .VPSidebarItem.is-active a.link')
       await expect(active).toHaveCount(1)
-      await expect(active.locator('[data-slot="SidebarStatus"]')).toHaveAttribute('data-status', stateOf(19))
+      await expect(active.locator('[data-slot="SidebarStatus"]')).toHaveAttribute('data-status', stateOf(LECTURE_NO))
 
       expect(hydration, 'hydration warnings').toEqual([])
       expect(pageErrors.map((e) => e.message)).toEqual([])
@@ -216,8 +227,8 @@ for (const [theme, impl] of THEMES) {
       const tb = page.locator('.VPDoc [data-slot="LectureTitleBlock"]')
       await expect(tb).toHaveCount(1)
       await expect(tb).toHaveAttribute('data-slot-impl', impl)
-      await expect(tb.locator('.lec-tb-code')).toContainText('G05-L19')
-      await expect(tb.locator('.lec-tb-spec code')).toHaveText('db_joins')
+      await expect(tb.locator('.lec-tb-code')).toContainText(LECTURE_CODE)
+      await expect(tb.locator('.lec-tb-spec code')).toHaveText(LECTURE_NODE)
       await expect(tb.locator('.lec-tb-status')).toHaveAttribute('data-status', 'in_progress')
 
       // 2. FigureFrame on every figure.chart; record existing chart-body elements before switching theme

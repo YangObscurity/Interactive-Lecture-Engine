@@ -14,7 +14,7 @@ for (const [theme, expectedImpl] of SKINS) {
   test.describe(`search (${theme} skin)`, () => {
     test('Ctrl+K opens themed slot panel, groups hits, toggles scope, moves with arrows, Enter opens, Esc closes', async ({ page, pageErrors }) => {
       await useTheme(page, theme, 'light')
-      await gotoAndSettle(page, '/g05/L19')
+      await gotoAndSettle(page, '/mea/L03')
 
       // Open via Ctrl/Cmd+K shortcut
       await page.keyboard.press('ControlOrMeta+k')
@@ -31,9 +31,9 @@ for (const [theme, expectedImpl] of SKINS) {
       const input = page.locator('#lec-search-input')
       await expect(input).toBeFocused()
       // spec 04.2: opened on a group page, the default scope is "this group"
-      await expect(page.locator('.sp-scope-btn', { hasText: '本组 G05' })).toHaveAttribute('aria-pressed', 'true')
+      await expect(page.locator('.sp-scope-btn', { hasText: '本组 MEA' })).toHaveAttribute('aria-pressed', 'true')
       await expect(page.locator('.sp-scope-btn', { hasText: '全部' })).toHaveAttribute('aria-pressed', 'false')
-      await input.fill('外键')
+      await input.fill('误差')
 
       // Wait until hits and meta count appear cleanly within 100 ms engine latency
       const hits = page.locator('.sp-hit')
@@ -51,9 +51,9 @@ for (const [theme, expectedImpl] of SKINS) {
       await expect(firstHit.locator('.mk')).toHaveAttribute('data-status', /not_started|in_progress|completed/)
       const noText = (await firstHit.locator('.no').innerText()).trim()
       if (theme === 'reader') {
-        expect(noText).toMatch(/^第\d+讲$|^G\d+/)
+        expect(noText).toMatch(/^第\d+讲$|^[A-Z]+\d*/)
       } else {
-        expect(noText).toMatch(/^G\d+-L\d+$|^G\d+$/)
+        expect(noText).toMatch(/^[A-Z]+\d*-L\d+$|^[A-Z]+\d*$/)
       }
 
       // Highlight marks have underline in both skins and accent background in reader
@@ -68,22 +68,22 @@ for (const [theme, expectedImpl] of SKINS) {
         expect(markStyles.bg).not.toBe('rgba(0, 0, 0, 0)')
       }
 
-      // Scope toggle "all" vs "本组 G05"
-      await input.fill('外键')
+      // Scope toggle "all" vs "本组 MEA"
+      await input.fill('下一讲预告')
       await expect(hits.first()).toBeVisible()
       const groupCount = await hits.count()
-      const scopeGroupBtn = page.locator('.sp-scope-btn', { hasText: '本组 G05' })
+      const scopeGroupBtn = page.locator('.sp-scope-btn', { hasText: '本组 MEA' })
       await expect(scopeGroupBtn).toHaveAttribute('aria-pressed', 'true')
       const groupHrefs = await hits.evaluateAll((els) => els.map((e) => e.getAttribute('href') ?? ''))
       for (const href of groupHrefs) {
-        expect(href).toMatch(/^\/g05\//)
+        expect(href).toMatch(/^\/mea\//)
       }
       await page.locator('.sp-scope-btn', { hasText: '全部' }).click()
       await expect(scopeGroupBtn).toHaveAttribute('aria-pressed', 'false')
       expect(await hits.count()).toBeGreaterThanOrEqual(groupCount)
 
-      // Search specific lecture G01-L01 (scope is "all" now), move selection with ArrowDown, Enter opens lecture
-      await input.fill('G01-L01')
+      // Search specific lecture LOG-L01 (scope is "all" now), move selection with ArrowDown, Enter opens lecture
+      await input.fill('LOG-L01')
       await expect(hits.first()).toBeVisible()
       await expect(hits.first()).toHaveAttribute('aria-selected', 'true')
       if ((await hits.count()) > 1) {
@@ -93,11 +93,11 @@ for (const [theme, expectedImpl] of SKINS) {
       }
       await expect(hits.first()).toHaveAttribute('aria-selected', 'true')
       const targetHref = await hits.first().getAttribute('href')
-      expect(targetHref).toMatch(/^\/g01\/L01/)
+      expect(targetHref).toMatch(/^\/log\/L01/)
 
       await page.keyboard.press('Enter')
       await expect(slot).toBeHidden()
-      await expect(page).toHaveURL(/\/g01\/L01/)
+      await expect(page).toHaveURL(/\/log\/L01/)
 
       // Reopen and close with Esc
       await page.keyboard.press('ControlOrMeta+k')
@@ -128,7 +128,7 @@ for (const [theme, expectedImpl] of SKINS) {
       const input = page.locator('#lec-search-input')
       await expect(input).toBeFocused()
       const start = Date.now()
-      await input.fill('外键')
+      await input.fill('误差')
 
       // Title/heading hit appears quickly while shards remain paused
       const hits = page.locator('.sp-hit')
@@ -154,7 +154,7 @@ for (const [theme, expectedImpl] of SKINS) {
       // Release shards -> progress bar clears and body snippets hydrate
       releaseShards()
       await expect(loadBar).toBeHidden({ timeout: 20_000 })
-      await input.fill('FOREIGN KEY')
+      await input.fill('标准差')
       await expect(page.locator('.sp-hit .snip').first()).toBeVisible({ timeout: 10_000 })
       await expect(page.locator('.sp-hit mark').first()).toBeVisible()
 
@@ -164,7 +164,7 @@ for (const [theme, expectedImpl] of SKINS) {
 
     test('focus trap: Tab and Shift+Tab stay inside search dialog; Esc closes and returns focus to opener button', async ({ page, pageErrors }) => {
       await useTheme(page, theme, 'light')
-      await gotoAndSettle(page, '/g05/L19')
+      await gotoAndSettle(page, '/mea/L03')
 
       const trigger = page.locator('.VPNavBarSearch button, #local-search button').first()
       await trigger.click()

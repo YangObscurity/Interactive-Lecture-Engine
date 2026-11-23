@@ -5,10 +5,7 @@ import { afterAll, describe, expect, it } from 'vitest'
 import { buildCurriculumFromDisk, curriculumLog, readGraphFile, scanSourceLectures } from '../../docs/.vitepress/curriculum/node.mts'
 import { resolveGroups } from '../../docs/.vitepress/groups-source.mts'
 import type { GroupMetaLike } from '../../docs/.vitepress/groups-source.mts'
-
-const SITE = path.resolve(__dirname, '../..')
-const DOCS = path.join(SITE, 'docs')
-const GRAPH = path.join(SITE, 'data', 'graph.json')
+import { DEMO_ENV, demoContentPaths, setEnv, syncDemoDocs } from './demo-content'
 
 const tmp: string[] = []
 afterAll(() => {
@@ -101,35 +98,49 @@ describe('curriculum from a temporary docs folder', () => {
   })
 })
 
-describe('curriculum of this site (docs/ + data/graph.json)', () => {
+describe('curriculum of the demo site (templates/demo-content synced into a temporary docs folder)', () => {
   it('lists every lecture file once and every edge between lectures that exist', async () => {
-    const { GROUPS } = await resolveGroups()
-    const build = buildCurriculumFromDisk({ docsRoot: DOCS, graphFile: GRAPH, allGroups: GROUPS, keptGroupIds: GROUPS.map((g) => g.id), rootLang: 'zh-CN', otherLangs: ['en'] })
-    const root = build.byLocale.root
-    expect(root).toBeDefined()
-    const ids = root?.groups.flatMap((g) => g.lectures.map((l) => l.id)) ?? []
-    expect(new Set(ids).size).toBe(ids.length)
-    const onDisk = GROUPS.reduce((n, g) => n + fs.readdirSync(path.join(DOCS, g.dir)).filter((f) => /^L\d+\.md$/.test(f)).length, 0)
-    expect(ids.length).toBe(onDisk)
-    const known = new Set(ids)
-    for (const [a, b] of root?.edges ?? []) {
-      expect(known.has(a)).toBe(true)
-      expect(known.has(b)).toBe(true)
-      expect(a).not.toBe(b)
-    }
-    expect(root?.stats).toEqual({ groups: GROUPS.length, lectures: onDisk, edges: root?.edges.length })
-    // the six categories of the contract, in first-appearance order, with their English names
-    const cats = [...new Map((root?.groups ?? []).map((g) => [g.category, g.catSlot])).entries()]
-    expect(cats).toEqual([['硬件与固件', 1], ['编程语言', 2], ['网络与云', 3], ['数据与前端', 4], ['工程实践', 5], ['研究', 6]])
-    expect([...new Set(build.byLocale.en?.groups.map((g) => g.category))]).toEqual(['Hardware & firmware', 'Programming languages', 'Networks & cloud', 'Data & front end', 'Engineering practice', 'Research'])
-    // the lecture titles have no "第N讲" prefix left
-    expect(root?.groups.flatMap((g) => g.lectures).filter((l) => /^第\s*\d+\s*讲/.test(l.title))).toEqual([])
-    // groups with more than 8 lectures and no phase in the frontmatter are cut into phases of at most 4
-    for (const g of root?.groups ?? []) {
-      if (g.lectures.length > 8) {
-        expect(g.phases.length).toBe(Math.ceil(g.lectures.length / 4))
-        expect(g.phases.reduce((n, p) => n + g.lectures.filter((l) => l.n >= p.from && l.n <= p.to).length, 0)).toBe(g.lectures.length)
-      } else expect(g.phases).toEqual([])
+    const demo = await syncDemoDocs()
+    const restore = setEnv({ ...DEMO_ENV })
+    try {
+      const { GROUPS } = await resolveGroups()
+      const DOCS = demo.docsRoot
+      const GRAPH = demoContentPaths().graphDir.graph
+      const build = buildCurriculumFromDisk({ docsRoot: DOCS, graphFile: GRAPH, allGroups: GROUPS, keptGroupIds: GROUPS.map((g) => g.id), rootLang: 'zh-CN', otherLangs: ['en'] })
+      const root = build.byLocale.root
+      expect(root).toBeDefined()
+      const ids = root?.groups.flatMap((g) => g.lectures.map((l) => l.id)) ?? []
+      expect(new Set(ids).size).toBe(ids.length)
+      const onDisk = GROUPS.reduce((n, g) => n + fs.readdirSync(path.join(DOCS, g.dir)).filter((f) => /^L\d+\.md$/.test(f)).length, 0)
+      expect(ids.length).toBe(onDisk)
+      expect(onDisk).toBe(14)
+      const known = new Set(ids)
+      for (const [a, b] of root?.edges ?? []) {
+        expect(known.has(a)).toBe(true)
+        expect(known.has(b)).toBe(true)
+        expect(a).not.toBe(b)
+      }
+      expect(root?.stats).toEqual({ groups: GROUPS.length, lectures: onDisk, edges: root?.edges.length })
+      // the two categories of the demo, in first-appearance order, with their English names
+      const cats = [...new Map((root?.groups ?? []).map((g) => [g.category, g.catSlot])).entries()]
+      expect(cats).toEqual([['基础', 1], ['应用', 2]])
+      expect([...new Set(build.byLocale.en?.groups.map((g) => g.category))]).toEqual(['Foundations', 'Applications'])
+      // the lecture titles have no "第N讲" prefix left
+      expect(root?.groups.flatMap((g) => g.lectures).filter((l) => /^第\s*\d+\s*讲/.test(l.title))).toEqual([])
+      // MEA writes `phase:` in the frontmatter of L01 and L04: those start explicit phases running to the next one
+      const mea = root?.groups.find((g) => g.dir === 'mea')
+      expect(mea?.phases).toEqual([{ from: 1, to: 3, name: '读数基础' }, { from: 4, to: 6, name: '数据与图' }])
+      // groups with more than 8 lectures and no phase in the frontmatter are cut into phases of at most 4
+      for (const g of root?.groups ?? []) {
+        if (g === mea) continue
+        if (g.lectures.length > 8) {
+          expect(g.phases.length).toBe(Math.ceil(g.lectures.length / 4))
+          expect(g.phases.reduce((n, p) => n + g.lectures.filter((l) => l.n >= p.from && l.n <= p.to).length, 0)).toBe(g.lectures.length)
+        } else expect(g.phases).toEqual([])
+      }
+    } finally {
+      restore()
+      demo.cleanup()
     }
   })
 })

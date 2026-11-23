@@ -24,10 +24,13 @@ import { LectureConfigError, defineLectureConfig, validateLectureConfig } from '
 import { loadLectureConfig } from '../../docs/.vitepress/content/config.mts'
 import { readAccessEnv, resolveAccessWithoutGroups, resolveBuildAccess } from '../../docs/.vitepress/access/build.mts'
 import { SITE_BLOCKS, toJSON } from '../../config/schema'
+import { DEMO_ACCESS_JSON, demoContentPaths } from './demo-content'
 
-const siteConfig = loadLectureConfig()
+// S6: the demo content's site config (templates/demo-content), never the owner's own
+const siteConfig = loadLectureConfig({ paths: demoContentPaths() })
+const DEMO_IDS = ['MEA', 'LOG', 'PLN', 'DAT']
 
-const IDS = ['G01', 'G02', 'G03', 'LR']
+const IDS = ['G01', 'G02', 'G03', 'XR']
 
 describe('tier ids', () => {
   it('named tiers are their own id; a user-group tier is grp- + fnv1a of the sorted names joined by newline', () => {
@@ -67,7 +70,7 @@ describe('validateAccessConfig', () => {
   })
 
   it('lists the valid group ids for an unknown group', () => {
-    expect(() => validateAccessConfig({ groups: { G99: { read: 'public' } } }, IDS)).toThrow('access.groups.G99 is not a course group (valid ids: G01, G02, G03, LR)')
+    expect(() => validateAccessConfig({ groups: { G99: { read: 'public' } } }, IDS)).toThrow('access.groups.G99 is not a course group (valid ids: G01, G02, G03, XR)')
   })
 
   it('lists the valid values for bad values and rejects unknown keys', () => {
@@ -91,9 +94,10 @@ describe('validateAccessConfig', () => {
   it('validateLectureConfig runs it (and maps the error), with the group list when the build passes it', () => {
     expect(() => defineLectureConfig({ theme: 'reader', access: { default: 'authenticated', enforcement: 'gateway' } })).not.toThrow()
     expect(() => defineLectureConfig({ theme: 'reader', access: { default: 'nope' as 'public' } })).toThrow(LectureConfigError)
-    expect(() => validateLectureConfig({ theme: 'reader', access: { groups: { G9: { read: 'public' } } } }, { groupIds: IDS })).toThrow(/valid ids: G01, G02, G03, LR/)
+    expect(() => validateLectureConfig({ theme: 'reader', access: { groups: { G9: { read: 'public' } } } }, { groupIds: IDS })).toThrow(/valid ids: G01, G02, G03, XR/)
     expect(() => validateLectureConfig({ theme: 'reader', access: { groups: { G9: { read: 'public' } } } })).not.toThrow()
-    expect(siteConfig.access).toEqual({ default: 'authenticated', enforcement: 'gateway' })
+    expect(() => validateLectureConfig(siteConfig, { groupIds: DEMO_IDS })).not.toThrow()
+    expect(() => validateLectureConfig({ theme: 'reader', access: JSON.parse(DEMO_ACCESS_JSON) as AccessConfig }, { groupIds: DEMO_IDS })).not.toThrow()
   })
 
   it('the schema declares the block with zh and en descriptions and the same values the validator uses', () => {
@@ -129,7 +133,7 @@ describe('resolveAccess', () => {
     const p = resolveAccess({ access: { default: 'authenticated', groups: { G01: { read: 'public' } } }, groupIds: IDS })
     expect(p.inlineTier).toBe('public')
     expect(p.tiers.map((t) => t.id)).toEqual(['authenticated'])
-    expect(p.tiers[0]?.groupIds).toEqual(['G02', 'G03', 'LR'])
+    expect(p.tiers[0]?.groupIds).toEqual(['G02', 'G03', 'XR'])
   })
 
   it('default public + an authenticated group + a user-group group: inline public, two restricted tiers with their rules', () => {
@@ -156,17 +160,17 @@ describe('resolveAccess', () => {
   it('LECTURE_BUILD_GROUPS keeps only those groups; an unknown id lists the valid ones; the inline tier follows the kept groups', () => {
     const p = resolveAccess({ access: { default: 'authenticated', groups: { G01: { read: 'public' } } }, groupIds: IDS, buildGroups: ['G02', 'G03'] })
     expect(p.keptGroupIds).toEqual(['G02', 'G03'])
-    expect(p.removedGroupIds).toEqual(['G01', 'LR'])
+    expect(p.removedGroupIds).toEqual(['G01', 'XR'])
     expect(p.inlineTier).toBe('authenticated')
     expect(p.tiers).toEqual([])
-    expect(() => resolveAccess({ groupIds: IDS, buildGroups: ['G01', 'G77'] })).toThrow('LECTURE_BUILD_GROUPS names unknown course group(s) G77 (valid ids: G01, G02, G03, LR)')
+    expect(() => resolveAccess({ groupIds: IDS, buildGroups: ['G01', 'G77'] })).toThrow('LECTURE_BUILD_GROUPS names unknown course group(s) G77 (valid ids: G01, G02, G03, XR)')
     expect(() => resolveAccess({ groupIds: IDS, buildGroups: [] })).toThrow(/LECTURE_BUILD_GROUPS is empty/)
   })
 
   it('--audience public builds only public groups: no restricted tier is left', () => {
     const p = resolveAccess({ access: { groups: { G02: { read: 'authenticated' }, G03: { read: ['x'] } } }, groupIds: IDS, audience: 'public' })
     expect(p.audience).toBe('public')
-    expect(p.keptGroupIds).toEqual(['G01', 'LR'])
+    expect(p.keptGroupIds).toEqual(['G01', 'XR'])
     expect(p.removedGroupIds).toEqual(['G02', 'G03'])
     expect(p.tiers).toEqual([])
     expect(p.inlineTier).toBe('public')
@@ -214,7 +218,7 @@ describe('build guards', () => {
 
   it('reads the environment: audience only "public", ids trimmed, empty values ignored', () => {
     expect(readAccessEnv({})).toEqual({})
-    expect(readAccessEnv({ LECTURE_AUDIENCE: 'public', LECTURE_BUILD_GROUPS: ' G01 , LR,,', LECTURE_ACCESS_JSON: ' ' })).toEqual({ audience: 'public', buildGroups: ['G01', 'LR'] })
+    expect(readAccessEnv({ LECTURE_AUDIENCE: 'public', LECTURE_BUILD_GROUPS: ' G01 , XR,,', LECTURE_ACCESS_JSON: ' ' })).toEqual({ audience: 'public', buildGroups: ['G01', 'XR'] })
     expect(() => readAccessEnv({ LECTURE_AUDIENCE: 'staff' })).toThrow(/only: public/)
     expect(parseIdList(undefined)).toBeUndefined()
     expect(parseIdList('  ')).toBeUndefined()
@@ -250,11 +254,11 @@ describe('lookups used by the graph, the seed and the paths', () => {
     expect(limited.inlineTier).toBe('authenticated')
   })
 
-  const groups = [{ id: 'G01', dir: 'g01' }, { id: 'EX', dir: 'examples/g01' }]
+  const groups = [{ id: 'G01', dir: 'g01' }, { id: 'EX', dir: 'courses/g01' }]
   it('ownerOfPath: group folder, locale prefix, longest folder, null for non-group pages', () => {
     expect(ownerOfPath('g01/L01.md', groups, ['en'])).toEqual({ groupId: 'G01', dir: 'g01', locale: null })
     expect(ownerOfPath('/en/g01/index.md', groups, ['en'])).toEqual({ groupId: 'G01', dir: 'g01', locale: 'en' })
-    expect(ownerOfPath('/examples/g01/L02', groups, ['en'])).toEqual({ groupId: 'EX', dir: 'examples/g01', locale: null })
+    expect(ownerOfPath('/courses/g01/L02', groups, ['en'])).toEqual({ groupId: 'EX', dir: 'courses/g01', locale: null })
     expect(ownerOfPath('index.md', groups, ['en'])).toBeNull()
     expect(ownerOfPath('en/index.md', groups, ['en'])).toBeNull()
     expect(ownerOfPath('g010/L01.md', groups, ['en'])).toBeNull()
@@ -262,8 +266,8 @@ describe('lookups used by the graph, the seed and the paths', () => {
   })
 
   it('gateway paths and page chunk patterns of a group', () => {
-    expect(pathPrefixesOf('examples/g01', ['en'])).toEqual(['/examples/g01/', '/en/examples/g01/'])
-    expect(chunkPrefixOf('examples/g01')).toBe('examples_g01_')
+    expect(pathPrefixesOf('courses/g01', ['en'])).toEqual(['/courses/g01/', '/en/courses/g01/'])
+    expect(chunkPrefixOf('courses/g01')).toBe('courses_g01_')
     expect(chunkPrefixOf('g05', 'en')).toBe('en_g05_')
     expect(chunkPatternsOf('g05', ['en'])).toEqual(['^/assets/g05_', '^/assets/en_g05_'])
     expect(new RegExp((chunkPatternsOf('g05', ['en'])[0] as string)).test('/assets/g05_L01.md.Dlc0bFKV.js')).toBe(true)

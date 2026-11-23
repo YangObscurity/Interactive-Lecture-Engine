@@ -130,6 +130,8 @@ defineProps<LectureTitleBlockProps>()
 .lec-tb-spec code {
   font-family: var(--lec-font-mono);
   font-size: 12.5px;
+  /* a long node id breaks instead of widening the table past a narrow phone screen */
+  overflow-wrap: anywhere;
 }
 .lec-tb-spec a {
   color: var(--lec-accent);

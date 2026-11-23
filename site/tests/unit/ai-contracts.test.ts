@@ -7,7 +7,7 @@ import os from 'node:os'
 import path from 'node:path'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { EventEmitter } from 'node:events'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
 import { loadAiContract } from '../../docs/.vitepress/prompts/loadContract.mts'
 import {
   CONTRACT_INVALID_MESSAGE_ZH,
@@ -19,6 +19,14 @@ import {
 } from '../../docs/.vitepress/prompts/contracts.ts'
 import type { ConceptDraftPayload } from '../../docs/.vitepress/concepts/frontmatter.ts'
 import { createDashboardDevHandler } from '../../docs/.vitepress/plugins/dashboardDevPlugin.mts'
+import { useSyntheticGroups } from './demo-content'
+
+// S6: the dev handler reads the course groups of the active content root; the fixtures name the synthetic group G06
+let restoreGroups: (() => void) | undefined
+beforeAll(() => {
+  restoreGroups = useSyntheticGroups(['G01', 'G06'])
+})
+afterAll(() => restoreGroups?.())
 
 const tempRoots: string[] = []
 const servers: http.Server[] = []
@@ -218,7 +226,7 @@ describe('AI feature contract & Ajv runner (WP-F9)', () => {
     expect(res.json.ok).toBe(false)
     expect(res.json.message).toBe(CONTRACT_INVALID_MESSAGE_ZH)
     expect(fs.existsSync(path.join(conceptsDir, '_drafts'))).toBe(false)
-  })
+  }, 20_000) // the dev middleware loads the content root: 3-5 s under a full parallel run
 
   it('orders the messages: editable system prompt, then locked contract instructions, then the input and the schema', () => {
     const contract = loadAiContract('concept-draft')
@@ -484,7 +492,7 @@ describe('AI feature contract & Ajv runner (WP-F9)', () => {
     expect(retried.status).toBe(200)
     expect(callCount).toBe(2)
     expect(fs.existsSync(path.join(conceptsDir, '_drafts', 'retry-concept.md'))).toBe(true)
-  })
+  }, 20_000)
 
   it('parses valid raw or fenced JSON tolerantly via parseContractJsonResponse', () => {
     const fenced = parseContractJsonResponse('note before\n```json\n{"a":1,"b":"ok"}\n```\nnote after')

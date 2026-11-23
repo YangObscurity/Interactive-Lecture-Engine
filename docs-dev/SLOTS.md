@@ -45,7 +45,7 @@ Only register a slot that a real component needs.
 | `theme/slots/VPSidebarItem.vue` | host: the VitePress 1.6.4 sidebar item with `<LecSlot name="SidebarStatus">` added (see section 7) |
 | `plugins/lectureThemePlugin.mts` | validates packs, serves `virtual:lecture-components` |
 | `themes/datasheet/components/*.vue`, `components/parts/` | datasheet implementations (solder pad, atlas chips and pins, device card) |
-| `../examples/themes/minimal-slot/` | example third-party pack (tests and docs only, not enabled on this site) |
+| `site/tests/fixtures/theme-packs/minimal-slot/` | example third-party pack (tests and docs only, not enabled on this site) |
 
 ## 3. `theme.json` fields
 
@@ -80,13 +80,14 @@ In `$extensions["org.lecture-engine"]`:
 4. Register it in `theme.json` (`engine` + `components`).
 5. Name the pack in `lecture.config.ts` (section 5). A pack inside this repo is built with the site: run `npm run build`.
 
-The example pack is the shortest complete one: `site/docs/examples/themes/minimal-slot/`.
+The example pack is the shortest complete one: `site/tests/fixtures/theme-packs/minimal-slot/` (a test fixture of
+`tests/unit/slots-contract.test.ts`; copy it as the start of your own pack).
 
 ## 5. Third-party packs (`themePacks`)
 
 ```ts
 // site/lecture.config.ts
-themePacks: ['docs/examples/themes/minimal-slot'],   // folders relative to site/, each with a theme.json
+themePacks: ['tests/fixtures/theme-packs/minimal-slot'],   // folders relative to site/, each with a theme.json
 theme: 'datasheet',
 themes: ['reader', 'minimal-slot'],                  // a pack id can be named like a built-in theme
 ```

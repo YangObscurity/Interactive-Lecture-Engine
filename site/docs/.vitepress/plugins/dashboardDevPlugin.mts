@@ -250,6 +250,34 @@ async function buildDevStatus(csrfToken: string, probe: boolean) {
   }
 }
 
+/**
+ * S6 decision B: Dashboard endpoints that write into the content folder (AI tool switches, companion prompts, site
+ * texts, concept drafts / confirm / discard / delete). While the site shows the engine's demo content (`demo: true`,
+ * no content folder of its own yet) they answer 409 `demo_read_only`; every read endpoint, the content check, the
+ * probe and the machine-local `.env` (repository root, not the content folder) keep working.
+ */
+export const DEMO_WRITE_ENDPOINTS: readonly string[] = [
+  '/tools',
+  '/prompts',
+  '/texts',
+  '/concepts/draft',
+  '/concepts/confirm',
+  '/concepts/discard',
+  '/concepts/delete',
+]
+
+/** The 409 answer of a write endpoint while the demo content is shown (same advice as new:group / new:lecture). */
+export function demoReadOnlyBody(root: string) {
+  return {
+    ok: false as const,
+    error: 'demo_read_only',
+    message:
+      `No content folder yet: the site shows the engine's demo content (${root}), which is read only. ` +
+      'Run `npm run init` first (or set LECTURE_CONTENT_DIR), then edit your own content.',
+    messageZh: `还没有自己的内容目录：站点正在显示引擎自带的示例内容（${root}），示例只读。请先运行 \`npm run init\`（或设置 LECTURE_CONTENT_DIR），再编辑自己的内容。`,
+  }
+}
+
 export function createDashboardDevHandler(opts?: {
   token?: string
   allowNonLoopbackForTests?: boolean
@@ -258,9 +286,24 @@ export function createDashboardDevHandler(opts?: {
   siteDir?: string
   docsRoot?: string
   conceptsDir?: string
+  /** Treat the active content as the read-only demo (tests); default: `resolveContent().demo`. */
+  demo?: boolean
   onFilesChanged?: (files: readonly string[]) => void
 }) {
   const siteDir = opts?.siteDir // undefined: the active content root (content/paths.mts) decides
+  /**
+   * True when a POST to `subpath` would write into the demo content: the endpoint writes into the content folder, the
+   * active content is the demo, and the handler was not pointed at a folder of its own for that file (tests).
+   */
+  const writesIntoDemo = (subpath: string): boolean => {
+    if (!DEMO_WRITE_ENDPOINTS.includes(subpath)) return false
+    if (opts?.demo !== undefined) return opts.demo
+    if (resolveContent().demo !== true) return false
+    if (subpath === '/texts') return !siteDir
+    if (subpath === '/prompts') return !opts?.promptsFilePath
+    if (subpath.startsWith('/concepts/')) return !opts?.docsRoot && !opts?.conceptsDir
+    return true
+  }
   const conceptPaths = () =>
     resolveConceptContentPaths({
       docsRoot: opts?.docsRoot,
@@ -475,6 +518,12 @@ export function createDashboardDevHandler(opts?: {
     const reqToken = String(req.headers['x-lecture-dev-token'] || '')
     if (!reqToken || reqToken !== token) {
       sendJson(res, 403, { ok: false, error: 'invalid_dev_token' })
+      return
+    }
+
+    // S6 decision B: the demo content ships with the engine and is read only, like new:group / new:lecture.
+    if (method === 'POST' && writesIntoDemo(subpath)) {
+      sendJson(res, 409, demoReadOnlyBody(resolveContent().root))
       return
     }
 

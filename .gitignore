@@ -25,14 +25,14 @@ dist/
 **/.vitepress/.temp/
 site/.lecture-build/
 site/.access-e2e/
+site/.e2e-demo/
 site/docs/public/exports/
 site/docs/.content-mount.json
 
-# tests: reports and per-site screenshot baselines
+# tests: reports (the screenshot baselines in site/tests/e2e/__screenshots__/ are pictures of the demo content and are tracked)
 playwright-report/
 test-results/
 site/tests/.cache/
-site/tests/e2e/__screenshots__/
 
 # logs, editors, systems
 *.log
@@ -46,7 +46,6 @@ Thumbs.db
 /site/docs/*
 !/site/docs/.vitepress/
 !/site/docs/en/
-!/site/docs/examples/
 !/site/docs/public/
 !/site/docs/index.md
 !/site/docs/dashboard.md

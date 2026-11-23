@@ -234,7 +234,7 @@ export function scanLectureFiles(opts: ScanLecturesOptions): LectureFileEntry[] 
   const localeKeys = opts.localeKeys ?? []
   const groupByDir = new Map<string, GroupInfo>(opts.groups.map((g) => [g.dir.replace(/^\/+|\/+$/g, ''), g]))
   const scanRoots = [content.lecturesDir]
-  const skip = new Set(['node_modules', '.vitepress', 'dist', 'cache', 'concepts', 'public', 'examples'])
+  const skip = new Set(['node_modules', '.vitepress', 'dist', 'cache', 'concepts', 'public'])
 
   const seenPaths = new Set<string>()
   const out: LectureFileEntry[] = []

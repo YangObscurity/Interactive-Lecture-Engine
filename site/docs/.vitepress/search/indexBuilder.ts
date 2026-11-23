@@ -116,7 +116,7 @@ function parseLectureCode(
   if (m && m[1] !== undefined) {
     const lectureNo = Number.parseInt(m[1], 10)
     const pad = m[1].padStart(2, '0')
-    const code = groupId === 'EXAMPLES' ? `EX-L${pad}` : `${groupId}-L${pad}`
+    const code = `${groupId}-L${pad}`
     return { lectureNo, code }
   }
   return { lectureNo: null, code: groupId === 'SITE' ? '' : groupId }
@@ -290,7 +290,7 @@ export function buildSearchArtifacts(opts: BuildSearchOptions): SearchBuildResul
   const excludes = opts.excludes ?? []
   const maxTitleBytes = opts.maxTitleBytes ?? TITLE_INDEX_MAX_BYTES
   const maxShardBytes = opts.maxShardBytes ?? SHARDS_TOTAL_MAX_BYTES
-  const groupOrder = [...opts.allGroups.map((g) => g.id), 'CONCEPTS', 'EXAMPLES', 'SITE']
+  const groupOrder = [...opts.allGroups.map((g) => g.id), 'CONCEPTS', 'SITE']
   const groupById = new Map(opts.allGroups.map((g) => [g.id, g]))
   const builtGroupIds = new Set(opts.allGroups.map((g) => g.id))
   const locales = ['root', ...opts.localeKeys]
@@ -384,10 +384,6 @@ export function buildSearchArtifacts(opts: BuildSearchOptions): SearchBuildResul
         sections: extracted.sections,
       })
       continue
-    } else if (pathNoLocale.startsWith('examples/')) {
-      groupId = 'EXAMPLES'
-      shardId = 'examples'
-      groupMeta = { id: 'EXAMPLES', dir: 'examples', title: 'Examples', catSlot: 1 }
     } else {
       groupId = 'SITE'
       shardId = 'site'

@@ -42,7 +42,8 @@ const LEFT_IN_PUBLIC = new Set(['exports', 'showcase', 'favicon.ico', 'favicon.s
 
 export async function planMigration(repoRoot: string, contentRoot = path.join(repoRoot, 'content')): Promise<MigratePlan> {
   // both sides come from the one path module: the in-place layout is the source, the content layout the target
-  const src = resolveContent({ repoRoot, env: {} })
+  // S6: LECTURE_DEMO=0 so the engine's fallback demo content does not stand in for the in-place source
+  const src = resolveContent({ repoRoot, env: { LECTURE_DEMO: '0' } })
   if (src.mode !== 'in-place') throw new Error(`a content root is already active: ${src.root}`)
   const dst = resolveContent({ repoRoot, env: { LECTURE_CONTENT_DIR: contentRoot } })
   const rel = (abs: string) => posix(path.relative(repoRoot, abs))

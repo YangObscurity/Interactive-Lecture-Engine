@@ -27,6 +27,8 @@ export interface GraphPaths {
 
 export interface ContentPaths {
   mode: ContentMode
+  /** S6: true when nothing else is configured and the engine's demo content (templates/demo-content) is the root. */
+  demo?: boolean
   root: string
   repoRoot: string
   siteRoot: string
@@ -41,9 +43,7 @@ export interface ContentPaths {
   groups: string
   lecturesDir: string
   chartsDir: string
-  exampleChartsDir: string
   figuresDir: string
-  exampleFiguresDir: string
   conceptsDir: string
   graphDir: GraphPaths
   /** AI companion prompts file (F7): `<root>/prompts/companion.json` in content mode, `site/prompts/companion.json` in-place. */
@@ -111,8 +111,6 @@ function buildContentModePaths(
   docsRoot: string,
   vpRoot: string,
   defaultSiteConfig: string,
-  exampleChartsDir: string,
-  exampleFiguresDir: string,
 ): ContentPaths {
   const engineFiles = siteFilesIn(siteRoot)
   const graphBase = path.join(root, 'graph')
@@ -130,9 +128,7 @@ function buildContentModePaths(
     groups: path.join(root, 'groups.ts'),
     lecturesDir: path.join(root, 'lectures'),
     chartsDir: path.join(root, 'charts'),
-    exampleChartsDir,
     figuresDir: path.join(root, 'figures'),
-    exampleFiguresDir,
     conceptsDir: path.join(root, 'concepts'),
     graphDir: {
       dir: graphBase,
@@ -159,6 +155,11 @@ function templateDirOf(repoRoot: string): string {
   return path.join(repoRoot, 'templates', 'content')
 }
 
+/** The engine's demo content (S6): the fallback content root and the content of the e2e suites. */
+export function demoContentDirOf(repoRoot: string = DEFAULT_REPO_ROOT): string {
+  return path.join(repoRoot, 'templates', 'demo-content')
+}
+
 /** A translation tree of the lectures: `<lecturesDir>/<locale key>/<group dir>/` (`en/g01/L03.md`). */
 export function translationDirOf(paths: Pick<ContentPaths, 'lecturesDir'>, localeKey: string, groupDir = ''): string {
   return groupDir ? path.join(paths.lecturesDir, localeKey, groupDir) : path.join(paths.lecturesDir, localeKey)
@@ -167,7 +168,8 @@ export function translationDirOf(paths: Pick<ContentPaths, 'lecturesDir'>, local
 /**
  * Resolve content root and all engine/content paths.
  * Priority: env `LECTURE_CONTENT_DIR` (always content mode) > `<repo>/content` when it is a content root
- * (holds `site.config.ts` or `groups.ts`) > in-place mode.
+ * (holds `site.config.ts` or `groups.ts`) > the engine's demo content `<repo>/templates/demo-content` (content mode,
+ * `demo: true`, `initTarget` still `<repo>/content`; off with `LECTURE_DEMO=0`) > in-place mode.
  */
 export function resolveContent(options: ResolveContentOptions = {}): ContentPaths {
   const repoRoot = options.repoRoot ? path.resolve(options.repoRoot) : DEFAULT_REPO_ROOT
@@ -176,19 +178,29 @@ export function resolveContent(options: ResolveContentOptions = {}): ContentPath
   const docsRoot = path.join(siteRoot, 'docs')
   const vpRoot = path.join(docsRoot, '.vitepress')
   const defaultSiteConfig = path.join(siteRoot, 'lecture.config.ts')
-  const exampleChartsDir = path.join(docsRoot, 'examples', 'public', 'charts')
-  const exampleFiguresDir = path.join(docsRoot, 'examples', 'public', 'figures')
 
   const envRaw = (env.LECTURE_CONTENT_DIR ?? '').trim()
   if (envRaw !== '') {
     const root = path.isAbsolute(envRaw) ? path.resolve(envRaw) : path.resolve(repoRoot, envRaw)
-    return buildContentModePaths(root, repoRoot, siteRoot, docsRoot, vpRoot, defaultSiteConfig, exampleChartsDir, exampleFiguresDir)
+    return buildContentModePaths(root, repoRoot, siteRoot, docsRoot, vpRoot, defaultSiteConfig)
   }
 
   const repoContentDir = path.join(repoRoot, 'content')
   const repoContentExists = isDirectory(repoContentDir)
   if (repoContentExists && isContentRoot(repoContentDir)) {
-    return buildContentModePaths(repoContentDir, repoRoot, siteRoot, docsRoot, vpRoot, defaultSiteConfig, exampleChartsDir, exampleFiguresDir)
+    return buildContentModePaths(repoContentDir, repoRoot, siteRoot, docsRoot, vpRoot, defaultSiteConfig)
+  }
+
+  // S6: no content of its own -> the engine's demo content (templates/demo-content), read like a content root.
+  // `npm run init` still targets <repo>/content, which takes over once it exists. LECTURE_DEMO=0 keeps in-place mode.
+  const demoDir = demoContentDirOf(repoRoot)
+  if ((env.LECTURE_DEMO ?? '').trim() !== '0' && isDirectory(demoDir) && isContentRoot(demoDir)) {
+    return {
+      ...buildContentModePaths(demoDir, repoRoot, siteRoot, docsRoot, vpRoot, defaultSiteConfig),
+      demo: true,
+      ignoredContentDir: repoContentExists ? repoContentDir : null,
+      initTarget: repoContentDir,
+    }
   }
 
   const dataDir = path.join(siteRoot, 'data')
@@ -206,9 +218,7 @@ export function resolveContent(options: ResolveContentOptions = {}): ContentPath
     groups: path.join(vpRoot, 'groups.mts'),
     lecturesDir: docsRoot,
     chartsDir: path.join(publicDir, 'charts'),
-    exampleChartsDir,
     figuresDir: path.join(publicDir, 'figures'),
-    exampleFiguresDir,
     conceptsDir: path.join(docsRoot, 'concepts'),
     graphDir: {
       dir: dataDir,

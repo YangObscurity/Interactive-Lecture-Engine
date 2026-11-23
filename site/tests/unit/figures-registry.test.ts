@@ -89,8 +89,8 @@ describe('figures/validate (Ajv schema + invariants)', () => {
 
     const entry = validEntry(svg)
     const res = validateFiguresRegistry(
-      { version: 1, group: 'lr', figures: [entry] },
-      { expectedGroup: 'lr', groupDir: root, verifyFiles: true },
+      { version: 1, group: 'xr', figures: [entry] },
+      { expectedGroup: 'xr', groupDir: root, verifyFiles: true },
     )
     expect(res.ok).toBe(true)
     expect(res.errors).toEqual([])
@@ -100,7 +100,7 @@ describe('figures/validate (Ajv schema + invariants)', () => {
   it('rejects licence and third-party fields: the engine keeps no licence bookkeeping (owner decision 2026-11-22)', () => {
     const buf = Buffer.from('abc')
     for (const field of ['licence', 'third-party']) {
-      const res = validateFiguresRegistry({ version: 1, group: 'lr', figures: [validEntry(buf, { [field]: 'x' })] })
+      const res = validateFiguresRegistry({ version: 1, group: 'xr', figures: [validEntry(buf, { [field]: 'x' })] })
       expect(res.ok, field).toBe(false)
       expect(res.errors.some((e) => e.includes(field) || e.includes('additional')), field).toBe(true)
     }
@@ -110,7 +110,7 @@ describe('figures/validate (Ajv schema + invariants)', () => {
     const buf = Buffer.from('abc')
     const res = validateFiguresRegistry({
       version: 1,
-      group: 'lr',
+      group: 'xr',
       extraTop: 1,
       figures: [validEntry(buf, { rogueField: 'nope' })],
     })
@@ -126,15 +126,15 @@ describe('figures/validate (Ajv schema + invariants)', () => {
 
     const dup = validateFiguresRegistry({
       version: 1,
-      group: 'lr',
+      group: 'xr',
       figures: [validEntry(buf), validEntry(buf, { file: 'L01/other.svg' })],
     })
     expect(dup.ok).toBe(false)
     expect(dup.errors.some((e) => e.includes('duplicate id'))).toBe(true)
 
     const badSha = validateFiguresRegistry(
-      { version: 1, group: 'lr', figures: [validEntry(buf, { sha256: '000000000000' })] },
-      { expectedGroup: 'lr', groupDir: root, verifyFiles: true },
+      { version: 1, group: 'xr', figures: [validEntry(buf, { sha256: '000000000000' })] },
+      { expectedGroup: 'xr', groupDir: root, verifyFiles: true },
     )
     expect(badSha.ok).toBe(false)
     expect(badSha.errors.some((e) => e.includes('checksum mismatch'))).toBe(true)

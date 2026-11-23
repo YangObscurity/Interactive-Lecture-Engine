@@ -1,16 +1,26 @@
 /**
  * tests/e2e/concept-panels.spec.ts - K1: the three panels at the end of a concept page and the per-tier tool data.
  *
- * prod only (a production build is required: `tools/*.json` are written by `buildEnd`). The five published concepts
- * (`docs/concepts/*.md`) are the fixture; the expected backlinks are derived here from the Markdown files with a
+ * prod only (a production build is required: `tools/*.json` are written by `buildEnd`). S6: the fixture is the demo
+ * content's published concepts (`concepts/*.md` of the copy `npm run build:e2e` built from): critical-path names
+ * truth-table as its prerequisite and links it in the body, truth-table links critical-path back, significant-figures
+ * has neither (only lectures use it). The expected backlinks are derived here from the Markdown files with a
  * deliberately simple regex, not from the code under test.
  */
 import fs from 'node:fs'
 import path from 'node:path'
-import { test, expect, gotoAndSettle, DOCS_ROOT } from './fixtures'
+import { test, expect, gotoAndSettle } from './fixtures'
 import { THEME_MODES, useTheme } from './theme-helpers'
+import { E2E_CONTENT_COPY } from '../../scripts/build_e2e.mjs'
 
-const CONCEPTS_DIR = path.join(DOCS_ROOT, 'concepts')
+const CONCEPTS_DIR = path.join(E2E_CONTENT_COPY, 'concepts')
+
+/** The concept with all three panels, its prerequisite, the lecture that uses it, and a concept with lectures only. */
+const FULL = 'critical-path'
+const PREREQ = 'truth-table'
+const PREREQ_TERM = '真值表'
+const FULL_LECTURE = { id: 'PLN-L02', route: '/pln/L02' }
+const LECTURES_ONLY = 'significant-figures'
 
 function publishedSlugs(): string[] {
   return fs
@@ -48,41 +58,42 @@ test.describe('concept page panels and tool data (@concept-panels)', () => {
     test.skip(test.info().project.name !== 'prod', 'needs the production build (tools/*.json come from buildEnd)')
   })
 
-  test('/concepts/actuation-lease: related (by role), cited-by and lecture panels with working links', async ({ page, pageErrors }) => {
-    await gotoAndSettle(page, '/concepts/actuation-lease', { idleTimeout: 4_000, chartsTimeout: 6_000 })
+  test(`/concepts/${FULL}: related (by role), cited-by and lecture panels with working links`, async ({ page, pageErrors }) => {
+    await gotoAndSettle(page, `/concepts/${FULL}`, { idleTimeout: 4_000, chartsTimeout: 6_000 })
     const root = page.locator('[data-concept-related]')
     await expect(root).toBeVisible()
 
     const related = root.locator('[data-concept-panel="related"]')
     await expect(related.locator('h2')).toHaveText('相关概念')
-    // `related: optimistic-concurrency-control (prerequisite)` on this page; the other page lists this one as `applied-in`,
-    // and a pair written on both pages shows the other concept once, under this page's own relation
+    // `related: truth-table (prerequisite)` on this page; the other page links this one in its body but has no
+    // `related`, so the pair shows the other concept once, under this page's own relation
     await expect(related.locator('[data-rel-role="prerequisite"] h3')).toHaveText('前置概念')
-    await expect(related.locator('[data-rel-role="prerequisite"] [data-concept-link="optimistic-concurrency-control"]')).toBeVisible()
+    await expect(related.locator(`[data-rel-role="prerequisite"] [data-concept-link="${PREREQ}"]`)).toBeVisible()
     await expect(related.locator('[data-rel-role="applies"]')).toHaveCount(0)
-    await expect(related.locator('[data-concept-link="optimistic-concurrency-control"]')).toHaveCount(1)
+    await expect(related.locator(`[data-concept-link="${PREREQ}"]`)).toHaveCount(1)
 
     const backlinks = root.locator('[data-concept-panel="backlinks"]')
     await expect(backlinks.locator('h2')).toHaveText('被这些概念引用')
     await expect(backlinks.locator('[data-concept-link]')).toHaveCount(1)
-    await expect(backlinks.locator('[data-concept-link="optimistic-concurrency-control"]')).toContainText('乐观并发控制')
+    await expect(backlinks.locator(`[data-concept-link="${PREREQ}"]`)).toContainText(PREREQ_TERM)
 
     const lectures = root.locator('[data-concept-panel="lectures"]')
     await expect(lectures.locator('h2')).toHaveText('出现在这些讲')
-    const lectureLink = lectures.locator('a[data-lecture-link="LR-L01"]')
-    await expect(lectureLink).toHaveAttribute('href', '/lr/L01')
+    const lectureLink = lectures.locator(`a[data-lecture-link="${FULL_LECTURE.id}"]`)
+    await expect(lectureLink).toHaveAttribute('href', FULL_LECTURE.route)
     await expect(lectureLink).toContainText(/\d+ 处/)
 
     // concept card navigates to the other concept page, whose panels point back here
-    await backlinks.locator('[data-concept-link="optimistic-concurrency-control"]').click()
-    await expect(page).toHaveURL(/\/concepts\/optimistic-concurrency-control$/)
-    await expect(page.locator('[data-concept-panel="related"] [data-rel-role="applied-in"] [data-concept-link="actuation-lease"]')).toBeVisible()
-    await expect(page.locator('[data-concept-panel="backlinks"] [data-concept-link="actuation-lease"]')).toBeVisible()
+    await backlinks.locator(`[data-concept-link="${PREREQ}"]`).click()
+    await expect(page).toHaveURL(new RegExp(`/concepts/${PREREQ}$`))
+    // the other page has no `related` of its own: it shows this page's prerequisite edge from its side (required-by)
+    await expect(page.locator(`[data-concept-panel="related"] [data-rel-role="required-by"] [data-concept-link="${FULL}"]`)).toBeVisible()
+    await expect(page.locator(`[data-concept-panel="backlinks"] [data-concept-link="${FULL}"]`)).toBeVisible()
     expect(pageErrors).toEqual([])
   })
 
   test('a panel without entries is not rendered', async ({ page }) => {
-    await gotoAndSettle(page, '/concepts/int8-quantization', { idleTimeout: 4_000, chartsTimeout: 6_000 })
+    await gotoAndSettle(page, `/concepts/${LECTURES_ONLY}`, { idleTimeout: 4_000, chartsTimeout: 6_000 })
     const root = page.locator('[data-concept-related]')
     await expect(root.locator('[data-concept-panel="lectures"]')).toBeVisible()
     await expect(root.locator('[data-concept-panel="related"]')).toHaveCount(0)
@@ -94,7 +105,7 @@ test.describe('concept page panels and tool data (@concept-panels)', () => {
       test(`panels fit and wear the ${theme} shape (${mode}, ${label})`, async ({ page }) => {
         await page.setViewportSize(size)
         await useTheme(page, theme, mode)
-        await gotoAndSettle(page, '/concepts/actuation-lease', { idleTimeout: 4_000, chartsTimeout: 6_000 })
+        await gotoAndSettle(page, `/concepts/${FULL}`, { idleTimeout: 4_000, chartsTimeout: 6_000 })
         const root = page.locator('[data-concept-related]')
         await root.scrollIntoViewIfNeeded()
         await expect(root.locator('[data-concept-panel]')).toHaveCount(3)
@@ -119,9 +130,9 @@ test.describe('concept page panels and tool data (@concept-panels)', () => {
     }
   }
 
-  test('tools/concepts.json lists the five concepts with correct backlinks; tiers.json and lectures.json are served', async ({ request }) => {
+  test('tools/concepts.json lists the published concepts with correct backlinks; tiers.json and lectures.json are served', async ({ request }) => {
     const slugs = publishedSlugs()
-    expect(slugs).toHaveLength(5)
+    expect(slugs).toEqual(['critical-path', 'significant-figures', 'truth-table'])
     const res = await request.get('/tools/concepts.json')
     expect(res.status()).toBe(200)
     const data = (await res.json()) as { version: number; tier: string; generatedAt: string; concepts: ToolConcept[] }
@@ -138,18 +149,23 @@ test.describe('concept page panels and tool data (@concept-panels)', () => {
       expect(c.markdown).not.toContain('status: published')
       for (const rel of c.related) expect(slugs).toContain(rel.slug)
     }
-    const lease = data.concepts.find((c) => c.slug === 'actuation-lease')!
-    expect(lease.related).toEqual([{ slug: 'optimistic-concurrency-control', rel: 'prerequisite' }])
-    expect(lease.links).toEqual(['optimistic-concurrency-control'])
-    expect(lease.lectures.some((l) => l.id === 'LR-L01' && l.route === '/lr/L01' && l.count >= 1)).toBe(true)
+    const full = data.concepts.find((c) => c.slug === FULL)!
+    expect(full.related).toEqual([{ slug: PREREQ, rel: 'prerequisite' }])
+    expect(full.links).toEqual([PREREQ])
+    expect(full.lectures.some((l) => l.id === FULL_LECTURE.id && l.route === FULL_LECTURE.route && l.count >= 1)).toBe(true)
+    // significant-figures is used by two lectures in two groups (MEA L02, DAT L02)
+    const lecturesOnly = data.concepts.find((c) => c.slug === LECTURES_ONLY)!
+    expect(lecturesOnly.lectures.map((l) => l.id).sort()).toEqual(['DAT-L02', 'MEA-L02'])
 
     const tiers = (await (await request.get('/tools/tiers.json')).json()) as { version: number; tiers: Array<{ id: string; read: string; path: string }> }
     expect(tiers.version).toBe(1)
     expect(tiers.tiers[0]).toMatchObject({ id: data.tier, path: '/tools/' })
 
-    // lectures.json is ~19 MB for this site: only its headers are checked here (unit tests cover the sections)
+    // lectures.json: only its headers are checked here (unit tests cover the sections); the demo's 14 lectures
+    // make a file of some kilobytes
     const head = await request.head('/tools/lectures.json')
     expect(head.status()).toBe(200)
-    expect(Number(head.headers()['content-length'] ?? 0)).toBeGreaterThan(1_000_000)
+    expect(head.headers()['content-type']).toContain('application/json')
+    expect(Number(head.headers()['content-length'] ?? 0)).toBeGreaterThan(5_000)
   })
 })

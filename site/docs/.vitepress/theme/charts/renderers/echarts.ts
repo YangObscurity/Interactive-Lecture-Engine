@@ -181,18 +181,84 @@ export function toPx(v: unknown, base: number, dflt: number): number {
   return isNaN(n) ? dflt : n
 }
 
+/** The ECharts tool icons at the top right: px from the chart box's right / top edge, and the row's size (padding included). */
+export interface ToolRow {
+  right: number
+  top: number
+  width: number
+  height: number
+}
+
+/** ECharts toolbox: icon size, gap between icons (ECharts default), box padding (ECharts default). */
+const TOOL_ICON = 13
+const TOOL_ICON_GAP = 8
+const TOOL_PAD = 5
+/** Space kept between the tool icons and the engine's enlarge icon. */
+const TOOL_ENLARGE_GAP = 6
+/** The corner position when there is no enlarge icon to avoid (the viewer). */
+const TOOL_CORNER = { right: 10, top: 6 }
+
+/**
+ * Where the ECharts tool icons go. The engine's enlarge icon (`.chart-enlarge`, styles/base.css) sits at the figure's top
+ * right and stays visible on touch screens, so the tool icons go to its left, centred on the same line: neither covers the
+ * other. Measured from the laid-out icon, so any skin's figure padding and icon size are respected; when the figure is not
+ * laid out yet, the icon's CSS offsets are used. In the viewer (no enlarge icon) the tool icons stay in the corner.
+ */
+export function toolboxPlacement(fig: HTMLElement, body: HTMLElement, count: number): ToolRow {
+  const width = count * TOOL_ICON + Math.max(0, count - 1) * TOOL_ICON_GAP + 2 * TOOL_PAD
+  const height = TOOL_ICON + 2 * TOOL_PAD
+  const corner: ToolRow = { ...TOOL_CORNER, width, height }
+  if (fig.classList.contains('chart--modal') || fig.classList.contains('big')) return corner
+  const btn = Array.from(fig.querySelectorAll<HTMLElement>('.chart-enlarge')).find((b) => b.closest('figure') === fig)
+  if (!btn) return corner
+  const cs = getComputedStyle(btn)
+  if (cs.display === 'none') return corner
+  const b = btn.getBoundingClientRect()
+  const r = body.getBoundingClientRect()
+  let fromRight: number // body right edge -> enlarge icon left edge
+  let centreY: number // enlarge icon centre, from the body top
+  if (b.width > 0 && r.width > 0) {
+    fromRight = r.right - b.left
+    centreY = (b.top + b.bottom) / 2 - r.top
+  } else {
+    const fcs = getComputedStyle(fig)
+    const px = (v: string): number => parseFloat(v) || 0
+    fromRight = px(cs.right) + px(cs.width) - px(fcs.paddingRight)
+    centreY = px(cs.top) + px(cs.height) / 2 - px(fcs.paddingTop)
+  }
+  if (fromRight <= 0) return corner
+  return {
+    right: Math.max(TOOL_CORNER.right, Math.ceil(fromRight + TOOL_ENLARGE_GAP - TOOL_PAD)),
+    top: Math.max(0, Math.round(centreY - height / 2)),
+    width,
+    height,
+  }
+}
+
 /**
  * title / legend / grid overlap normalisation (V1, unchanged): only moves things *down*, and only
  * when the author did not set a position or the declared one really overlaps — hand-tuned charts
  * are left alone. Grid margins / containLabel come from `CHART_ECHARTS_GRID`.
+ * `tools` is the row of tool icons at the top right (see `toolboxPlacement`): a centred title or legend the engine placed
+ * (the author set no position) that would run into it is moved left, or below the row when it does not fit beside it.
  */
-export function normalizeEchartsLayout(opt: Obj, boxW: number, boxH: number): void {
+export function normalizeEchartsLayout(opt: Obj, boxW: number, boxH: number, tools?: ToolRow): void {
   const titles = objs(opt.title).filter((t) => t.text || t.subtext)
   const legends = objs(opt.legend).filter((l) => l.data)
 
   if (opt.grid == null && (opt.xAxis != null || opt.yAxis != null)) opt.grid = [{}]
   const grids = objs(opt.grid)
   const fb = CHART_ECHARTS_GRID.fallback
+  // the left edge of the tool row and its bottom, in px of the chart box (no row: nothing to avoid)
+  const toolsLeft = tools ? boxW - tools.right - tools.width : boxW
+  const toolsBottom = tools ? tools.top + tools.height : 0
+  /** A centred box [w wide, from y top to y bottom] the engine placed: keep it clear of the tool row. */
+  const avoidTools = (o: Obj, w: number, top: number, bottom: number): void => {
+    if (!tools || o.left !== 'center' || o.right != null || top >= toolsBottom || bottom <= tools.top) return
+    if ((boxW + w) / 2 <= toolsLeft - 4) return
+    if (8 + w <= toolsLeft - 8) o.left = 8
+    else o.top = toolsBottom + 2
+  }
 
   // 1) title: make the default position explicit, estimate wrapped lines from its width
   let titleBottom = 0
@@ -208,6 +274,12 @@ export function normalizeEchartsLayout(opt: Obj, boxW: number, boxH: number): vo
     for (const ch of String(t.text || '')) w += ch.charCodeAt(0) > 255 ? fs : fs * 0.6
     const avail = Math.max(120, boxW * 0.86)
     const lines = Math.max(1, Math.ceil(w / avail))
+    const textTop = toPx(t.top, boxH, 4)
+    // its drawn width for the tool row: ECharts' default title size is 18 px bold (the 14 above only sizes the rows, as in V1)
+    const drawnFs = num(ts && ts.fontSize) || 18
+    let drawnW = 0
+    for (const ch of String(t.text || '')) drawnW += ch.charCodeAt(0) > 255 ? drawnFs : drawnFs * 0.62
+    avoidTools(t, Math.min(drawnW, avail), textTop, textTop + Math.round(drawnFs * 1.45))
     titleBottom = toPx(t.top, boxH, 4) + Math.round(fs * 1.45 * lines) + (subFs ? Math.round(subFs * 1.5) + 4 : 0) + 8
   }
 
@@ -218,6 +290,19 @@ export function normalizeEchartsLayout(opt: Obj, boxW: number, boxH: number): vo
     const declared = l.top
     const asIs = declared == null ? -1 : toPx(declared, boxH, -1)
     let top = asIs === -1 ? (titles.length ? titleBottom : 4) : asIs
+    if (asIs === -1 && !titles.length && l.bottom == null && l.left == null && l.right == null && tools) {
+      // a top legend without a title: estimate its width (symbol 25 + gap 10 + name) and keep it clear of the tool row
+      let w = 0
+      for (const d of asArr(l.data)) {
+        const name = String(isObj(d) ? d.name ?? '' : d ?? '')
+        w += 35
+        for (const ch of name) w += ch.charCodeAt(0) > 255 ? 12 : 7
+      }
+      const probe: Obj = { left: 'center' }
+      avoidTools(probe, w, top, top + 24)
+      if (probe.left !== 'center') l.left = probe.left
+      if (probe.top != null) top = toPx(probe.top, boxH, top)
+    }
     if (titles.length && top < titleBottom) top = titleBottom
     if (top !== asIs) l.top = top
     if (l.left == null && l.right == null) l.left = 'center'
@@ -289,21 +374,21 @@ export async function renderEcharts(fig: HTMLElement, code: string, env: RenderE
   opt.animation = false
   opt.textStyle = Object.assign({}, isObj(opt.textStyle) ? opt.textStyle : {}, { fontFamily: CHART_FONT })
   const L = (key: MessageKey): string => translate(currentLang(), key)
-  opt.toolbox = Object.assign(
-    {
-      right: 10,
-      top: 6,
-      itemSize: 13,
-      feature: {
+  const authorTools = isObj(opt.toolbox) ? opt.toolbox : {}
+  const feature: Obj = isObj(authorTools.feature)
+    ? authorTools.feature
+    : {
         saveAsImage: { title: L('chart.echarts.saveImage'), pixelRatio: 3 },
         dataView: { title: L('chart.echarts.dataView'), readOnly: true, lang: [L('chart.echarts.dataViewTitle'), L('chart.modal.close'), L('chart.echarts.refresh')] },
         restore: { title: L('chart.echarts.restore') },
-      },
-    },
-    isObj(opt.toolbox) ? opt.toolbox : {},
-  )
+      }
+  const toolCount = Object.values(feature).filter((f) => !isObj(f) || f.show !== false).length
+  const row = toolboxPlacement(fig, body, toolCount)
+  opt.toolbox = Object.assign({ right: row.right, top: row.top, itemSize: TOOL_ICON, itemGap: TOOL_ICON_GAP, padding: TOOL_PAD }, authorTools, { feature })
+  // an author who placed or hid the toolbox keeps it; the layout only avoids the row the engine placed
+  const engineRow = authorTools.show !== false && authorTools.right == null && authorTools.left == null && authorTools.top == null && authorTools.bottom == null
   opt.tooltip = Object.assign({ confine: true }, isObj(opt.tooltip) ? opt.tooltip : {})
-  normalizeEchartsLayout(opt, body.clientWidth || 660, body.clientHeight || 430)
+  normalizeEchartsLayout(opt, body.clientWidth || 660, body.clientHeight || 430, engineRow && toolCount > 0 ? row : undefined)
 
   ensureDarkTheme(echarts)
   const isDark = isDarkTheme()

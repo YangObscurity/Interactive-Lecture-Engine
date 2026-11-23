@@ -8,4 +8,4 @@ site/config/schema.json text eol=lf
 
 # Figures are checked against the sha256 in their registry: keep their bytes identical on every machine (no EOL conversion).
 site/docs/public/figures/** -text
-site/docs/examples/public/figures/** -text
+templates/demo-content/figures/** -text

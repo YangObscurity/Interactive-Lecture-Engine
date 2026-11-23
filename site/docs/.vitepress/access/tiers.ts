@@ -290,7 +290,7 @@ export function lectureAccessOf(plan: AccessPlan): LectureAccess {
 
 export interface GroupDir {
   id: string
-  /** Folder under docs/, may contain "/" (`examples/g01`). */
+  /** Folder under docs/, may contain "/" (`courses/g01`). */
   dir: string
 }
 
@@ -334,7 +334,7 @@ export function pathPrefixesOf(dir: string, localeKeys: readonly string[]): stri
   return [`/${dir}/`, ...localeKeys.map((k) => `/${k}/${dir}/`)]
 }
 
-/** Prefix of the page chunk file names of a group: `g01_`, `examples_g01_`; with a locale `en_g01_`. */
+/** Prefix of the page chunk file names of a group: `g01_`, `courses_g01_`; with a locale `en_g01_`. */
 export function chunkPrefixOf(dir: string, locale: string | null = null): string {
   const base = `${dir.replace(/\//g, '_')}_`
   return locale ? `${locale}_${base}` : base

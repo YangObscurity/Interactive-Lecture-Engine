@@ -132,9 +132,9 @@ describe('category slots', () => {
       { id: 'G02', category: '编程语言' },
       { id: 'G03', category: '硬件与固件' },
       { id: 'G04', category: '网络与云' },
-      { id: 'LR', category: '研究' },
+      { id: 'XR', category: '拓展' },
     ]
-    expect([...groupSlots(groups)]).toEqual([['G01', 1], ['G02', 2], ['G03', 1], ['G04', 3], ['LR', 4]])
+    expect([...groupSlots(groups)]).toEqual([['G01', 1], ['G02', 2], ['G03', 1], ['G04', 3], ['XR', 4]])
     expect([...assignCategorySlots(groups, 3).values()]).toEqual([1, 2, 3, 1])
   })
   it('groups without a category share one bucket that takes the next free slot', () => {

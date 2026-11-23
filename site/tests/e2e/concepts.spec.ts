@@ -22,17 +22,20 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { test, expect, gotoAndSettle } from './fixtures'
 import { resolveContent } from '../../docs/.vitepress/content/paths.mts'
+import { E2E_CONTENT_COPY } from '../../scripts/build_e2e.mjs'
 import type { Locator, Page } from '@playwright/test'
 
 const SITE_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
 // S2: in content mode the sources live in content/ and the dev server serves the copies in site/docs/;
 // in-place mode makes both the same folder. The concept workflow reads the sources, the pages render the copies.
-const CONTENT = resolveContent()
+// S6: the e2e suites run on the demo content: the throw-away copy site/.e2e-demo/content that `npm run build:e2e`
+// (and the dev project) build from (templates/demo-content itself is never written).
+const CONTENT = resolveContent({ env: { ...process.env, LECTURE_CONTENT_DIR: E2E_CONTENT_COPY } })
 const DOCS_DIR = path.join(SITE_DIR, 'docs')
 const CONCEPTS_DIR = CONTENT.conceptsDir
 const DRAFTS_DIR = path.join(CONCEPTS_DIR, '_drafts')
-const TARGET_LECTURE_REL = '/lr/L01'
-const TARGET_LECTURE_FILE = path.join(CONTENT.lecturesDir, 'lr', 'L01.md')
+const TARGET_LECTURE_REL = '/mea/L02'
+const TARGET_LECTURE_FILE = path.join(CONTENT.lecturesDir, 'mea', 'L02.md')
 
 /** The site/docs copy of a source file (itself in in-place mode). */
 function copyOf(file: string): string {
@@ -60,7 +63,7 @@ function rmBoth(file: string, opts?: fs.RmOptions): void {
 const AUTHOR_LOCK_DIR = path.join(os.tmpdir(), 'lec-f9-e2e-author.lock')
 
 let baselineCaptured = false
-let origL01 = ''
+let origTarget = ''
 let snapshotDrafts = new Set<string>()
 let snapshotPub = new Set<string>()
 let holdingAuthorLock = false
@@ -68,7 +71,7 @@ let holdingAuthorLock = false
 function captureBaselineOnce(): void {
   if (baselineCaptured) return
   baselineCaptured = true
-  origL01 = fs.readFileSync(TARGET_LECTURE_FILE, 'utf8')
+  origTarget = fs.readFileSync(TARGET_LECTURE_FILE, 'utf8')
   snapshotDrafts = new Set(fs.existsSync(DRAFTS_DIR) ? fs.readdirSync(DRAFTS_DIR) : [])
   snapshotPub = new Set(fs.existsSync(CONCEPTS_DIR) ? fs.readdirSync(CONCEPTS_DIR).filter((n) => n !== '_drafts') : [])
 }
@@ -160,8 +163,8 @@ async function enableMockByokInSettings(page: Page, baseUrl = 'https://openroute
 
 function restoreRepoFixtures(): void {
   if (!baselineCaptured) return
-  if (!fs.existsSync(TARGET_LECTURE_FILE) || fs.readFileSync(TARGET_LECTURE_FILE, 'utf8') !== origL01) {
-    writeBoth(TARGET_LECTURE_FILE, origL01, 'utf8')
+  if (!fs.existsSync(TARGET_LECTURE_FILE) || fs.readFileSync(TARGET_LECTURE_FILE, 'utf8') !== origTarget) {
+    writeBoth(TARGET_LECTURE_FILE, origTarget, 'utf8')
   }
   if (fs.existsSync(DRAFTS_DIR)) {
     for (const f of fs.readdirSync(DRAFTS_DIR)) {
@@ -192,7 +195,7 @@ test.describe('concepts isolation, drafts exclusion, and read-only Dashboard (@c
     expect(groupCards).not.toContain('CONCEPTS')
 
     // Continue reading never lists /concepts/
-    await gotoAndSettle(page, '/g05/L19', { idleTimeout: 3_000, chartsTimeout: 8_000 })
+    await gotoAndSettle(page, '/mea/L03', { idleTimeout: 3_000, chartsTimeout: 8_000 })
     await page.evaluate(() => window.scrollTo(0, 300))
     await page.waitForTimeout(600)
     const readPosBefore = await page.evaluate(() => localStorage.getItem('lecture-read-pos') ?? '{}')
@@ -210,14 +213,14 @@ test.describe('concepts isolation, drafts exclusion, and read-only Dashboard (@c
     }
 
     // Group page never lists concepts
-    await gotoAndSettle(page, '/lr/', { idleTimeout: 3_000, chartsTimeout: 8_000 })
-    const lrLinks = await page.locator('a[href*="/concepts/"]').count()
-    expect(lrLinks).toBe(0)
+    await gotoAndSettle(page, '/mea/', { idleTimeout: 3_000, chartsTimeout: 8_000 })
+    const groupLinks = await page.locator('a[href*="/concepts/"]').count()
+    expect(groupLinks).toBe(0)
 
     // SelectionToolbar outside local author mode (prod) has zero concept authoring buttons
     if (test.info().project.name === 'prod') {
-      await gotoAndSettle(page, '/lr/L01', { idleTimeout: 3_000, chartsTimeout: 8_000 })
-      await selectExactTextInLocator(page, page.locator('.vp-doc p', { hasText: 'HearthNet' }).first(), 'HearthNet')
+      await gotoAndSettle(page, '/mea/L02', { idleTimeout: 3_000, chartsTimeout: 8_000 })
+      await selectExactTextInLocator(page, page.locator('.vp-doc p', { hasText: '刻度尺' }).first(), '刻度尺')
       await expect(page.locator('[data-ai-toolbar-concept]')).toHaveCount(0)
     }
 
@@ -255,7 +258,7 @@ test.describe('concepts isolation, drafts exclusion, and read-only Dashboard (@c
     // 3. Search does not return drafts in prod
     await gotoAndSettle(page, '/')
     await page.keyboard.press('ControlOrMeta+k')
-    await page.locator('#lec-search-input').fill('租约')
+    await page.locator('#lec-search-input').fill('有效数字')
     await page.waitForTimeout(300)
     const hitHrefs = await page.locator('.sp-hit').evaluateAll((els) =>
       els.map((e) => (e as HTMLAnchorElement).getAttribute('href') ?? ''),
@@ -319,16 +322,16 @@ test.describe('concepts dev & local author mode flows (@concepts-author)', () =>
         'english: "E2E Draft Sample"',
         'aliases: []',
         'field: "测试"',
-        'groups: ["LR"]',
+        'groups: ["MEA"]',
         'summary: "只给布局测试用的草稿。"',
         'status: draft',
         'related:',
-        '  - { slug: actuation-lease, rel: applied-in }',
+        '  - { slug: significant-figures, rel: applied-in }',
         '---',
         '',
         '# E2E 草稿样例',
         '',
-        '这段正文提到[执行租约](concept:actuation-lease)，字段有 ManagerID 与 TargetDevice。',
+        '这段正文提到[有效数字](concept:significant-figures)，字段有 RawReading 与 UnitSymbol。',
         '',
       ].join('\n'),
       'utf8',
@@ -339,9 +342,9 @@ test.describe('concepts dev & local author mode flows (@concepts-author)', () =>
     await expect(page.locator('h1')).toHaveText('E2E 草稿样例')
     await expect(page.locator('[data-concept-meta-line]')).toContainText('E2E Draft Sample')
     await expect(page.locator('[data-concept-back]')).toBeVisible()
-    await expect(page.locator('[data-concept-related] [data-concept-link="actuation-lease"]').first()).toBeVisible()
-    await expect(page.locator('.vp-doc')).toContainText('ManagerID')
-    await expect(page.locator('.vp-doc')).toContainText('TargetDevice')
+    await expect(page.locator('[data-concept-related] [data-concept-link="significant-figures"]').first()).toBeVisible()
+    await expect(page.locator('.vp-doc')).toContainText('RawReading')
+    await expect(page.locator('.vp-doc')).toContainText('UnitSymbol')
 
     const readPos = await page.evaluate(() => localStorage.getItem('lecture-read-pos') ?? '{}')
     expect(readPos).not.toContain('/concepts/')
@@ -368,7 +371,7 @@ test.describe('concepts dev & local author mode flows (@concepts-author)', () =>
     await enableMockByokInSettings(page)
 
     await expect(async () => {
-      await selectExactTextInLocator(page, page.locator('.vp-doc p', { hasText: 'HearthNet' }).first(), 'HearthNet')
+      await selectExactTextInLocator(page, page.locator('.vp-doc p', { hasText: '刻度尺' }).first(), '刻度尺')
       await page.locator('[data-ai-toolbar-concept="create"]').click({ timeout: 4_000 })
       await expect(page.locator('[data-concept-author-panel]')).toBeVisible({ timeout: 4_000 })
     }).toPass({ intervals: [500], timeout: 30_000 })
@@ -398,7 +401,7 @@ test.describe('concepts dev & local author mode flows (@concepts-author)', () =>
       '第二段再次提到 *重复锚点词*，而代码 `不要转换(concept:none)` 应保持原样。',
       '',
     ].join('\n')
-    writeBoth(TARGET_LECTURE_FILE, origL01 + testSection, 'utf8')
+    writeBoth(TARGET_LECTURE_FILE, origTarget + testSection, 'utf8')
 
     let aiMode: 'create' | 'edit' = 'create'
     await page.route('https://openrouter.ai/api/v1/chat/completions', async (route) => {
@@ -410,14 +413,14 @@ test.describe('concepts dev & local author mode flows (@concepts-author)', () =>
               english: 'Temporary F9 Concept',
               aliases: ['F9-UNIQUE-ALIAS', '测试别名二'],
               field: 'F9 自动化测试域',
-              groups: ['LR'],
+              groups: ['MEA'],
               summary: '用于端到端验证的独立概念摘要。',
               related: [],
               paragraphs: [
                 {
                   heading: '核心定义',
                   body: '验证表格内链接与 **粗体** 契约以及 `inline` 保护，暂含 待核实 细节。',
-                  sources: ['LR-L01 · F9 E2E 测例节'],
+                  sources: ['MEA-L02 · F9 E2E 测例节'],
                   verified: false,
                   unverifiedReason: '模拟待核实条目验证阻塞发布',
                 },
@@ -429,14 +432,14 @@ test.describe('concepts dev & local author mode flows (@concepts-author)', () =>
               english: 'Temporary F9 Concept Revised',
               aliases: ['F9-UNIQUE-ALIAS', '修订别名'],
               field: 'F9 自动化测试域',
-              groups: ['LR'],
+              groups: ['MEA'],
               summary: '已完成修订的独立概念摘要。',
               related: [],
               paragraphs: [
                 {
                   heading: '核心定义',
                   body: '修订后的定义正文，全部来源已核实。',
-                  sources: ['LR-L01 · F9 E2E 测例节'],
+                  sources: ['MEA-L02 · F9 E2E 测例节'],
                   verified: true,
                 },
               ],
@@ -526,10 +529,10 @@ test.describe('concepts dev & local author mode flows (@concepts-author)', () =>
     await expect(page).toHaveURL(new RegExp(`/concepts/${slug}$`))
     await expect(page.locator('h1')).toHaveCount(1)
     await expect(page.locator('h1')).toHaveText('临时概念测试词')
-    await expect(page.locator('[data-concept-related]')).toContainText('LR-L01')
+    await expect(page.locator('[data-concept-related]')).toContainText('MEA-L02')
 
     await page.locator('[data-concept-back]').click()
-    await expect(page).toHaveURL(/\/lr\/L01/)
+    await expect(page).toHaveURL(/\/mea\/L02/)
     await expect.poll(async () => Math.abs((await page.evaluate(() => window.scrollY)) - beforeScrollY), { timeout: 5000 }).toBeLessThanOrEqual(2)
 
     // 5. Search alias hit -> "概念" badge & strictly 1 hit per concept page
@@ -565,10 +568,10 @@ test.describe('concepts dev & local author mode flows (@concepts-author)', () =>
         'english: "Repeated Term"',
         'aliases: []',
         'field: "测试"',
-        'groups: ["LR"]',
+        'groups: ["MEA"]',
         'summary: "用于测试多处命中需选择。"',
         'status: draft',
-        'selectionSource: "LR-L01"',
+        'selectionSource: "MEA-L02"',
         'outline: deep',
         '---',
         '',
@@ -578,14 +581,14 @@ test.describe('concepts dev & local author mode flows (@concepts-author)', () =>
         '',
         '重复词条测试正文。',
         '',
-        '（出处：LR-L01）',
+        '（出处：MEA-L02）',
         '',
       ].join('\n'),
       'utf8',
     )
     writeBoth(
       path.join(DRAFTS_DIR, `${repeatSlug}.ctx.json`),
-      JSON.stringify({ lecturePath: '/lr/L01', selectedText: '重复锚点词' }),
+      JSON.stringify({ lecturePath: '/mea/L02', selectedText: '重复锚点词' }),
       'utf8',
     )
 
@@ -610,7 +613,7 @@ test.describe('concepts dev & local author mode flows (@concepts-author)', () =>
     await page.locator(`[data-concept-row="${slug}"]`).click()
     await expect(page.locator('[data-dc-delete]')).toBeEnabled()
     await page.locator('[data-dc-delete]').click()
-    await expect(page.locator('[data-dc-delete-impact]')).toContainText('LR-L01')
+    await expect(page.locator('[data-dc-delete-impact]')).toContainText('MEA-L02')
     await page.locator('[data-dc-confirm-delete]').click()
     await expect(page.locator(`[data-concept-row="${slug}"]`)).toHaveCount(0)
 
@@ -636,7 +639,7 @@ test.describe('concepts dev & local author mode flows (@concepts-author)', () =>
         'english: "Attach Test"',
         'aliases: []',
         'field: "F9 测试"',
-        'groups: ["LR"]',
+        'groups: ["MEA"]',
         'summary: "用于验证挂载已有概念页的摘要。"',
         'status: published',
         'reviewedAt: "2026-11-22"',
@@ -649,14 +652,14 @@ test.describe('concepts dev & local author mode flows (@concepts-author)', () =>
         '',
         '这是一个用于端到端测试的已发布概念页。',
         '',
-        '（出处：LR-L01）',
+        '（出处：MEA-L02）',
         '',
       ].join('\n'),
       'utf8',
     )
     writeBoth(
       TARGET_LECTURE_FILE,
-      origL01 + ['', '## F9 附着测例节', '', '第一段提到 附着测试词 一次。', '', '第二段再提到 附着测试词 一次。', ''].join('\n'),
+      origTarget + ['', '## F9 附着测例节', '', '第一段提到 附着测试词 一次。', '', '第二段再提到 附着测试词 一次。', ''].join('\n'),
       'utf8',
     )
 
@@ -703,7 +706,7 @@ test.describe('concepts dev & local author mode flows (@concepts-author)', () =>
     }).toPass({ intervals: [500], timeout: 30_000 })
     await selectExactTextInLocator(page, termLink, '附着测试词')
     await page.locator('[data-ai-toolbar-concept="delete"]').click()
-    await expect(page.locator('[data-concept-delete-impact]')).toContainText('LR-L01')
+    await expect(page.locator('[data-concept-delete-impact]')).toContainText('MEA-L02')
     expect(fs.existsSync(path.join(CONCEPTS_DIR, `${slug}.md`))).toBe(true)
     await page.locator('[data-concept-confirm-delete]').click()
     await expect(page.locator('[data-concept-author-status]')).toBeVisible()
@@ -728,7 +731,7 @@ test.describe('concepts dev & local author mode flows (@concepts-author)', () =>
         `english: ${JSON.stringify(slug)}`,
         `aliases: [${aliases.map((a) => JSON.stringify(a)).join(', ')}]`,
         'field: "K3 E2E 测试"',
-        'groups: ["LR"]',
+        'groups: ["MEA"]',
         `summary: ${JSON.stringify(summary)}`,
         'status: published',
         'reviewedAt: "2025-01-01"',
@@ -742,7 +745,7 @@ test.describe('concepts dev & local author mode flows (@concepts-author)', () =>
         '',
         '原有已发布内容。',
         '',
-        '（出处：[LR-L01](/lr/L01)）',
+        '（出处：[MEA-L02](/mea/L02)）',
         '',
       ].join('\n')
 
@@ -763,7 +766,7 @@ test.describe('concepts dev & local author mode flows (@concepts-author)', () =>
     )
     writeBoth(
       TARGET_LECTURE_FILE,
-      origL01 + ['', '## K3 E2E 补充与查重测例', '', '本段测试 K3待补充术语 与多命中别名 K3共享别名 的表现。', ''].join('\n'),
+      origTarget + ['', '## K3 E2E 补充与查重测例', '', '本段测试 K3待补充术语 与多命中别名 K3共享别名 的表现。', ''].join('\n'),
       'utf8',
     )
 
@@ -779,20 +782,20 @@ test.describe('concepts dev & local author mode flows (@concepts-author)', () =>
         english: 'k3-supp',
         aliases: ['K3待补充术语'],
         field: 'K3 E2E 测试',
-        groups: ['LR'],
+        groups: ['MEA'],
         summary: '补充全貌后的新版摘要。',
         related: [],
         paragraphs: [
           {
             heading: '原始章节',
-            body: '原有已发布内容，顺带提及 执行租约 但暂未加链接。',
-            sources: ['[LR-L01](/lr/L01)'],
+            body: '原有已发布内容，顺带提及 有效数字 但暂未加链接。',
+            sources: ['[MEA-L02](/mea/L02)'],
             verified: true,
           },
           {
             heading: '补充机制细节',
             body: '新增补充说明：补充已有概念写入草稿修订。',
-            sources: ['[LR-L01](/lr/L01#k3-e2e-补充与查重测例)'],
+            sources: ['[MEA-L02](/mea/L02#k3-e2e-补充与查重测例)'],
             verified: true,
           },
         ],
@@ -824,7 +827,7 @@ test.describe('concepts dev & local author mode flows (@concepts-author)', () =>
     await page.locator('[data-concept-duplicate-supplement]').click()
     await expect(page.locator('[data-concept-draft-card]')).toBeVisible({ timeout: 15_000 })
     expect(llmCalls).toBe(1)
-    await expect(page.locator('[data-concept-draft-warnings]')).toContainText('执行租约')
+    await expect(page.locator('[data-concept-draft-warnings]')).toContainText('有效数字')
     await expect(page.locator('[data-concept-sidebar-confirm]')).toBeEnabled()
 
     // 3. Dashboard shows pending revision status + diff against published page -> confirm replaces published page cleanly

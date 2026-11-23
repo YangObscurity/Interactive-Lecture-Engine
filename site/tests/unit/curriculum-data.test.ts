@@ -63,15 +63,15 @@ describe('ids, titles, requires references', () => {
   it('uses the lower-case core/route lecture id', () => {
     expect(lectureIdOf('g05', 19)).toBe('g05-l19')
     expect(lectureIdOf('G05', 3)).toBe('g05-l03')
-    expect(lectureIdOf('examples/g01', 1)).toBe('g01-l01')
-    expect(lectureIdOf('lr', 100)).toBe('lr-l100')
+    expect(lectureIdOf('courses/g01', 1)).toBe('g01-l01')
+    expect(lectureIdOf('xr', 100)).toBe('xr-l100')
     expect(lectureOfPath('/g01/L13')).toEqual({ id: 'g01-l13', group: 'g01' })
     expect(lectureOfPath('/g01/')).toBeNull()
   })
 
   it('strips the "Lecture N" prefix in both languages and keeps a title that is only the prefix', () => {
     expect(stripLectureNumber('第5讲 · 电阻')).toBe('电阻')
-    expect(stripLectureNumber('第01讲 · HearthNet：面向智能家居')).toBe('HearthNet：面向智能家居')
+    expect(stripLectureNumber('第01讲 · 示例站点：测量与估算')).toBe('示例站点：测量与估算')
     expect(stripLectureNumber('Example Lecture 1 · Understanding Ohm\'s Law')).toBe("Understanding Ohm's Law")
     expect(stripLectureNumber('Lecture 12: Queues')).toBe('Queues')
     expect(stripLectureNumber('没有前缀')).toBe('没有前缀')
@@ -82,7 +82,7 @@ describe('ids, titles, requires references', () => {
     expect(resolveRequire('g05/L18', 'g06')).toEqual({ id: 'g05-l18', group: 'g05' })
     expect(resolveRequire('/g05/L18', 'g06')).toEqual({ id: 'g05-l18', group: 'g05' })
     expect(resolveRequire('g05/L18.md', 'g06')).toEqual({ id: 'g05-l18', group: 'g05' })
-    expect(resolveRequire('L3', 'examples/g01')).toEqual({ id: 'g01-l03', group: 'g01' })
+    expect(resolveRequire('L3', 'courses/g01')).toEqual({ id: 'g01-l03', group: 'g01' })
     expect(resolveRequire('g05-L18', 'g06')).toEqual({ id: 'g05-l18', group: 'g05' })
     expect(resolveRequire('somewhere else', 'g06')).toBeNull()
     expect(resolveRequire('', 'g06')).toBeNull()

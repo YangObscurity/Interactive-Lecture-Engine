@@ -62,3 +62,72 @@ Do **not** run full `npm run build` directly on small VPS / deploy hosts (such a
 2. **8 GB shared hosts**: Ensure swap or free RAM `>= 6 GB` (or run under a lock without parallel heavy tasks) and optionally pass `LECTURE_BUILD_HEAP_MB=5120`.
 3. **Local partial iteration**: Use `LECTURE_BUILD_GROUPS=G01,G05 npm run build` or `npm run dev` when working on specific groups.
 4. **Public-only tier builds**: `npm run build -- --audience public` omits restricted-tier pages and assets.
+
+
+## 5. Tests run on the demo content
+
+Every test suite runs on the engine's own demo content, `templates/demo-content/` (4 groups in 2 categories, 14 lectures,
+an English translation of LOG, charts, a figure pack, 3 concepts, a knowledge graph, a progress seed, `access.e2e.json`).
+The owner's lectures (`content/` of a private site) never take part in a test, so the suites give the same result in a
+private site repository and in the engine repository, which has no `content/` at all.
+
+| Command (in `site/`) | What it does | Port |
+|---|---|---|
+| `npx vitest run` (`npm test`) | unit tests; a test that needs a whole site syncs the demo into its own temporary docs folder (`tests/unit/demo-content.ts`: `syncDemoDocs`, `DEMO_ENV`, `DEMO_ACCESS_JSON`); nothing is read from `site/docs` or `content/` | none |
+| `npm run build:e2e` | the demo build for Playwright: copies `templates/demo-content` to `site/.e2e-demo/content`, lays `e2e/site.config.ts` over its `site.config.ts` (the backend paths the e2e mocks: progress `rest`, `trusted-header`, companion `proxy`), builds with `LECTURE_CONTENT_DIR` pointing at the copy into `site/.e2e-demo/dist`, then puts `site/docs` back for the site's own content | none |
+| `npm run test:e2e:prod` | `build:e2e`, then the `prod` project against `site/.e2e-demo/dist` (served by `tests/e2e/access-server.mjs`) | `E2E_PROD_PORT`, default 4174 |
+| `npx playwright test --project dev` | `scripts/dev_e2e.mjs` (the dev web server): a fresh copy of the demo in `site/.e2e-demo/content` with the e2e site config, `content:sync --drafts` of the copy into `site/docs`, then `vitepress dev docs` with `LECTURE_CONTENT_DIR` at the copy; tests that write (Dashboard site texts, concept drafts) write into the copy. Afterwards `tests/e2e/dev-teardown.ts` puts `site/docs` back for the site's own content | `E2E_DEV_PORT`, default 5174 |
+| `npm run test:e2e:access` | `build:e2e:access` (demo with the tiers of `access.e2e.json`: MEA and LOG inline, PLN `authenticated`, DAT the gateway group `staff`, into `site/.access-e2e/dist`, then `check:access:dist`), then the `access` project | `E2E_ACCESS_PORT`, default 4374 |
+
+- `site/.e2e-demo/` and `site/.access-e2e/` are git-ignored and are the only places the e2e builds write
+  (`assertE2eOutDir`); `docs/.vitepress/dist`, the deployed output, is never touched. The owner's own `npm run build`
+  and `npm run dev` are unchanged and show only the owner's content again after an e2e build.
+- `templates/demo-content` itself is only read. Its `site.config.ts` works without a backend (the default site of a
+  fresh clone); the e2e backend settings live in `templates/demo-content/e2e/site.config.ts` and reach only the copy.
+- Without `LECTURE_CONTENT_DIR` and without `<repo>/content`, the engine falls back to the demo content
+  (`resolveContent` reports `demo: true`); then the Dashboard's write endpoints, concept drafting and `new:group` /
+  `new:lecture` refuse to write and ask for `npm run init`. `LECTURE_DEMO=0` turns the fallback off (in-place mode:
+  only lectures under `site/docs` with groups in `site/docs/.vitepress/groups.mts`, the V1 layout `content:migrate`
+  reads; without them the build is an empty site and the log says to run `npm run init`). The engine has no example
+  pages of its own besides the demo content (`site/docs/examples/` was removed in S6).
+- The dev project's copy is a content folder of its own (`LECTURE_CONTENT_DIR` is set), so it is not the read-only
+  demo fallback: the Dashboard's writes and concept drafting work there and only ever change the copy
+  (`tests/unit/dev-e2e.test.ts`). Pointing `LECTURE_CONTENT_DIR` at `templates/demo-content` itself would make it
+  writable too: do not; the e2e scripts always use the copy.
+- Putting `site/docs` back after the dev project (`restoreOwnContent`, the same as after `build:e2e`: `content:sync` of
+  the site's own content folder, or `content:sync --clean` when it has none):
+  - normally `tests/e2e/dev-teardown.ts`, the global teardown Playwright registers only when the dev project is
+    selected. It runs before Playwright stops its web servers, stops the dev server itself (on Windows Playwright ends
+    web servers with `taskkill /T /F`, which no signal handler of the server script survives) and then restores.
+    Ctrl-C of `playwright test` still runs it.
+  - `scripts/dev_e2e.mjs` records its run in `site/.e2e-demo/dev-server.json` and restores by itself when vitepress
+    exits or it gets Ctrl-C / SIGTERM when run on its own (`node scripts/dev_e2e.mjs --port 5174`).
+  - a run killed outright (the process tree ended, no teardown) leaves the demo in `site/docs` and the state file
+    behind. The next dev e2e start cleans up first ("leftover of an interrupted run"); `node scripts/dev_e2e.mjs
+    --restore` does it by hand; the site's own `npm run dev` / `npm run build` repair `site/docs` anyway with their
+    own `content:sync`. The leftover files are git-ignored synced copies, so `git status` stays clean meanwhile.
+  - the dev web server never reuses a server already on `E2E_DEV_PORT` (it could be `npm run dev` on the site's own
+    lectures): free the port first. Run one `build:e2e` / dev e2e at a time per checkout: both rewrite `site/docs` and
+    the copy.
+- Two checkouts can run e2e at once with different ports, e.g.
+  `E2E_PROD_PORT=5794 E2E_DEV_PORT=6794 E2E_ACCESS_PORT=4894`. Put a spec path before `--project`
+  (`npx playwright test tests/e2e/group-page.spec.ts --project prod`): `--project` takes several values.
+- New tests take their expectations from the demo content (or from the curriculum built from it), never from a
+  site's own lectures; a unit test of a pure function may use synthetic ids such as `g01` / `L02`.
+- Screenshot baselines (`site/tests/e2e/__screenshots__/<spec>/prod/`) are pictures of the demo build and ship with
+  the engine. They are recorded for the `prod` project only (the visual tests skip on `dev`): `visual-v2.spec.ts`
+  (home, `/mea/L04`, `/mea/` in both skins and modes, desktop and mobile) and the `@visual` / `@visual-v2` tests of
+  `atlas`, `canvas`, `group-page` and `slots-contract`; `visual-baseline.spec.ts` (the P0 set) only runs with
+  `VISUAL_V1=1` and has no committed baselines. Re-record them only after a deliberate change of the look or of the
+  demo content, and look at every new picture before committing it:
+  `npm run build:e2e`, then `npx playwright test tests/e2e/visual-v2.spec.ts tests/e2e/atlas.spec.ts tests/e2e/canvas.spec.ts tests/e2e/group-page.spec.ts tests/e2e/slots-contract.spec.ts --project prod --grep "@visual" --update-snapshots`.
+  A failing visual test without such a change is a regression (the diff is in `site/test-results/`), not a reason to
+  update.
+- `npm run screenshots:readme` (`scripts/readme_screenshots.mjs`) writes the README pictures to `<repo>/docs/screenshots/`:
+  home atlas (reader light and datasheet dark), the MEA group page, a lecture with a chart and a formula, the
+  dependency canvas, a concept hover card, the AI companion with one canned exchange, the Dashboard overview and a
+  lecture at 390 x 844. It serves `site/.e2e-demo/dist` (and runs `build:e2e` first when there is none; `--build`
+  forces it) on a free local port and answers every `/api/` request itself (no network; the Dashboard is the built
+  site's read-only overview with a mocked admin session, so no dev server runs and `site/docs` is left alone apart from
+  that `build:e2e`, which puts it back). `--only lecture,mobile` takes some of them, `--out <dir>` writes elsewhere. 1280 px wide viewport,
+  deviceScaleFactor 1, first screen only; each file stays well under 400 KB.

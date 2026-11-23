@@ -243,7 +243,9 @@ figure.chart > details.chart-code {
 }
 
 /* Figures (spec board 07): no always-on controls. The enlarge icon shows on hover / keyboard focus only (faintly on touch screens,
-   which have no hover); a click on the image opens the same viewer. It stays out of the viewer's own copy of the figure. */
+   which have no hover); a click on the image opens the same viewer. It stays out of the viewer's own copy of the figure.
+   ECharts draws its own tool icons in the same corner: charts/renderers/echarts.ts (toolboxPlacement) measures this icon and
+   puts them to its left, on its centre line, so a change of position or size here needs no change there. */
 figure.chart .chart-enlarge,
 figure.lec-fig .chart-enlarge {
   position: absolute;

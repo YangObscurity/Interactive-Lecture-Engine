@@ -1,0 +1,236 @@
+[
+  {
+    "notionPageId": "00000000-0000-4000-8000-000000000001",
+    "nodeId": "mea_units",
+    "title": "第1讲 · 量与单位",
+    "category": "基础方法",
+    "groupId": "MEA",
+    "lectureId": "MEA-L01",
+    "lecturePath": "/mea/L01",
+    "status": "已完成",
+    "completedDate": "2026-01-10",
+    "prerequisites": [],
+    "subsequents": [
+      "mea_sigfigs"
+    ]
+  },
+  {
+    "notionPageId": "00000000-0000-4000-8000-000000000002",
+    "nodeId": "mea_sigfigs",
+    "title": "第2讲 · 有效数字",
+    "category": "基础方法",
+    "groupId": "MEA",
+    "lectureId": "MEA-L02",
+    "lecturePath": "/mea/L02",
+    "status": "已完成",
+    "completedDate": "2026-01-12",
+    "prerequisites": [
+      "mea_units"
+    ],
+    "subsequents": [
+      "mea_uncert"
+    ]
+  },
+  {
+    "notionPageId": "00000000-0000-4000-8000-000000000003",
+    "nodeId": "mea_uncert",
+    "title": "第3讲 · 误差与不确定度",
+    "category": "基础方法",
+    "groupId": "MEA",
+    "lectureId": "MEA-L03",
+    "lecturePath": "/mea/L03",
+    "status": "学习中",
+    "completedDate": null,
+    "prerequisites": [
+      "mea_sigfigs"
+    ],
+    "subsequents": [
+      "mea_spread",
+      "mea_plots"
+    ]
+  },
+  {
+    "notionPageId": "00000000-0000-4000-8000-000000000004",
+    "nodeId": "mea_spread",
+    "title": "第4讲 · 平均值与离散程度",
+    "category": "基础方法",
+    "groupId": "MEA",
+    "lectureId": "MEA-L04",
+    "lecturePath": "/mea/L04",
+    "status": "未开始",
+    "completedDate": null,
+    "prerequisites": [
+      "mea_uncert"
+    ],
+    "subsequents": [
+      "mea_dims",
+      "pln_buffer",
+      "dat_tidy"
+    ]
+  },
+  {
+    "notionPageId": "00000000-0000-4000-8000-000000000005",
+    "nodeId": "mea_plots",
+    "title": "第5讲 · 读图与插值",
+    "category": "基础方法",
+    "groupId": "MEA",
+    "lectureId": "MEA-L05",
+    "lecturePath": "/mea/L05",
+    "status": "未开始",
+    "completedDate": null,
+    "prerequisites": [
+      "mea_uncert"
+    ],
+    "subsequents": [
+      "mea_dims"
+    ]
+  },
+  {
+    "notionPageId": "00000000-0000-4000-8000-000000000006",
+    "nodeId": "mea_dims",
+    "title": "第6讲 · 量纲检查",
+    "category": "基础方法",
+    "groupId": "MEA",
+    "lectureId": "MEA-L06",
+    "lecturePath": "/mea/L06",
+    "status": "未开始",
+    "completedDate": null,
+    "prerequisites": [
+      "mea_spread",
+      "mea_plots"
+    ],
+    "subsequents": []
+  },
+  {
+    "notionPageId": "00000000-0000-4000-8000-000000000007",
+    "nodeId": "log_truth",
+    "title": "第1讲 · 命题与真值表",
+    "category": "基础方法",
+    "groupId": "LOG",
+    "lectureId": "LOG-L01",
+    "lecturePath": "/log/L01",
+    "status": "已完成",
+    "completedDate": "2026-01-15",
+    "prerequisites": [],
+    "subsequents": [
+      "log_cond"
+    ]
+  },
+  {
+    "notionPageId": "00000000-0000-4000-8000-000000000008",
+    "nodeId": "log_cond",
+    "title": "第2讲 · 条件语句与逆否",
+    "category": "基础方法",
+    "groupId": "LOG",
+    "lectureId": "LOG-L02",
+    "lecturePath": "/log/L02",
+    "status": "未开始",
+    "completedDate": null,
+    "prerequisites": [
+      "log_truth"
+    ],
+    "subsequents": [
+      "log_proofs",
+      "pln_crit"
+    ]
+  },
+  {
+    "notionPageId": "00000000-0000-4000-8000-000000000009",
+    "nodeId": "log_proofs",
+    "title": "第3讲 · 从例子到证明",
+    "category": "基础方法",
+    "groupId": "LOG",
+    "lectureId": "LOG-L03",
+    "lecturePath": "/log/L03",
+    "status": "未开始",
+    "completedDate": null,
+    "prerequisites": [
+      "log_cond"
+    ],
+    "subsequents": []
+  },
+  {
+    "notionPageId": "00000000-0000-4000-8000-000000000010",
+    "nodeId": "pln_split",
+    "title": "第1讲 · 拆分任务",
+    "category": "应用实践",
+    "groupId": "PLN",
+    "lectureId": "PLN-L01",
+    "lecturePath": "/pln/L01",
+    "status": "未开始",
+    "completedDate": null,
+    "prerequisites": [],
+    "subsequents": [
+      "pln_crit"
+    ]
+  },
+  {
+    "notionPageId": "00000000-0000-4000-8000-000000000011",
+    "nodeId": "pln_crit",
+    "title": "第2讲 · 依赖与关键路径",
+    "category": "应用实践",
+    "groupId": "PLN",
+    "lectureId": "PLN-L02",
+    "lecturePath": "/pln/L02",
+    "status": "未开始",
+    "completedDate": null,
+    "prerequisites": [
+      "pln_split",
+      "log_cond"
+    ],
+    "subsequents": [
+      "pln_buffer"
+    ]
+  },
+  {
+    "notionPageId": "00000000-0000-4000-8000-000000000012",
+    "nodeId": "pln_buffer",
+    "title": "第3讲 · 估算与缓冲",
+    "category": "应用实践",
+    "groupId": "PLN",
+    "lectureId": "PLN-L03",
+    "lecturePath": "/pln/L03",
+    "status": "未开始",
+    "completedDate": null,
+    "prerequisites": [
+      "pln_crit",
+      "mea_spread",
+      "dat_group"
+    ],
+    "subsequents": []
+  },
+  {
+    "notionPageId": "00000000-0000-4000-8000-000000000013",
+    "nodeId": "dat_tidy",
+    "title": "第1讲 · 一行一条记录",
+    "category": "应用实践",
+    "groupId": "DAT",
+    "lectureId": "DAT-L01",
+    "lecturePath": "/dat/L01",
+    "status": "未开始",
+    "completedDate": null,
+    "prerequisites": [
+      "mea_spread"
+    ],
+    "subsequents": [
+      "dat_group"
+    ]
+  },
+  {
+    "notionPageId": "00000000-0000-4000-8000-000000000014",
+    "nodeId": "dat_group",
+    "title": "第2讲 · 汇总与分组",
+    "category": "应用实践",
+    "groupId": "DAT",
+    "lectureId": "DAT-L02",
+    "lecturePath": "/dat/L02",
+    "status": "未开始",
+    "completedDate": null,
+    "prerequisites": [
+      "dat_tidy"
+    ],
+    "subsequents": [
+      "pln_buffer"
+    ]
+  }
+]

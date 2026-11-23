@@ -312,7 +312,7 @@ def update_registry(registry_path: Path, group: str, entry: dict[str, Any]) -> N
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description="Prepare and register a figure/table in <figuresDir>/<group>/figures.json")
     p.add_argument("--source", required=True, type=Path, help="Input PDF, SVG, or raster image path")
-    p.add_argument("--group", required=True, help="Target group directory name (e.g. lr, examples/g01)")
+    p.add_argument("--group", required=True, help="Target group directory name (e.g. g01, courses/g01)")
     p.add_argument("--id", required=True, help="Unique figure id within group")
     p.add_argument("--out-rel", help="Relative output file inside group dir (e.g. L01/hearthnet-arch.webp)")
     p.add_argument("--kind", choices=("figure", "table"), default="figure")

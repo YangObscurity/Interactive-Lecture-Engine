@@ -6,7 +6,7 @@ import { describe, expect, it } from 'vitest'
 import MarkdownIt from 'markdown-it'
 import { localeLinksPlugin, rewriteLocaleHref } from '../../docs/.vitepress/plugins/localeLinks.mts'
 
-const translated = new Set(['/g01/L01', '/g01/L03', '/examples/g01/L01'])
+const translated = new Set(['/g01/L01', '/g01/L03', '/courses/g01/L01'])
 const opts = { localeKeys: ['en'], exists: (key: string, rootPath: string) => key === 'en' && translated.has(rootPath) }
 
 function hrefs(src: string, relativePath: string): string[] {
@@ -52,7 +52,7 @@ describe('localeLinksPlugin (markdown-it core rule)', () => {
   })
 
   it('works for nested group directories and for pages without relativePath', () => {
-    expect(hrefs('[a](./L02)', 'en/examples/g01/L01.md')).toEqual(['/examples/g01/L02'])
+    expect(hrefs('[a](./L02)', 'en/courses/g01/L01.md')).toEqual(['/courses/g01/L02'])
     const md = new MarkdownIt().use(localeLinksPlugin, opts)
     expect(md.render('[a](./L02)')).toContain('href="./L02"')
   })
