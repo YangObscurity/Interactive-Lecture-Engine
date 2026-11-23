@@ -261,7 +261,7 @@ export async function runProgressImport(
 
   log(`[import_progress] Source file: ${filePath} (${nodes.length} total node(s))`)
   // the reader id is not echoed: it may come from IMPORT_PROGRESS_USER_ID and logs get shared (CodeQL js/clear-text-logging)
-  log(`[import_progress] Target user: ${options.userId ? '--user-id' : 'IMPORT_PROGRESS_USER_ID'} (${userId.length} characters)`)
+  log(`[import_progress] Target user: given by ${options.userId ? '--user-id' : 'IMPORT_PROGRESS_USER_ID'}`)
   log(`[import_progress] Mode: ${apply ? 'APPLY (writing to database)' : 'DRY-RUN (read-only preview)'}`)
 
   const db: Db = createDb(dbUrl)
@@ -471,7 +471,7 @@ export async function runProgressImport(
         }
 
         if (prune) {
-          log(`[prune] Deleting ${orphanIds.length} orphan row(s) for user "${userId}"...`)
+          log(`[prune] Deleting ${orphanIds.length} orphan row(s) of the target user...`)
           await db.tx(async (client: DbClient) => {
             for (const oid of orphanIds!) {
               await client.query('DELETE FROM progress WHERE user_id = $1 AND lecture_id = $2', [
