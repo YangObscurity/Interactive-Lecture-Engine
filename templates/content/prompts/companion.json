@@ -1,0 +1,77 @@
+{
+  "version": 1,
+  "system": {
+    "zh": "你是讲义站点的技术伴读助手。仅依据当前讲义标题、课程分组、所在小节和读者选区等提供的上下文作答。如果问题超出当前讲义范围或缺少依据，必须明确说明并避免编造具体数值或引用。回答保持客观简明，并与读者提问所用语言保持一致。",
+    "en": "You are a technical reading companion for the lecture site. Answer from the supplied lecture title, group, section outline, and selected passage. If a question falls outside the provided lecture context or lacks evidence in it, state that explicitly rather than guessing parameters or citations. Keep answers factual and concise, and match the reader's language."
+  },
+  "actions": [
+    {
+      "id": "explain",
+      "label": {
+        "zh": "解释这段",
+        "en": "Explain this passage"
+      },
+      "template": {
+        "zh": "当前讲义：{lecture}（{group}），当前小节：{outline}。\n请结合本讲上下文，准确解释下面这段选文的核心含义、适用条件与关键结论；若缺少前提信息请明确指出：\n\n{selection}",
+        "en": "Lecture: {lecture} ({group}), Section: {outline}.\nUsing the lecture context, explain the core meaning, conditions, and key takeaways of the selected passage below, and note if required premises are missing:\n\n{selection}"
+      },
+      "needsSelection": true,
+      "surfaces": [
+        "panel",
+        "menu"
+      ],
+      "enabled": true
+    },
+    {
+      "id": "example",
+      "label": {
+        "zh": "举个例子",
+        "en": "Give an example"
+      },
+      "template": {
+        "zh": "当前讲义：{lecture}（{group}），当前小节：{outline}。\n针对下面这段选文，给出一个具体、可核对的示例来说明它的用法或边界条件，并说明示例与原文要点的对应关系：\n\n{selection}",
+        "en": "Lecture: {lecture} ({group}), Section: {outline}.\nGive one concrete, verifiable example illustrating the selected passage below (including boundary conditions if relevant), and state how each part of the example maps to the passage:\n\n{selection}"
+      },
+      "needsSelection": true,
+      "surfaces": [
+        "panel",
+        "menu"
+      ],
+      "enabled": true
+    },
+    {
+      "id": "quiz",
+      "label": {
+        "zh": "出一道自测题",
+        "en": "Make a self-test question"
+      },
+      "template": {
+        "zh": "当前讲义：{lecture}（{group}），当前小节：{outline}。\n请围绕当前小节内容出一道简短的自测题（先给出题干与作答提示，再在分隔之后给出参考答案与依据说明），避免使用讲义外未定义的概念。",
+        "en": "Lecture: {lecture} ({group}), Section: {outline}.\nCreate one short self-test question covering the current section. Present the question and prompt first, then provide the answer and a brief explanation grounded in the lecture."
+      },
+      "needsSelection": false,
+      "surfaces": [
+        "panel",
+        "menu"
+      ],
+      "enabled": true
+    },
+    {
+      "id": "summarize",
+      "label": {
+        "zh": "总结这一节",
+        "en": "Summarise this section"
+      },
+      "template": {
+        "zh": "当前讲义：{lecture}（{group}），当前小节：{outline}。\n请用简洁的分条方式总结这一节的核心概念、关键约束和常见误区，只归纳讲义上下文中明确提到的内容。",
+        "en": "Lecture: {lecture} ({group}), Section: {outline}.\nSummarise this section concisely in bullet points covering core concepts, key constraints, and common pitfalls based strictly on what is present in the lecture context."
+      },
+      "needsSelection": false,
+      "surfaces": [
+        "panel",
+        "menu"
+      ],
+      "enabled": true
+    }
+  ]
+}

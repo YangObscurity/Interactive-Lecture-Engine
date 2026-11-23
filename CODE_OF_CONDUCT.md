@@ -41,7 +41,7 @@
 ## 执行
 
 如遇辱骂、骚扰或其他不可接受的行为，请通过 GitHub 联系项目维护者报告：
-- 提交一个 [Issue](https://github.com/YangObscurity/Interactive-Lecture-Engine/issues) 并说明情况，或在任意 Issue / PR 中 @YangObscurity；
+- 提交一个 Issue 并说明情况，或在任意 Issue / PR 中 @ 维护者（仓库所有者）；
 - 若不便公开讨论，可在 Issue 中仅说明「需要私下沟通」，维护者会提供后续联系方式。
 
 所有投诉都会被**及时且公正**地审阅与处理。

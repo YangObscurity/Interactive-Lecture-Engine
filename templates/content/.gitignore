@@ -1,0 +1,8 @@
+# content repository: never commit secrets, raw material packs or agent workspaces
+.env
+.env.*
+*.key
+*.pem
+.privacy-terms
+node_modules/
+_raw/

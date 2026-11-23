@@ -1,0 +1,25 @@
+{
+  "version": 1,
+  "engineTools": {
+    "search_concepts": { "enabled": true },
+    "get_concept": { "enabled": true },
+    "get_concept_graph": { "enabled": true },
+    "search_lectures": { "enabled": true },
+    "get_lecture_summary": { "enabled": true }
+  },
+  "mcpServers": [
+    {
+      "id": "example-docs",
+      "name": "Example external MCP server (disabled by default)",
+      "url": "https://mcp.example.com/mcp",
+      "headerEnv": {
+        "Authorization": "EXAMPLE_MCP_AUTH"
+      },
+      "enabled": false,
+      "tools": {
+        "example_search": { "enabled": false }
+      },
+      "timeoutMs": 8000
+    }
+  ]
+}

@@ -1,0 +1,77 @@
+/*
+ * themes/datasheet/theme.css — structural differences of the datasheet theme (spec board §06 §09 §10).
+ * Every rule is scoped to [data-lec-theme="datasheet"] and uses only --lec-* contract names.
+ */
+
+/* three-line tables: heavy top rule, hairline under the header, heavy bottom rule, no zebra */
+[data-lec-theme='datasheet'] .vp-doc table:not(.lec-tb-spec) thead th {
+  border-top: var(--lec-line-heavy) solid var(--lec-text);
+  border-bottom: var(--lec-line-hair) solid var(--lec-text);
+}
+[data-lec-theme='datasheet'] .vp-doc table:not(.lec-tb-spec) tbody tr:last-child td {
+  border-bottom: var(--lec-line-heavy) solid var(--lec-text);
+}
+
+/* citations read as bracketed references */
+[data-lec-theme='datasheet'] .vp-doc .cite::before {
+  content: '[';
+  opacity: 0.6;
+}
+[data-lec-theme='datasheet'] .vp-doc .cite::after {
+  content: ']';
+  opacity: 0.6;
+}
+
+/* the place of the title block before a restricted tier's data arrives (see LectureTitleHost.vue) */
+[data-lec-theme='datasheet'] .lec-tb-ph {
+  min-height: 237px;
+}
+@media (max-width: 560px) {
+  [data-lec-theme='datasheet'] .lec-tb-ph {
+    min-height: 300px;
+  }
+}
+
+/* lecture title block (DOM arrives in P5: .lec-tb-top / .lec-tb-spec) — ruled spec table */
+[data-lec-theme='datasheet'] .lec-tb-top {
+  border-top: var(--lec-line-heavy) solid var(--lec-text);
+  padding-top: var(--lec-space-2);
+}
+[data-lec-theme='datasheet'] .lec-tb-spec {
+  border-top: var(--lec-line-hair) solid var(--lec-text);
+  border-bottom: var(--lec-line-hair) solid var(--lec-text);
+}
+[data-lec-theme='datasheet'] .lec-tb-spec th,
+[data-lec-theme='datasheet'] .lec-tb-spec td {
+  border-right: var(--lec-line-hair) solid var(--lec-border);
+}
+[data-lec-theme='datasheet'] .lec-tb-spec td:last-child {
+  border-right: 0;
+}
+[data-lec-theme='datasheet'] .lec-tb-spec tr + tr th,
+[data-lec-theme='datasheet'] .lec-tb-spec tr + tr td {
+  border-top: var(--lec-line-hair) solid var(--lec-border);
+}
+[data-lec-theme='datasheet'] .lec-tb-spec th {
+  background: var(--lec-surface);
+}
+
+/* group page (P4a WP-H3; theme/group/group.css is the shared layout, this is what the datasheet changes): square pads for the
+   lecture chips, heavy rules on lane titles and the panel; the group map (DIP) is the `GroupMap` component, the lines are
+   right-angled through `layout.edges` in theme.json */
+[data-lec-theme='datasheet'] .gp .gp-lc {
+  border-radius: 1px;
+}
+[data-lec-theme='datasheet'] .gp .gp-lc .no {
+  color: var(--lec-text);
+}
+[data-lec-theme='datasheet'] .gp .gp-lane-h {
+  font-weight: 900;
+}
+[data-lec-theme='datasheet'] .gp .gp-panel {
+  border-top: var(--lec-line-heavy) solid var(--lec-text);
+  border-radius: 0 0 var(--lec-radius-1) var(--lec-radius-1);
+}
+[data-lec-theme='datasheet'] .gp .gp-p-s h4 {
+  font-weight: 900;
+}

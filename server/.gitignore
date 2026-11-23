@@ -1,0 +1,18 @@
+node_modules/
+dist/
+coverage/
+*.tsbuildinfo
+
+.env
+.env.*
+!.env.example
+
+.pglite/
+pglite-data/
+*.pglite/
+
+# Runtime data directories (pglite database, backups). Never commit user data.
+data/
+
+*.log
+*.tmp

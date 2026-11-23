@@ -1,0 +1,14 @@
+[Unit]
+Description=Daily Backup Timer for Lecture Site API Service (lecture-api)
+Documentation=https://github.com/your-org/your-repo
+
+[Timer]
+# 每日凌晨 03:30 执行备份
+OnCalendar=*-*-* 03:30:00
+# 随机抖动 15 分钟，避免与其他定时任务集中并发打满 I/O
+RandomizedDelaySec=15m
+# 若关机或停机错过执行时间，开机后尽快补跑一次
+Persistent=true
+
+[Install]
+WantedBy=timers.target

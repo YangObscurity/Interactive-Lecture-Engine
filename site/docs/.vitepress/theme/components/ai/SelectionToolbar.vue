@@ -16,8 +16,19 @@
  */
 
 import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
+import { useT } from '../../../i18n/useT.ts'
+import { actionsForSurface, normalizePromptLang } from '../../../prompts/companion.ts'
+import { companionPromptsRef } from '../../../prompts/store.ts'
 import { ICONS } from './icons'
 import { aiState } from './aiState'
+import { normalizeConceptName } from '../../../concepts/names.ts'
+import {
+  fetchDevConceptsList,
+  probeLocalAuthorSession,
+  type ConceptListItem,
+} from './conceptAuthorClient'
+
+const { t, lang } = useT()
 
 interface Props {
   /** 限定触发选区的容器选择器，默认 .vp-doc */
@@ -30,13 +41,99 @@ const props = withDefaults(defineProps<Props>(), {
 
 const emit = defineEmits<{
   (e: 'ask-ai', selectedText: string): void
+  (e: 'quick-action', payload: { actionId: string; selectedText: string }): void
 }>()
+
+const quickActionButtons = computed(() => {
+  const pLang = normalizePromptLang(lang.value)
+  return actionsForSurface(companionPromptsRef.value, 'menu').map((action) => ({
+    id: action.id,
+    label: action.label[pLang],
+  }))
+})
 
 const isMounted = ref(false)
 const visible = ref(false)
 const selectedText = ref('')
 const coords = ref<{ top: number; left: number }>({ top: 0, left: 0 })
 const toolbarRef = ref<HTMLElement | null>(null)
+
+const isLocalAuthor = ref(false)
+const devConcepts = ref<ConceptListItem[]>([])
+const selectedConceptSlug = ref('')
+const selectionMeta = ref({
+  sectionHeading: '',
+  beforeContext: '',
+  afterContext: '',
+  lecturePath: '',
+})
+
+const matchingExistingConcepts = computed<ConceptListItem[]>(() => {
+  if (!isLocalAuthor.value || selectedConceptSlug.value) return []
+  const needle = normalizeConceptName(selectedText.value)
+  if (!needle) return []
+  const matched: ConceptListItem[] = []
+  const seenSlugs = new Set<string>()
+  for (const c of devConcepts.value) {
+    if (c.status && c.status !== 'published') continue
+    if (seenSlugs.has(c.slug)) continue
+    const names = [c.term, c.english, ...(c.aliases ?? [])]
+    if (names.some((n) => normalizeConceptName(n) === needle)) {
+      seenSlugs.add(c.slug)
+      matched.push(c)
+    }
+  }
+  return matched
+})
+
+const matchingExistingConcept = computed<ConceptListItem | null>(() => matchingExistingConcepts.value[0] ?? null)
+
+function extractSelectionContext(range: Range, docContainer: Element): void {
+  const startNode = range.startContainer
+  const startEl = startNode.nodeType === Node.ELEMENT_NODE ? (startNode as Element) : startNode.parentElement
+  const endEl = range.endContainer.nodeType === Node.ELEMENT_NODE ? (range.endContainer as Element) : range.endContainer.parentElement
+  const linkEl = startEl?.closest('a.lec-term') ?? endEl?.closest('a.lec-term') ?? null
+  let foundSlug = linkEl?.getAttribute('data-concept') ?? ''
+  if (!foundSlug) {
+    const insideLink = Array.from(docContainer.querySelectorAll('a.lec-term')).find((a) => range.intersectsNode(a))
+    if (insideLink) foundSlug = insideLink.getAttribute('data-concept') ?? ''
+  }
+  selectedConceptSlug.value = foundSlug
+
+  let sectionHeading = ''
+  const blockEl = startEl?.closest('p, li, td, th, blockquote') ?? startEl
+  const headings = Array.from(docContainer.querySelectorAll('h2, h3, h4'))
+  for (const h of headings) {
+    if (blockEl && (h.compareDocumentPosition(blockEl) & Node.DOCUMENT_POSITION_FOLLOWING)) {
+      sectionHeading = (h.textContent ?? '').replace(/\u200b/g, '').trim()
+    }
+  }
+
+  let beforeContext = ''
+  let afterContext = ''
+  if (blockEl && typeof document !== 'undefined') {
+    try {
+      const preRange = document.createRange()
+      preRange.selectNodeContents(blockEl)
+      preRange.setEnd(range.startContainer, range.startOffset)
+      beforeContext = preRange.toString().slice(-40)
+
+      const postRange = document.createRange()
+      postRange.selectNodeContents(blockEl)
+      postRange.setStart(range.endContainer, range.endOffset)
+      afterContext = postRange.toString().slice(0, 40)
+    } catch {
+      // ignore cross-container range extraction edge cases
+    }
+  }
+
+  selectionMeta.value = {
+    sectionHeading,
+    beforeContext,
+    afterContext,
+    lecturePath: typeof window !== 'undefined' ? window.location.pathname : '',
+  }
+}
 
 let debounceTimer: ReturnType<typeof setTimeout> | null = null
 
@@ -97,6 +194,10 @@ const updatePosition = (isScrollUpdate = false) => {
     return
   }
 
+  if (isLocalAuthor.value) {
+    extractSelectionContext(range, docContainer)
+  }
+
   const rect = range.getBoundingClientRect()
   // 选区不可见或尺寸为零
   if (rect.width === 0 && rect.height === 0) {
@@ -111,8 +212,8 @@ const updatePosition = (isScrollUpdate = false) => {
   }
 
   // 预估或实测浮动条尺寸
-  const tbWidth = toolbarRef.value?.offsetWidth || 108
-  const tbHeight = toolbarRef.value?.offsetHeight || 34
+  const tbWidth = toolbarRef.value?.offsetWidth || 340
+  const tbHeight = toolbarRef.value?.offsetHeight || 36
 
   // 上下定位：优先贴在选区上方 8px，若上方空间不足（< 8px）则翻转至选区下方
   let top = rect.top - tbHeight - 8
@@ -211,8 +312,58 @@ const onAskAi = () => {
   visible.value = false
 }
 
+const onQuickAction = (actionId: string) => {
+  const text = selectedText.value
+  if (!text) return
+
+  emit('quick-action', { actionId, selectedText: text })
+  aiState.dispatchAction(actionId, text)
+  visible.value = false
+}
+
+const onConceptAction = (mode: 'create' | 'attach' | 'edit' | 'supplement' | 'delete') => {
+  const text = selectedText.value
+  if (!text || !isLocalAuthor.value) return
+  const targetSlug =
+    mode === 'edit' || mode === 'delete'
+      ? selectedConceptSlug.value
+      : mode === 'attach'
+        ? matchingExistingConcept.value?.slug
+        : mode === 'supplement' && matchingExistingConcepts.value.length === 1
+          ? matchingExistingConcept.value?.slug
+          : undefined
+  aiState.openConceptTask({
+    mode,
+    selectedText: text,
+    ...(targetSlug ? { targetSlug } : {}),
+    lecturePath: selectionMeta.value.lecturePath,
+    sectionHeading: selectionMeta.value.sectionHeading,
+    beforeContext: selectionMeta.value.beforeContext,
+    afterContext: selectionMeta.value.afterContext,
+  })
+  visible.value = false
+}
+
+const refreshDevConceptCatalog = async () => {
+  if (!import.meta.env.DEV) return
+  const session = await probeLocalAuthorSession()
+  isLocalAuthor.value = session.isLocalAuthor
+  if (session.isLocalAuthor) {
+    devConcepts.value = await fetchDevConceptsList()
+  }
+}
+
+const onToolbarKeyDown = (event: KeyboardEvent) => {
+  if (event.key === 'Escape') {
+    hide()
+  }
+}
+
 onMounted(() => {
   isMounted.value = true
+  if (import.meta.env.DEV) {
+    void refreshDevConceptCatalog()
+  }
   if (typeof window !== 'undefined' && typeof document !== 'undefined') {
     document.addEventListener('selectionchange', onSelectionChange)
     document.addEventListener('pointerdown', onPointerDown)
@@ -248,18 +399,87 @@ onUnmounted(() => {
         class="ai-selection-toolbar"
         :style="toolbarStyle"
         role="toolbar"
-        aria-label="划词快速操作"
+        :aria-label="t('ai.askAiToolbarAria')"
+        @keydown="onToolbarKeyDown"
       >
         <button
           type="button"
-          class="ai-toolbar-btn"
+          class="ai-toolbar-btn is-primary-trigger"
+          data-ai-toolbar-ask
           @mousedown.prevent
           @click="onAskAi"
-          title="向 AI 伴读询问选中文本"
+          :title="t('ai.askAiTitle')"
         >
-          <span class="ai-toolbar-icon" v-html="ICONS.pulseTrigger"></span>
-          <span class="ai-toolbar-label">问问AI</span>
+          <span class="ai-toolbar-icon" aria-hidden="true" v-html="ICONS.pulseTrigger"></span>
+          <span class="ai-toolbar-label">{{ t('ai.askAi') }}</span>
         </button>
+        <span v-if="quickActionButtons.length > 0" class="ai-toolbar-sep" aria-hidden="true"></span>
+        <button
+          v-for="action in quickActionButtons"
+          :key="action.id"
+          type="button"
+          class="ai-toolbar-btn"
+          :data-ai-toolbar-action="action.id"
+          @mousedown.prevent
+          @click="onQuickAction(action.id)"
+          :title="action.label"
+        >
+          <span class="ai-toolbar-label">{{ action.label }}</span>
+        </button>
+        <template v-if="isLocalAuthor">
+          <span class="ai-toolbar-sep" aria-hidden="true"></span>
+          <template v-if="selectedConceptSlug">
+            <button
+              type="button"
+              class="ai-toolbar-btn"
+              data-ai-toolbar-concept="edit"
+              @mousedown.prevent
+              @click="onConceptAction('edit')"
+            >
+              <span class="ai-toolbar-label">{{ t('ai.conceptEditBtn') }}</span>
+            </button>
+            <button
+              type="button"
+              class="ai-toolbar-btn"
+              data-ai-toolbar-concept="delete"
+              @mousedown.prevent
+              @click="onConceptAction('delete')"
+            >
+              <span class="ai-toolbar-label">{{ t('ai.conceptDeleteBtn') }}</span>
+            </button>
+          </template>
+          <template v-else>
+            <button
+              v-if="matchingExistingConcept"
+              type="button"
+              class="ai-toolbar-btn"
+              data-ai-toolbar-concept="attach"
+              @mousedown.prevent
+              @click="onConceptAction('attach')"
+            >
+              <span class="ai-toolbar-label">{{ t('ai.conceptAttachBtn', { term: matchingExistingConcept.term }) }}</span>
+            </button>
+            <button
+              v-if="matchingExistingConcept"
+              type="button"
+              class="ai-toolbar-btn"
+              data-ai-toolbar-concept="supplement"
+              @mousedown.prevent
+              @click="onConceptAction('supplement')"
+            >
+              <span class="ai-toolbar-label">{{ t('ai.conceptSupplementBtn') }}</span>
+            </button>
+            <button
+              type="button"
+              class="ai-toolbar-btn"
+              data-ai-toolbar-concept="create"
+              @mousedown.prevent
+              @click="onConceptAction('create')"
+            >
+              <span class="ai-toolbar-label">{{ t('ai.conceptCreateBtn') }}</span>
+            </button>
+          </template>
+        </template>
       </div>
     </Transition>
   </Teleport>
@@ -270,40 +490,63 @@ onUnmounted(() => {
   position: fixed;
   z-index: 1000;
   display: inline-flex;
+  flex-wrap: wrap;
   align-items: center;
+  max-width: calc(100vw - 24px);
   gap: 4px;
-  padding: 3px 4px;
-  border-radius: 9999px;
-  background: var(--vp-c-bg-elv, #ffffff);
-  border: 1px solid var(--vp-c-divider, rgba(60, 60, 67, 0.18));
-  box-shadow: 0 4px 16px -2px rgba(0, 0, 0, 0.12), 0 1px 4px rgba(0, 0, 0, 0.06);
-  backdrop-filter: blur(8px);
+  padding: 4px 6px;
+  border-radius: var(--lec-radius-2);
+  background: var(--lec-surface);
+  border: var(--lec-line-hair) solid var(--lec-border);
   user-select: none;
   pointer-events: auto;
   transform: translate3d(0, 0, 0);
 }
 
+.ai-toolbar-sep {
+  width: 1px;
+  height: 16px;
+  background: var(--lec-border);
+  flex-shrink: 0;
+}
+
 .ai-toolbar-btn {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 5px 11px;
-  border-radius: 9999px;
-  font-size: 12.5px;
+  gap: 5px;
+  padding: 5px 10px;
+  border-radius: var(--lec-radius-1);
+  font-family: var(--lec-font-heading);
+  font-size: 12px;
   font-weight: 500;
-  letter-spacing: 0.02em;
-  color: var(--vp-c-text-1, #213547);
+  color: var(--lec-text);
   background: transparent;
-  border: none;
+  border: var(--lec-line-hair) solid transparent;
   cursor: pointer;
   white-space: nowrap;
-  transition: all 0.16s ease;
-  line-height: 1;
+  transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+  line-height: 1.2;
 }
 
 .ai-toolbar-btn:hover {
-  color: var(--vp-c-brand-1, #10b981);
-  background: var(--vp-c-default-soft, rgba(16, 185, 129, 0.08));
+  color: var(--lec-accent);
+  background: var(--lec-accent-tint);
+  border-color: var(--lec-accent);
+}
+
+.ai-toolbar-btn:focus-visible {
+  outline: 2px solid var(--lec-accent);
+  outline-offset: 2px;
+}
+
+[data-lec-theme='datasheet'] .ai-selection-toolbar {
+  border-radius: var(--lec-radius-1);
+  border-top: var(--lec-line-heavy) solid var(--lec-text);
+}
+
+[data-lec-theme='datasheet'] .ai-toolbar-btn {
+  font-family: var(--lec-font-mono);
+  font-size: 11.5px;
 }
 
 .ai-toolbar-btn:active {
@@ -314,7 +557,7 @@ onUnmounted(() => {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  color: var(--vp-c-brand-1, #10b981);
+  color: var(--lec-accent);
   flex-shrink: 0;
 }
 

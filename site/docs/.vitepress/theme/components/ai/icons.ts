@@ -163,5 +163,36 @@ export const ICONS = {
   edit: `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
     <path d="M17 3a2.85 2.85 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/>
     <path d="m15 5 4 4"/>
+  </svg>`,
+
+  /** 状态形状 1: 正常/已验证（圆圈+勾，实线） */
+  statusOk: `<svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="8" cy="8" r="6.2"/>
+    <polyline points="5.2 8.2 7.2 10.2 10.9 5.8"/>
+  </svg>`,
+
+  /** 状态形状 2: 不可用/失败（三角形告警） */
+  statusUnavailable: `<svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M8 2.1 14.2 13H1.8Z"/>
+    <line x1="8" y1="6.2" x2="8" y2="9.3"/>
+    <circle cx="8" cy="11.3" r="0.6" fill="currentColor"/>
+  </svg>`,
+
+  /** 状态形状 3: 未配置（圆圈+斜杠） */
+  statusUnconfigured: `<svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round">
+    <circle cx="8" cy="8" r="6"/>
+    <line x1="3.8" y1="12.2" x2="12.2" y2="3.8"/>
+  </svg>`,
+
+  /** 状态形状 4: 限流等待（钟表倒计时） */
+  statusRateLimited: `<svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="8" cy="8" r="6"/>
+    <polyline points="8 4.6 8 8 10.5 9.6"/>
+  </svg>`,
+
+  /** 状态形状 5: 未验证/检测中（空心菱形） */
+  statusUnverified: `<svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round">
+    <polygon points="8 1.8 14.2 8 8 14.2 1.8 8"/>
+    <circle cx="8" cy="8" r="1.1" fill="currentColor"/>
   </svg>`
 } as const

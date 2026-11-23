@@ -1,0 +1,6 @@
+{
+  "c1": {
+    "type": "echarts",
+    "code": "{\n  \"title\": {\n    \"text\": \"五次测量\"\n  },\n  \"tooltip\": {\n    \"trigger\": \"item\"\n  },\n  \"xAxis\": {\n    \"type\": \"category\",\n    \"data\": [\n      \"1\",\n      \"2\",\n      \"3\",\n      \"4\",\n      \"5\"\n    ]\n  },\n  \"yAxis\": {\n    \"type\": \"value\",\n    \"min\": 9.5,\n    \"max\": 10.5\n  },\n  \"series\": [\n    {\n      \"name\": \"读数\",\n      \"type\": \"line\",\n      \"showSymbol\": true,\n      \"symbolSize\": 8,\n      \"lineStyle\": {\n        \"width\": 0\n      },\n      \"data\": [\n        9.8,\n        10.1,\n        10,\n        9.9,\n        10.2\n      ]\n    }\n  ]\n}"
+  }
+}

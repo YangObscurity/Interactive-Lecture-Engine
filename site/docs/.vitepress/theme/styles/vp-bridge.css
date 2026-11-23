@@ -1,0 +1,101 @@
+/*
+ * styles/vp-bridge.css — map the `--lec-*` contract onto VitePress' PUBLIC variables (plan §4
+ * "映射到 VitePress"). Only variables documented in vitepress/theme-default/styles/vars.css are
+ * touched; no VP component is aliased or overridden here.
+ *
+ * `:root, :root.dark` (specificity 0,1,0 / 0,2,0) wins over VP's own `:root` / `.dark` blocks
+ * regardless of bundle order, so light and dark both follow the active theme pack.
+ */
+:root,
+:root.dark {
+  /* surfaces */
+  --vp-c-bg: var(--lec-bg);
+  --vp-c-bg-alt: var(--lec-surface);
+  --vp-c-bg-elv: var(--lec-surface);
+  --vp-c-bg-soft: var(--lec-surface);
+
+  /* lines */
+  --vp-c-border: var(--lec-border);
+  --vp-c-divider: var(--lec-border);
+  --vp-c-gutter: var(--lec-border);
+
+  /* text */
+  --vp-c-text-1: var(--lec-text);
+  --vp-c-text-2: var(--lec-text-muted);
+  --vp-c-text-3: var(--lec-text-muted);
+
+  /* brand */
+  --vp-c-brand-1: var(--lec-accent);
+  --vp-c-brand-2: var(--lec-accent);
+  --vp-c-brand-3: var(--lec-accent);
+  --vp-c-brand-soft: var(--lec-accent-tint);
+
+  /* neutral "default" scale used by code / badges / info blocks */
+  --vp-c-default-soft: var(--lec-surface);
+
+  /* semantic custom blocks (tip / note / important → accent, warning, danger / caution) */
+  --vp-c-tip-1: var(--lec-accent);
+  --vp-c-tip-2: var(--lec-accent);
+  --vp-c-tip-3: var(--lec-accent);
+  --vp-c-tip-soft: var(--lec-accent-tint);
+  --vp-c-note-1: var(--lec-accent);
+  --vp-c-note-2: var(--lec-accent);
+  --vp-c-note-3: var(--lec-accent);
+  --vp-c-note-soft: var(--lec-accent-tint);
+  --vp-c-important-1: var(--lec-accent);
+  --vp-c-important-2: var(--lec-accent);
+  --vp-c-important-3: var(--lec-accent);
+  --vp-c-important-soft: var(--lec-accent-tint);
+  --vp-c-success-1: var(--lec-done-text);
+  --vp-c-success-2: var(--lec-done-text);
+  --vp-c-success-3: var(--lec-done);
+  --vp-c-warning-1: var(--lec-warning);
+  --vp-c-warning-2: var(--lec-warning);
+  --vp-c-warning-3: var(--lec-warning);
+  --vp-c-warning-soft: var(--lec-warning-tint);
+  --vp-c-danger-1: var(--lec-danger);
+  --vp-c-danger-2: var(--lec-danger);
+  --vp-c-danger-3: var(--lec-danger);
+  --vp-c-danger-soft: var(--lec-danger-tint);
+  --vp-c-caution-1: var(--lec-danger);
+  --vp-c-caution-2: var(--lec-danger);
+  --vp-c-caution-3: var(--lec-danger);
+  --vp-c-caution-soft: var(--lec-danger-tint);
+
+  /* buttons */
+  --vp-button-brand-border: var(--lec-accent);
+  --vp-button-brand-text: var(--lec-on-accent);
+  --vp-button-brand-bg: var(--lec-accent);
+  --vp-button-brand-hover-border: var(--lec-accent);
+  --vp-button-brand-hover-text: var(--lec-on-accent);
+  --vp-button-brand-hover-bg: var(--lec-accent);
+  --vp-button-brand-active-border: var(--lec-accent);
+  --vp-button-brand-active-text: var(--lec-on-accent);
+  --vp-button-brand-active-bg: var(--lec-accent);
+
+  /* code */
+  --vp-code-color: var(--lec-text);
+  --vp-code-bg: var(--lec-surface);
+  --vp-code-block-bg: var(--lec-surface);
+  --vp-code-lang-color: var(--lec-text-muted);
+  --vp-code-copy-code-bg: var(--lec-bg);
+  --vp-code-copy-code-hover-bg: var(--lec-bg);
+  --vp-code-copy-code-border-color: var(--lec-border);
+  --vp-code-copy-code-hover-border-color: var(--lec-border);
+
+  /* chrome */
+  --vp-nav-bg-color: var(--lec-bg);
+  --vp-local-nav-bg-color: var(--lec-bg);
+  --vp-sidebar-bg-color: var(--lec-surface);
+  --vp-input-bg-color: var(--lec-bg);
+  --vp-input-border-color: var(--lec-border);
+  --vp-local-search-bg: var(--lec-bg);
+  --vp-local-search-result-bg: var(--lec-surface);
+  --vp-local-search-result-border: var(--lec-border);
+  --vp-local-search-highlight-bg: var(--lec-accent);
+  --vp-local-search-highlight-text: var(--lec-on-accent);
+
+  /* typography */
+  --vp-font-family-base: var(--lec-font-heading);
+  --vp-font-family-mono: var(--lec-font-mono);
+}

@@ -1,0 +1,33 @@
+{
+  "ok": true,
+  "service": "tutorial-backend",
+  "version": "2.0.0",
+  "time": "2026-11-19T12:00:00.000Z",
+  "uptimeSeconds": 4200,
+  "checks": {
+    "db": {
+      "status": "ok",
+      "latencyMs": 3.2,
+      "migrations": {
+        "appliedCount": 4,
+        "pendingCount": 0,
+        "latestApplied": "004_admin_views"
+      }
+    },
+    "ai": {
+      "provider": "dify",
+      "configured": true,
+      "status": "ok"
+    },
+    "notion": {
+      "configured": true,
+      "status": "ok"
+    }
+  },
+  "runtime": {
+    "nodeVersion": "v22.23.3",
+    "authAdapter": "trusted-header",
+    "headerPreset": "authelia",
+    "dbKind": "postgres"
+  }
+}

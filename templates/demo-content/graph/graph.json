@@ -1,0 +1,227 @@
+{
+  "schema": 1,
+  "source": {
+    "file": "demo-graph",
+    "sha256": "000000000000",
+    "nodes": 14,
+    "edges": 15
+  },
+  "categories": [
+    {
+      "id": "cat_found",
+      "title": "基础方法",
+      "nodes": [
+        "mea_units",
+        "mea_sigfigs",
+        "mea_uncert",
+        "mea_spread",
+        "mea_plots",
+        "mea_dims",
+        "log_truth",
+        "log_cond",
+        "log_proofs"
+      ]
+    },
+    {
+      "id": "cat_apply",
+      "title": "应用实践",
+      "nodes": [
+        "pln_split",
+        "pln_crit",
+        "pln_buffer",
+        "dat_tidy",
+        "dat_group"
+      ]
+    }
+  ],
+  "nodes": [
+    {
+      "id": "mea_units",
+      "title": "量与单位",
+      "category": "cat_found",
+      "kind": "lecture",
+      "status": "unread",
+      "lecture": "/mea/L01",
+      "binding": "legacy"
+    },
+    {
+      "id": "mea_sigfigs",
+      "title": "有效数字",
+      "category": "cat_found",
+      "kind": "lecture",
+      "status": "unread",
+      "lecture": "/mea/L02",
+      "binding": "legacy"
+    },
+    {
+      "id": "mea_uncert",
+      "title": "误差与不确定度",
+      "category": "cat_found",
+      "kind": "lecture",
+      "status": "unread",
+      "lecture": "/mea/L03",
+      "binding": "legacy"
+    },
+    {
+      "id": "mea_spread",
+      "title": "平均值与离散程度",
+      "category": "cat_found",
+      "kind": "lecture",
+      "status": "unread",
+      "lecture": "/mea/L04",
+      "binding": "legacy"
+    },
+    {
+      "id": "mea_plots",
+      "title": "读图与插值",
+      "category": "cat_found",
+      "kind": "lecture",
+      "status": "unread",
+      "lecture": "/mea/L05",
+      "binding": "legacy"
+    },
+    {
+      "id": "mea_dims",
+      "title": "量纲检查",
+      "category": "cat_found",
+      "kind": "lecture",
+      "status": "unread",
+      "lecture": "/mea/L06",
+      "binding": "legacy"
+    },
+    {
+      "id": "log_truth",
+      "title": "命题与真值表",
+      "category": "cat_found",
+      "kind": "lecture",
+      "status": "unread",
+      "lecture": "/log/L01",
+      "binding": "legacy"
+    },
+    {
+      "id": "log_cond",
+      "title": "条件语句与逆否",
+      "category": "cat_found",
+      "kind": "lecture",
+      "status": "unread",
+      "lecture": "/log/L02",
+      "binding": "legacy"
+    },
+    {
+      "id": "log_proofs",
+      "title": "从例子到证明",
+      "category": "cat_found",
+      "kind": "lecture",
+      "status": "unread",
+      "lecture": "/log/L03",
+      "binding": "legacy"
+    },
+    {
+      "id": "pln_split",
+      "title": "拆分任务",
+      "category": "cat_apply",
+      "kind": "lecture",
+      "status": "unread",
+      "lecture": "/pln/L01",
+      "binding": "legacy"
+    },
+    {
+      "id": "pln_crit",
+      "title": "依赖与关键路径",
+      "category": "cat_apply",
+      "kind": "lecture",
+      "status": "unread",
+      "lecture": "/pln/L02",
+      "binding": "legacy"
+    },
+    {
+      "id": "pln_buffer",
+      "title": "估算与缓冲",
+      "category": "cat_apply",
+      "kind": "lecture",
+      "status": "unread",
+      "lecture": "/pln/L03",
+      "binding": "legacy"
+    },
+    {
+      "id": "dat_tidy",
+      "title": "一行一条记录",
+      "category": "cat_apply",
+      "kind": "lecture",
+      "status": "unread",
+      "lecture": "/dat/L01",
+      "binding": "legacy"
+    },
+    {
+      "id": "dat_group",
+      "title": "汇总与分组",
+      "category": "cat_apply",
+      "kind": "lecture",
+      "status": "unread",
+      "lecture": "/dat/L02",
+      "binding": "legacy"
+    }
+  ],
+  "edges": [
+    [
+      "mea_units",
+      "mea_sigfigs"
+    ],
+    [
+      "mea_sigfigs",
+      "mea_uncert"
+    ],
+    [
+      "mea_uncert",
+      "mea_spread"
+    ],
+    [
+      "mea_uncert",
+      "mea_plots"
+    ],
+    [
+      "mea_spread",
+      "mea_dims"
+    ],
+    [
+      "mea_plots",
+      "mea_dims"
+    ],
+    [
+      "log_truth",
+      "log_cond"
+    ],
+    [
+      "log_cond",
+      "log_proofs"
+    ],
+    [
+      "pln_split",
+      "pln_crit"
+    ],
+    [
+      "log_cond",
+      "pln_crit"
+    ],
+    [
+      "pln_crit",
+      "pln_buffer"
+    ],
+    [
+      "mea_spread",
+      "pln_buffer"
+    ],
+    [
+      "mea_spread",
+      "dat_tidy"
+    ],
+    [
+      "dat_tidy",
+      "dat_group"
+    ],
+    [
+      "dat_group",
+      "pln_buffer"
+    ]
+  ]
+}

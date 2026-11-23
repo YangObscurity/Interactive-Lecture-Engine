@@ -50,8 +50,8 @@ and discussions) and to behaviour when an individual represents the project in p
 If you experience abuse, harassment or other unacceptable behaviour, please report it to
 the maintainers through GitHub:
 
-- Open an [issue](https://github.com/YangObscurity/Interactive-Lecture-Engine/issues) describing
-  what happened, or mention **@YangObscurity** in any issue or pull request.
+- Open an issue describing
+  what happened, or mention the maintainer (the repository owner) in any issue or pull request.
 - If you would rather not discuss it publicly, simply say so in the issue — the
   maintainer will then provide a private channel.
 

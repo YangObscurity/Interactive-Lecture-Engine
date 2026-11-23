@@ -1,0 +1,6 @@
+{
+  "c1": {
+    "type": "echarts",
+    "code": "{\n  \"title\": { \"text\": \"Fixture Demo Linear Response\" },\n  \"tooltip\": { \"trigger\": \"axis\" },\n  \"xAxis\": { \"type\": \"category\", \"data\": [\"0\", \"1\", \"2\", \"3\"] },\n  \"yAxis\": { \"type\": \"value\" },\n  \"series\": [{ \"name\": \"Gain\", \"type\": \"line\", \"data\": [0, 1, 2, 3] }]\n}"
+  }
+}

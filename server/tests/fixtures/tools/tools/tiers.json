@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "tiers": [
+    {
+      "id": "public",
+      "read": "public",
+      "groups": [],
+      "path": ""
+    },
+    {
+      "id": "staff",
+      "read": "groups",
+      "groups": ["staff"],
+      "path": "_access/staff"
+    }
+  ]
+}

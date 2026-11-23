@@ -1,0 +1,59 @@
+# Interactive Lecture Engine (the export swaps this file in as the repository's .gitignore)
+
+# secrets and local configuration: never committed
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+*.p12
+*.pfx
+*.htpasswd
+credentials.*
+
+# the site owner's private content repository
+/content/
+
+# dependencies, caches, build output
+node_modules/
+__pycache__/
+*.pyc
+dist/
+**/dist/
+**/dist-*/
+**/.vitepress/cache/
+**/.vitepress/.temp/
+site/.lecture-build/
+site/.access-e2e/
+site/.e2e-demo/
+site/docs/public/exports/
+site/docs/.content-mount.json
+
+# tests: reports (the screenshot baselines in site/tests/e2e/__screenshots__/ are pictures of the demo content and are tracked)
+playwright-report/
+test-results/
+site/tests/.cache/
+
+# logs, editors, systems
+*.log
+*.tmp
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# content mode: npm run content:sync copies content/ into site/docs; only the engine's own pages are tracked
+/site/docs/*
+!/site/docs/.vitepress/
+!/site/docs/en/
+!/site/docs/public/
+!/site/docs/index.md
+!/site/docs/dashboard.md
+/site/docs/public/charts/
+/site/docs/public/figures/
+/site/docs/public/notion_knowledge_graph.json
+/site/docs/public/lecture_catalog.json
+/site/docs/en/*
+!/site/docs/en/index.md
+!/site/docs/en/dashboard.md
+!/site/docs/en/\[group\]/

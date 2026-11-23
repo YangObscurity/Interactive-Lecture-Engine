@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "tier": "staff",
+  "generatedAt": "2026-11-22T00:00:00Z",
+  "concepts": [
+    {
+      "slug": "staff-secret-algo",
+      "term": "教研内部评分策略",
+      "english": "Staff Grading Policy",
+      "aliases": ["内部策略", "评分校准"],
+      "field": "教研内部",
+      "groups": ["STAFF"],
+      "summary": "仅教研组可见的实验题评分基准与扣分权重策略。",
+      "url": "/staff/concepts/staff-secret-algo",
+      "related": [{ "slug": "tcp-handshake", "rel": "applied-in" }],
+      "links": ["tcp-handshake"],
+      "backlinks": ["tcp-handshake"],
+      "lectures": [{ "route": "/staff/L99", "id": "STF-L99", "title": "第99讲 · 内部评审", "count": 1 }],
+      "markdown": "# 教研内部评分策略\n\n教研组保密评分策略：边界条件占 40%，时序分析占 60%。"
+    }
+  ]
+}

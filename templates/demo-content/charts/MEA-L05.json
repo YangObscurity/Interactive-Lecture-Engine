@@ -1,0 +1,14 @@
+{
+  "c1": {
+    "type": "mermaid",
+    "code": "flowchart LR\n  A[读坐标轴] --> B[读单位]\n  B --> C[找已知点]\n  C --> D[插值估计]"
+  },
+  "c2": {
+    "type": "echarts",
+    "code": "{\n  \"title\": {\n    \"text\": \"线性插值\"\n  },\n  \"tooltip\": {\n    \"trigger\": \"axis\"\n  },\n  \"xAxis\": {\n    \"type\": \"value\"\n  },\n  \"yAxis\": {\n    \"type\": \"value\"\n  },\n  \"series\": [\n    {\n      \"name\": \"已知点\",\n      \"type\": \"line\",\n      \"data\": [\n        [\n          0,\n          1\n        ],\n        [\n          2,\n          5\n        ],\n        [\n          4,\n          6\n        ]\n      ]\n    }\n  ]\n}"
+  },
+  "c3": {
+    "type": "wavedrom",
+    "code": "{\"signal\":[{\"name\":\"采样时钟\",\"wave\":\"p.......\"},{\"name\":\"读数\",\"wave\":\"x.3.4.5.\",\"data\":[\"1.0\",\"1.4\",\"1.9\"]},{\"name\":\"插值\",\"wave\":\"0..1.0..\"}]}"
+  }
+}

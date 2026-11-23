@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "tier": "staff",
+  "lectures": [
+    {
+      "route": "/staff/L99",
+      "id": "STF-L99",
+      "group": "STAFF",
+      "title": "第99讲 · 内部评审",
+      "sections": [
+        {
+          "heading": "保密校准基准",
+          "anchor": "保密校准基准",
+          "text": "教研组保密校准阈值 99123 用于复核高难度实验提交的边界表现。"
+        }
+      ]
+    }
+  ]
+}

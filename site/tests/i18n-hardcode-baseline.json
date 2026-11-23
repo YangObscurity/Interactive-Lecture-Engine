@@ -1,0 +1,8 @@
+{
+  "note": "Lines with hard-coded CJK (outside comments and console calls) allowed in legacy theme files. May only go down (scripts/check_i18n_strings.mjs).",
+  "total": 3,
+  "files": {
+    "docs/.vitepress/theme/charts/fonts.ts": 1,
+    "docs/.vitepress/theme/charts/renderers/mermaid.ts": 2
+  }
+}

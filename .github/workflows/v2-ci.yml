@@ -1,0 +1,108 @@
+name: v2-ci
+
+# Runs in both repositories: the private lecture repository (branch v2, with the owner's content/) and the
+# open-source engine repository (branch main, no content/: the build shows templates/demo-content).
+on:
+  push:
+    branches: [v2, main]
+  pull_request:
+    branches: [v2, main]
+
+concurrency:
+  group: v2-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+# the jobs only read the repository (artifacts go through the runner's own token)
+permissions:
+  contents: read
+
+defaults:
+  run:
+    working-directory: site
+
+jobs:
+  static:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: site/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run typecheck:legacy
+      - run: npm run lint
+      - run: npm test
+
+  build-and-gates:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: site/package-lock.json
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: npm ci
+      - run: npm run build
+      - name: content and built-site gates
+        run: |
+          npm run check:content
+          npm run check:i18n:dist
+          npm run check:access:dist
+          npm run check:search:dist
+      # the V1 lecture checks read the owner's lectures: only in the repository that has content/
+      - name: check_figs2
+        if: hashFiles('content/groups.ts') != ''
+        working-directory: .
+        run: python scripts/check_figs2.py
+      - name: 'check_body_links (exit code alone not trusted; require "结论: PASS")'
+        if: hashFiles('content/groups.ts') != ''
+        working-directory: .
+        run: |
+          set -o pipefail
+          python scripts/check_body_links.py | tee body_links.log
+          grep -q "结论: PASS" body_links.log
+      - name: check_lecture_contracts
+        if: hashFiles('content/groups.ts') != ''
+        working-directory: .
+        run: python scripts/check_lecture_contracts.py
+      # the built site, for small deploy hosts that cannot build themselves (docs-dev/BUILD.md section 4)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: site/docs/.vitepress/dist
+          retention-days: 7
+
+  e2e:
+    runs-on: ubuntu-latest
+    env:
+      CI: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: site/package-lock.json
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      # the prod project serves the engine's demo content build (site/.e2e-demo/dist), never the site's own lectures.
+      # Screenshot specs (@visual) compare with baselines recorded in Chrome on Windows (docs-dev/BUILD.md section 5),
+      # so they do not run on Linux CI; every functional spec does.
+      - run: npm run build:e2e
+      - run: npx playwright test --project prod --grep-invert @visual
+      - run: npm run test:e2e:access
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            site/playwright-report
+            site/test-results
+          retention-days: 7

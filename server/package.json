@@ -1,0 +1,53 @@
+{
+  "name": "lecture-api",
+  "version": "2026.11.21",
+  "private": true,
+  "type": "module",
+  "description": "Lecture site progress, identity, and health API service",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/index.js",
+    "typecheck": "tsc --noEmit -p tsconfig.typecheck.json",
+    "lint": "eslint .",
+    "test": "vitest run tests/unit tests/integration",
+    "test:coverage": "vitest run --coverage tests/unit tests/integration",
+    "test:contract": "vitest run tests/contract",
+    "setup": "tsx scripts/setup.ts",
+    "db:status": "tsx scripts/db.ts status",
+    "db:migrate": "tsx scripts/db.ts migrate",
+    "db:reassign": "tsx scripts/db.ts reassign",
+    "db:backup": "tsx scripts/backup.ts",
+    "db:restore": "tsx scripts/restore.ts",
+    "db:import-progress": "tsx scripts/import_progress.ts",
+    "config:gen": "tsx scripts/config.ts",
+    "config:check": "tsx scripts/config.ts --check"
+  },
+  "dependencies": {
+    "@ai-sdk/mcp": "2.0.93",
+    "@ai-sdk/openai": "4.0.111",
+    "@electric-sql/pglite": "0.5.16",
+    "@hono/node-server": "^2.1.9",
+    "@modelcontextprotocol/hono": "2.0.2",
+    "@modelcontextprotocol/server": "2.4.0",
+    "ai": "7.0.165",
+    "hono": "^4.13.19",
+    "pg": "^8.23.1",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite-socket": "0.2.19",
+    "@eslint/js": "^9.39.5",
+    "@types/node": "^22.20.5",
+    "@types/pg": "^8.23.1",
+    "@vitest/coverage-v8": "^3.2.7",
+    "eslint": "^9.39.5",
+    "tsx": "^4.23.15",
+    "typescript": "~5.9.3",
+    "typescript-eslint": "^8.72.2",
+    "vitest": "^3.2.7"
+  }
+}

@@ -1,0 +1,7 @@
+# SSE fixture for scenario=sse-error: partial answer, then an error event (no message_end).
+
+event: ping
+
+data: {"event":"agent_message","task_id":"task_fixture","id":"{{message_id}}","message_id":"{{message_id}}","conversation_id":"{{conversation_id}}","answer":"**[fixture]** 这段回答会在中途失败……","created_at":1763280001}
+
+data: {"event":"error","task_id":"task_fixture","message_id":"{{message_id}}","status":500,"code":"completion_request_error","message":"[fixture] upstream model error (scenario=sse-error)"}

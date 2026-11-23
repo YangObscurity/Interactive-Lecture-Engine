@@ -1,7 +1,14 @@
 <script setup lang="ts">
-import { ref, computed, watch, nextTick, onMounted } from 'vue'
+import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
+import { isEnabled, onFlagsChange } from '../../debug/flags'
+import { useT } from '../../../i18n/useT.ts'
+import { actionsForSurface, normalizePromptLang } from '../../../prompts/companion.ts'
+import { companionPromptsRef } from '../../../prompts/store.ts'
+import { BYOK_CHANGED_EVENT, isByokActive, readByokConfig } from './byokClient'
 import { ICONS } from './icons'
 import type { ScopeType, SendPayload, ScopeChipItem } from './types'
+
+const { t, lang } = useT()
 
 const props = withDefaults(
   defineProps<{
@@ -10,6 +17,7 @@ const props = withDefaults(
     selectedText?: string
     isStreaming?: boolean
     disabled?: boolean
+    canUpload?: boolean
     placeholder?: string
   }>(),
   {
@@ -18,7 +26,8 @@ const props = withDefaults(
     selectedText: '',
     isStreaming: false,
     disabled: false,
-    placeholder: '输入你的问题... (Enter 发送)'
+    canUpload: false,
+    placeholder: ''
   }
 )
 
@@ -35,47 +44,56 @@ const currentScope = ref<ScopeType>('lecture')
 const isFocused = ref(false)
 const textareaRef = ref<HTMLTextAreaElement | null>(null)
 const fileInputRef = ref<HTMLInputElement | null>(null)
+const aiScopeEnabled = ref(isEnabled('aiScope'))
+const aiUploadEnabled = ref(isEnabled('aiUpload'))
+const byokActive = ref(isByokActive(readByokConfig()))
 
-// 自适应工程检索范围 Chips (自适应单讲、课程组与选区，彻底消除超宽显示不全)
+const refreshInputFlags = () => {
+  aiScopeEnabled.value = isEnabled('aiScope')
+  aiUploadEnabled.value = isEnabled('aiUpload')
+  byokActive.value = isByokActive(readByokConfig())
+}
+
+// 自适应工程检索范围 Chips（aiScope 开关关闭时不渲染多选范围假入口，FE-010）
 const scopeChips = computed<ScopeChipItem[]>(() => {
   const hasSelection = Boolean(props.selectedText && props.selectedText.trim().length > 0)
   const chips: ScopeChipItem[] = []
 
-  // 1. 单讲范围 (仅在具体讲义页面提供)
-  if (props.lectureId) {
+  if (aiScopeEnabled.value) {
+    if (props.lectureId) {
+      chips.push({
+        id: 'lecture',
+        label: t('ai.scopeLecture'),
+        icon: ICONS.scopeLecture,
+        description: t('ai.scopeLectureDesc', { id: props.lectureId.toUpperCase() })
+      })
+    }
+
+    if (props.groupId) {
+      chips.push({
+        id: 'group',
+        label: props.lectureId
+          ? t('ai.scopeGroupLong')
+          : t('ai.scopeGroupWithId', { id: props.groupId.toUpperCase() }),
+        icon: ICONS.scopeGroup,
+        description: t('ai.scopeGroupDesc', { id: props.groupId.toUpperCase() })
+      })
+    }
+
     chips.push({
-      id: 'lecture',
-      label: '本讲',
-      icon: ICONS.scopeLecture,
-      description: `仅检索当前讲义上下文 (${props.lectureId.toUpperCase()})`
+      id: 'all',
+      label: props.lectureId ? t('ai.scopeAll') : t('ai.scopeAllLong'),
+      icon: ICONS.scopeAll,
+      description: t('ai.scopeAllDesc')
     })
   }
 
-  // 2. 课程组范围
-  if (props.groupId) {
-    chips.push({
-      id: 'group',
-      label: props.lectureId ? '本组' : `本课程组 (${props.groupId.toUpperCase()})`,
-      icon: ICONS.scopeGroup,
-      description: `检索所属课程组全部模块 (${props.groupId.toUpperCase()})`
-    })
-  }
-
-  // 3. 全站讲义
-  chips.push({
-    id: 'all',
-    label: props.lectureId ? '全站' : '全站讲义',
-    icon: ICONS.scopeAll,
-    description: '检索全站全部讲义知识库'
-  })
-
-  // 4. 选中文本 (仅当存在高亮选区时显式呈现)
   if (hasSelection) {
     chips.push({
       id: 'selection',
-      label: '选区',
+      label: t('ai.scopeSelection'),
       icon: ICONS.scopeSelection,
-      description: '精准针对正文划选片段提问'
+      description: t('ai.scopeSelectionDesc')
     })
   }
 
@@ -146,6 +164,41 @@ function handleKeyDown(event: KeyboardEvent) {
   }
 }
 
+// 快捷动作按钮（由站点 companion.json 统一定义，按 enabled / surfaces 过滤，needsSelection 联动启用状态）
+const hasEffectiveSelection = computed(() => {
+  const s = (props.selectedText || '').trim()
+  return s.length > 0 && s !== t('ai.noSelection')
+})
+
+const quickActionItems = computed(() => {
+  const pLang = normalizePromptLang(lang.value)
+  return actionsForSurface(companionPromptsRef.value, 'panel').map((action) => {
+    const needsSelection = action.needsSelection
+    const selectionBlocked = needsSelection && !hasEffectiveSelection.value
+    const disabled = Boolean(props.disabled || props.isStreaming || selectionBlocked)
+    const label = action.label[pLang]
+    return {
+      id: action.id,
+      label,
+      needsSelection,
+      disabled,
+      title: selectionBlocked ? t('ai.quickActionNeedsSelection') : label,
+    }
+  })
+})
+
+function handleQuickAction(actionId: string) {
+  if (props.disabled || props.isStreaming) return
+  const cleanSel = hasEffectiveSelection.value ? props.selectedText.trim() : undefined
+  const payload: SendPayload = {
+    query: '',
+    scope: cleanSel ? 'selection' : currentScope.value,
+    selectedText: cleanSel,
+    actionId,
+  }
+  emit('send', payload)
+}
+
 // 发送指令
 function handleSend() {
   if (props.isStreaming) return
@@ -181,7 +234,7 @@ function handleFileChange(event: Event) {
   if (!target.files || target.files.length === 0) return
 
   const file = target.files[0]
-  if (file.name.toLowerCase().endsWith('.pptx')) {
+  if (file && file.name.toLowerCase().endsWith('.pptx')) {
     emit('uploadPptx', file)
   }
   // 清空 value 允许重复选同一文件
@@ -195,15 +248,30 @@ const truncatedSelection = computed(() => {
   return clean.length > 70 ? `${clean.slice(0, 70)}...` : clean
 })
 
+let stopFlagListener: (() => void) | null = null
+
 onMounted(() => {
+  refreshInputFlags()
+  stopFlagListener = onFlagsChange(refreshInputFlags)
+  if (typeof window !== 'undefined') {
+    window.addEventListener(BYOK_CHANGED_EVENT, refreshInputFlags)
+  }
   adjustTextareaHeight()
+})
+
+onUnmounted(() => {
+  stopFlagListener?.()
+  stopFlagListener = null
+  if (typeof window !== 'undefined') {
+    window.removeEventListener(BYOK_CHANGED_EVENT, refreshInputFlags)
+  }
 })
 </script>
 
 <template>
   <div class="chat-input-wrapper">
-    <!-- 1. 范围选择器 Chips -->
-    <div class="scope-chips-bar" role="tablist" aria-label="检索范围切换">
+    <!-- 1. 范围选择器 Chips (受 aiScope 特性开关控制) -->
+    <div v-if="scopeChips.length > 0" class="scope-chips-bar" role="tablist" :aria-label="t('ai.scopeTablistAria')">
       <button
         v-for="chip in scopeChips"
         :key="chip.id"
@@ -226,11 +294,11 @@ onMounted(() => {
     <div v-if="selectedText && selectedText.trim()" class="selection-quote-card">
       <div class="quote-header">
         <span class="quote-icon" v-html="ICONS.scopeSelection"></span>
-        <span class="quote-title">正文划选上下文</span>
+        <span class="quote-title">{{ t('ai.quotedContextLabel') }}</span>
         <button
           type="button"
           class="quote-clear-btn"
-          title="移除选区引用"
+          :title="t('ai.clearQuoteTitle')"
           @click="handleClearSelection"
         >
           <span class="clear-icon" v-html="ICONS.close"></span>
@@ -239,6 +307,33 @@ onMounted(() => {
       <div class="quote-snippet">
         {{ truncatedSelection }}
       </div>
+    </div>
+
+    <!-- 2.5 站点受控快捷动作栏 -->
+    <div
+      v-if="quickActionItems.length > 0"
+      class="quick-actions-bar"
+      role="group"
+      :aria-label="t('ai.quickActionsAria')"
+      data-ai-quick-actions
+    >
+      <button
+        v-for="item in quickActionItems"
+        :key="item.id"
+        type="button"
+        class="quick-action-btn"
+        :class="{
+          'needs-selection': item.needsSelection,
+          'is-disabled': item.disabled
+        }"
+        :data-ai-quick-action="item.id"
+        :data-needs-selection="item.needsSelection ? '1' : '0'"
+        :disabled="item.disabled"
+        :title="item.title"
+        @click="handleQuickAction(item.id)"
+      >
+        <span class="quick-action-label">{{ item.label }}</span>
+      </button>
     </div>
 
     <!-- 3. 输入框与控制栏主容器 -->
@@ -253,7 +348,7 @@ onMounted(() => {
         ref="textareaRef"
         v-model="inputText"
         class="chat-textarea"
-        :placeholder="placeholder"
+        :placeholder="placeholder || t('ai.inputPlaceholder')"
         :disabled="disabled || isStreaming"
         rows="1"
         @focus="isFocused = true"
@@ -265,39 +360,41 @@ onMounted(() => {
       <!-- 底部控制按钮栏 -->
       <div class="input-actions-bar">
         <div class="left-tools">
-          <!-- PPTX 课件上传按钮 -->
-          <input
-            ref="fileInputRef"
-            type="file"
-            accept=".pptx"
-            class="hidden-file-input"
-            @change="handleFileChange"
-          />
-          <button
-            type="button"
-            class="tool-btn"
-            title="上传课件 (.pptx) 考点导学"
-            :disabled="disabled || isStreaming"
-            @click="triggerFileInput"
-          >
-            <span class="tool-icon" v-html="ICONS.paperclip"></span>
-            <span class="tool-label">课件导学</span>
-          </button>
+          <!-- PPTX 课件上传按钮（受 aiUpload 特性开关及 adapter === 'proxy' 控制，BYOK 直连下隐藏，FE-011） -->
+          <template v-if="aiUploadEnabled && canUpload && !byokActive">
+            <input
+              ref="fileInputRef"
+              type="file"
+              accept=".pptx"
+              class="hidden-file-input"
+              @change="handleFileChange"
+            />
+            <button
+              type="button"
+              class="tool-btn"
+              :title="t('ai.uploadTitle')"
+              :disabled="disabled || isStreaming"
+              @click="triggerFileInput"
+            >
+              <span class="tool-icon" v-html="ICONS.paperclip"></span>
+              <span class="tool-label">{{ t('ai.uploadBtn') }}</span>
+            </button>
+          </template>
         </div>
 
         <div class="right-tools">
-          <span class="shortcut-tip">Enter 发送 / Shift+Enter 换行</span>
+          <span class="shortcut-tip">{{ t('ai.shortcutHint') }}</span>
 
           <!-- 发送 / 停止切换按钮 -->
           <button
             v-if="isStreaming"
             type="button"
             class="action-btn stop-btn"
-            title="停止生成"
+            :title="t('ai.stopTitle')"
             @click="handleStop"
           >
             <span class="action-icon" v-html="ICONS.stop"></span>
-            <span class="action-text">停止</span>
+            <span class="action-text">{{ t('ai.stopLabel') }}</span>
           </button>
 
           <button
@@ -305,7 +402,7 @@ onMounted(() => {
             type="button"
             class="action-btn send-btn"
             :disabled="disabled || !inputText.trim()"
-            title="发送 (Enter)"
+            :title="t('ai.sendTitle')"
             @click="handleSend"
           >
             <span class="action-icon" v-html="ICONS.send"></span>
@@ -322,11 +419,11 @@ onMounted(() => {
   flex-direction: column;
   gap: 8px;
   padding: 10px 14px 14px;
-  background: var(--vp-c-bg);
-  border-top: 1px solid var(--vp-c-divider);
+  background: var(--lec-bg);
+  border-top: 1px solid var(--lec-border);
 }
 
-/* 范围选择 Chips */
+/* Scope selection chips */
 .scope-chips-bar {
   display: flex;
   align-items: center;
@@ -347,10 +444,10 @@ onMounted(() => {
   font-size: 11.5px;
   font-weight: 500;
   line-height: 1.2;
-  border-radius: 6px;
-  border: 1px solid var(--vp-c-divider);
-  background: var(--vp-c-bg-soft);
-  color: var(--vp-c-text-2);
+  border-radius: var(--lec-radius-1);
+  border: 1px solid var(--lec-border);
+  background: var(--lec-surface);
+  color: var(--lec-text-muted);
   cursor: pointer;
   white-space: nowrap;
   transition: all 0.15s ease;
@@ -358,14 +455,14 @@ onMounted(() => {
 }
 
 .scope-chip:hover:not(:disabled) {
-  border-color: var(--vp-c-border);
-  color: var(--vp-c-text-1);
+  border-color: var(--lec-accent);
+  color: var(--lec-text);
 }
 
 .scope-chip.is-active {
-  background: var(--vp-c-brand-soft, rgba(62, 99, 221, 0.12));
-  border-color: var(--vp-c-brand-1);
-  color: var(--vp-c-brand-1);
+  background: var(--lec-accent-tint);
+  border-color: var(--lec-accent);
+  color: var(--lec-accent);
 }
 
 .scope-chip.is-disabled {
@@ -385,12 +482,12 @@ onMounted(() => {
   height: 12px;
 }
 
-/* 划词微卡片预览 */
+/* Selection quote card */
 .selection-quote-card {
   padding: 6px 10px;
-  background: var(--vp-c-bg-mute);
-  border-left: 3px solid var(--vp-c-brand-1);
-  border-radius: 0 6px 6px 0;
+  background: var(--lec-surface);
+  border-left: 3px solid var(--lec-accent);
+  border-radius: 0 var(--lec-radius-1) var(--lec-radius-1) 0;
   font-size: 11.5px;
   display: flex;
   flex-direction: column;
@@ -401,7 +498,7 @@ onMounted(() => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  color: var(--vp-c-brand-1);
+  color: var(--lec-accent);
   font-weight: 600;
 }
 
@@ -424,14 +521,14 @@ onMounted(() => {
   border: none;
   padding: 2px;
   cursor: pointer;
-  color: var(--vp-c-text-3);
+  color: var(--lec-text-muted);
   display: inline-flex;
   align-items: center;
-  border-radius: 3px;
+  border-radius: var(--lec-radius-1);
 }
 .quote-clear-btn:hover {
-  color: var(--vp-c-text-1);
-  background: var(--vp-c-bg-soft);
+  color: var(--lec-text);
+  background: var(--lec-surface);
 }
 .quote-clear-btn :deep(svg) {
   width: 12px;
@@ -439,27 +536,28 @@ onMounted(() => {
 }
 
 .quote-snippet {
-  color: var(--vp-c-text-2);
-  font-family: var(--vp-font-family-mono, monospace);
+  color: var(--lec-text-muted);
+  font-family: var(--lec-font-mono);
   line-height: 1.4;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-/* 输入框主容器 */
+/* Input box container */
 .input-box-container {
   display: flex;
   flex-direction: column;
-  border: 1px solid var(--vp-c-divider);
-  border-radius: 8px;
-  background: var(--vp-c-bg-soft);
-  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+  border: 1px solid var(--lec-border);
+  border-radius: var(--lec-radius-1);
+  background: var(--lec-surface);
+  transition: border-color 0.2s ease;
 }
 
 .input-box-container:focus-within {
-  border-color: var(--vp-c-brand-1);
-  box-shadow: 0 0 0 2px var(--vp-c-brand-soft, rgba(62, 99, 221, 0.15));
+  border-color: var(--lec-accent);
+  outline: 2px solid var(--lec-accent-tint);
+  outline-offset: 0;
 }
 
 .chat-textarea {
@@ -469,7 +567,7 @@ onMounted(() => {
   padding: 8px 10px;
   font-size: 13px;
   line-height: 1.5;
-  color: var(--vp-c-text-1);
+  color: var(--lec-text);
   background: transparent;
   border: none;
   resize: none;
@@ -479,7 +577,7 @@ onMounted(() => {
 }
 
 .chat-textarea::placeholder {
-  color: var(--vp-c-text-3);
+  color: var(--lec-text-muted);
   font-size: 12.5px;
 }
 
@@ -487,13 +585,13 @@ onMounted(() => {
   display: none;
 }
 
-/* 底部操作条 */
+/* Bottom action bar */
 .input-actions-bar {
   display: flex;
   align-items: center;
   justify-content: space-between;
   padding: 4px 8px 6px;
-  border-top: 1px dashed var(--vp-c-divider);
+  border-top: 1px dashed var(--lec-border);
 }
 
 .left-tools,
@@ -510,17 +608,17 @@ onMounted(() => {
   padding: 3px 6px;
   background: transparent;
   border: 1px solid transparent;
-  border-radius: 4px;
+  border-radius: var(--lec-radius-1);
   font-size: 11.5px;
-  color: var(--vp-c-text-2);
+  color: var(--lec-text-muted);
   cursor: pointer;
   transition: all 0.15s ease;
 }
 
 .tool-btn:hover:not(:disabled) {
-  background: var(--vp-c-bg-mute);
-  color: var(--vp-c-text-1);
-  border-color: var(--vp-c-divider);
+  background: var(--lec-bg);
+  color: var(--lec-text);
+  border-color: var(--lec-border);
 }
 
 .tool-btn:disabled {
@@ -535,7 +633,7 @@ onMounted(() => {
 
 .shortcut-tip {
   font-size: 11px;
-  color: var(--vp-c-text-3);
+  color: var(--lec-text-muted);
   display: none;
 }
 
@@ -550,7 +648,7 @@ onMounted(() => {
   align-items: center;
   justify-content: center;
   height: 26px;
-  border-radius: 5px;
+  border-radius: var(--lec-radius-1);
   font-size: 12px;
   cursor: pointer;
   transition: all 0.15s ease;
@@ -559,9 +657,9 @@ onMounted(() => {
 .send-btn {
   width: 28px;
   padding: 0;
-  background: var(--vp-c-brand-1);
-  border: 1px solid var(--vp-c-brand-1);
-  color: #ffffff;
+  background: var(--lec-accent);
+  border: 1px solid var(--lec-accent);
+  color: var(--lec-on-accent);
 }
 
 .send-btn:hover:not(:disabled) {
@@ -569,9 +667,9 @@ onMounted(() => {
 }
 
 .send-btn:disabled {
-  background: var(--vp-c-bg-mute);
-  border-color: var(--vp-c-divider);
-  color: var(--vp-c-text-3);
+  background: var(--lec-surface);
+  border-color: var(--lec-border);
+  color: var(--lec-text-muted);
   cursor: not-allowed;
 }
 
@@ -583,19 +681,64 @@ onMounted(() => {
 .stop-btn {
   gap: 4px;
   padding: 0 8px;
-  background: var(--vp-c-bg-mute);
-  border: 1px solid var(--vp-c-divider);
-  color: #ef4444;
+  background: var(--lec-surface);
+  border: 1px solid var(--lec-border);
+  color: var(--lec-danger);
   font-weight: 500;
 }
 
 .stop-btn:hover {
-  background: rgba(239, 68, 68, 0.1);
-  border-color: #ef4444;
+  background: var(--lec-danger-tint);
+  border-color: var(--lec-danger);
 }
 
 .stop-btn :deep(svg) {
   width: 12px;
   height: 12px;
+}
+
+/* 站点受控快捷动作按钮条（遵循 spec-board chips 语法与双肤契约） */
+.quick-actions-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.quick-action-btn {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 9px;
+  border-radius: var(--lec-radius-1);
+  border: var(--lec-line-hair) solid var(--lec-border);
+  background: var(--lec-surface);
+  color: var(--lec-text);
+  font-family: var(--lec-font-heading);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.3;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.quick-action-btn:hover:not(:disabled) {
+  border-color: var(--lec-accent);
+  background: var(--lec-accent-tint);
+  color: var(--lec-accent);
+}
+
+.quick-action-btn:focus-visible {
+  outline: 2px solid var(--lec-accent);
+  outline-offset: 2px;
+}
+
+.quick-action-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+[data-lec-theme='datasheet'] .quick-action-btn {
+  border-color: var(--lec-border);
+  font-family: var(--lec-font-mono);
+  font-size: 11.5px;
 }
 </style>

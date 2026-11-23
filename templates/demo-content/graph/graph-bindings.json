@@ -1,0 +1,7 @@
+{
+  "schema": 1,
+  "bindings": {
+    "pln_split": "/pln/L01",
+    "dat_tidy": "/dat/L01"
+  }
+}

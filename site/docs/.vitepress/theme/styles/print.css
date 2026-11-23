@@ -1,0 +1,253 @@
+/**
+ * styles/print.css — unified print rules for Cmd/Ctrl+P, continuous PDF export and A4 PDF export (FE-032).
+ *
+ * Zero raw colour literals: uses semantic `--lec-*` tokens and CSS colour keywords (`white`, `black`, `transparent`,
+ * `inherit`) so theme-contract gate stays clean. Dynamic `@page { size }` rules are injected per export job by
+ * `LectureExportButton.vue`, which marks `html[data-lec-print="continuous" | "a4"]`.
+ */
+@media print {
+  html,
+  body {
+    width: 100% !important;
+    height: auto !important;
+    min-height: 100% !important;
+    max-height: none !important;
+    overflow: visible !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    background: var(--lec-bg, white) !important;
+    color: var(--lec-text, black) !important;
+    color-scheme: light !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  .VPNav,
+  .VPLocalNav,
+  .VPSidebar,
+  .aside,
+  .VPDocAside,
+  .reading-mode-nav-wrapper,
+  .lecture-export-wrapper,
+  .lecture-export-toast,
+  .lecture-export-hud-overlay,
+  .ai-sidebar-shell,
+  .selection-toolbar-root,
+  .lecture-progress-card,
+  .VPDocFooter,
+  .edit-link,
+  .next-and-prev-link,
+  .chart-tools,
+  .chart-enlarge,
+  details.chart-code,
+  .math-copy-toast,
+  .lec-xref-peek,
+  .lec-xref-backbtn,
+  .lec-fig-backlink,
+  .pswp.chart-modal {
+    display: none !important;
+    visibility: hidden !important;
+  }
+
+  .VPContent,
+  .VPDoc {
+    max-width: 100% !important;
+    width: 100% !important;
+    margin: 0 auto !important;
+    padding: 0 !important;
+    box-sizing: border-box !important;
+  }
+
+  .VPDoc .container,
+  .VPDoc .content,
+  .VPDoc .content-container {
+    max-width: 100% !important;
+    width: 100% !important;
+    margin: 0 auto !important;
+    padding: 0 !important;
+    display: block !important;
+  }
+
+  html[data-lec-print='continuous'] .VPContent,
+  html[data-lec-print='continuous'] .VPDoc {
+    padding: 32px 48px !important;
+  }
+
+  html[data-lec-print='continuous'] .vp-doc {
+    font-size: 16px !important;
+  }
+
+  html[data-lec-print='continuous'] * {
+    break-inside: auto !important;
+    page-break-inside: auto !important;
+  }
+
+  .wave-compare-grid,
+  .wave-channel-card,
+  .scope-viewer,
+  table,
+  tr,
+  details.details,
+  details.custom-block {
+    break-inside: avoid !important;
+    page-break-inside: avoid !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  details.details,
+  details.custom-block {
+    border: 1px solid var(--lec-border) !important;
+    background: var(--lec-surface) !important;
+    margin: 16px 0 !important;
+    padding: 12px 16px !important;
+    border-radius: 6px !important;
+  }
+
+  details.details summary,
+  details.custom-block summary {
+    font-weight: 600 !important;
+    color: var(--lec-text) !important;
+    margin-bottom: 8px !important;
+    cursor: default !important;
+  }
+
+  figure.chart,
+  figure.lec-fig {
+    break-inside: avoid !important;
+    page-break-inside: avoid !important;
+    box-sizing: border-box !important;
+    float: none !important;
+    clear: both !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    margin: 18px auto !important;
+    background: var(--lec-surface) !important;
+    border: 1px solid var(--lec-border) !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  html:not([data-lec-print='continuous']) figure.chart,
+  html:not([data-lec-print='continuous']) figure.lec-fig {
+    max-height: 240mm !important;
+  }
+
+  html[data-lec-print='continuous'] figure.chart,
+  html[data-lec-print='continuous'] figure.lec-fig {
+    margin: 24px auto !important;
+  }
+
+  figure.chart .chart-body {
+    overflow: visible !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    box-sizing: border-box !important;
+  }
+
+  html:not([data-lec-print='continuous']) figure.chart .chart-body {
+    max-height: 230mm !important;
+  }
+
+  figure.chart .chart-body svg {
+    max-width: 100% !important;
+    height: auto !important;
+    display: block !important;
+    margin: 0 auto !important;
+  }
+
+  html:not([data-lec-print='continuous']) figure.chart .chart-body svg,
+  html:not([data-lec-print='continuous']) figure.chart .chart-body canvas {
+    max-height: 220mm !important;
+  }
+
+  figure.chart .chart-body canvas {
+    max-width: 100% !important;
+    height: auto !important;
+    object-fit: contain !important;
+  }
+
+  figure.chart[data-type='echarts'] .chart-body {
+    height: 440px !important;
+    max-height: 440px !important;
+    overflow: hidden !important;
+  }
+
+  figure.chart[data-type='echarts'] .chart-body > div {
+    height: 100% !important;
+    max-height: 100% !important;
+    width: 100% !important;
+  }
+
+  figure.chart[data-type='echarts'] .chart-body svg {
+    width: 100% !important;
+    max-width: 100% !important;
+    height: 100% !important;
+    max-height: 100% !important;
+    display: block !important;
+  }
+
+  .vp-doc div[class*='language-'],
+  div[class*='language-'],
+  pre,
+  .vp-code-block {
+    overflow: visible !important;
+    overflow-x: visible !important;
+    overflow-y: visible !important;
+    box-sizing: border-box !important;
+    max-width: 100% !important;
+    white-space: pre-wrap !important;
+    word-break: break-all !important;
+    word-wrap: break-word !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  .vp-doc div[class*='language-'],
+  div[class*='language-'] {
+    background-color: var(--lec-surface) !important;
+    border: 1px solid var(--lec-border) !important;
+    border-radius: 6px !important;
+    margin: 16px 0 !important;
+    padding: 12px 16px !important;
+    page-break-inside: auto !important;
+    break-inside: auto !important;
+    position: relative !important;
+  }
+
+  .vp-doc div[class*='language-'] pre,
+  div[class*='language-'] pre {
+    background: transparent !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: none !important;
+  }
+
+  .vp-doc div[class*='language-'] button.copy,
+  div[class*='language-'] button.copy {
+    display: none !important;
+  }
+
+  .vp-doc div[class*='language-'] span.lang,
+  div[class*='language-'] span.lang {
+    position: absolute !important;
+    top: 6px !important;
+    right: 12px !important;
+    font-size: 11px !important;
+    color: var(--lec-text-muted) !important;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    break-after: avoid !important;
+    page-break-after: avoid !important;
+  }
+
+  html.dark .vp-adaptive-theme span {
+    color: var(--shiki-light, inherit) !important;
+  }
+}

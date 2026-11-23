@@ -1,0 +1,16 @@
+# Dify-style SSE fixture for POST /api/ai/chat. Frames are separated by a blank line.
+# Lines starting with # are ignored. Placeholders: {{conversation_id}} {{message_id}} {{query}}
+
+event: ping
+
+data: {"event":"agent_thought","id":"thought_fixture_1","task_id":"task_fixture","message_id":"{{message_id}}","position":1,"thought":"[fixture] 解析问题与当前讲次上下文","observation":"","tool":"","tool_input":"","created_at":1763280000}
+
+data: {"event":"agent_message","task_id":"task_fixture","id":"{{message_id}}","message_id":"{{message_id}}","conversation_id":"{{conversation_id}}","answer":"**[fixture 演示数据]** 你问的是：{{query}}\n\n","created_at":1763280001}
+
+data: {"event":"agent_message","task_id":"task_fixture","id":"{{message_id}}","message_id":"{{message_id}}","conversation_id":"{{conversation_id}}","answer":"这是 mock 模式下的流式回答，用于验证 Markdown、公式 $a^2+b^2=c^2$ 与代码块：\n\n","created_at":1763280001}
+
+data: {"event":"agent_message","task_id":"task_fixture","id":"{{message_id}}","message_id":"{{message_id}}","conversation_id":"{{conversation_id}}","answer":"```c\nint main(void) { return 0; }\n```\n","created_at":1763280002}
+
+data: {"event":"message","task_id":"task_fixture","id":"{{message_id}}","message_id":"{{message_id}}","conversation_id":"{{conversation_id}}","answer":"\n回答结束。","created_at":1763280002}
+
+data: {"event":"message_end","task_id":"task_fixture","id":"{{message_id}}","message_id":"{{message_id}}","conversation_id":"{{conversation_id}}","metadata":{"usage":{"prompt_tokens":420,"completion_tokens":96,"total_tokens":516,"latency":1.23}}}

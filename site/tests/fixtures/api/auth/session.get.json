@@ -1,0 +1,7 @@
+{
+  "authenticated": false,
+  "user": null,
+  "roles": ["reader"],
+  "groups": [],
+  "logoutUrl": null
+}

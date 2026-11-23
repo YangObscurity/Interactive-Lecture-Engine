@@ -1,0 +1,6 @@
+{
+  "c1": {
+    "type": "mermaid",
+    "code": "flowchart LR\n  A[需求] --> B[设计]\n  B --> C[实现]\n  A --> D[采购]\n  D --> C\n  C --> E[验收]"
+  }
+}

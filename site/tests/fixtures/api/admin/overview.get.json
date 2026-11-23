@@ -1,0 +1,38 @@
+{
+  "generatedAt": "2026-11-19T12:00:00.000Z",
+  "totals": {
+    "users": 12,
+    "progressRows": 148,
+    "completedLectures": 86,
+    "sessions": 24,
+    "messages": 112,
+    "checklistItems": 30,
+    "completedChecklistItems": 18
+  },
+  "byStatus": {
+    "未开始": 22,
+    "学习中": 40,
+    "已完成": 86
+  },
+  "byGroup": [
+    {
+      "group_id": "g05",
+      "total_rows": 31,
+      "completed": 18,
+      "in_progress": 6,
+      "not_started": 7
+    },
+    {
+      "group_id": "g03",
+      "total_rows": 63,
+      "completed": 32,
+      "in_progress": 14,
+      "not_started": 17
+    }
+  ],
+  "recentActivity": {
+    "progressUpdatedLast24h": 19,
+    "sessionsCreatedLast24h": 5,
+    "messagesCreatedLast24h": 28
+  }
+}

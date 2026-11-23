@@ -1,0 +1,26 @@
+{
+  // Legacy (V1) code: strict OFF. Used only by scripts/ts_baseline.mjs, which fails
+  // when any file's error count rises above tests/ts-baseline.json.
+  "compilerOptions": {
+    "target": "es2022",
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "lib": ["es2022", "dom", "dom.iterable"],
+    "jsx": "preserve",
+    "strict": false,
+    "esModuleInterop": true,
+    "resolveJsonModule": true,
+    "skipLibCheck": true,
+    "allowJs": false,
+    "allowImportingTsExtensions": true,
+    "noEmit": true,
+    "types": ["node"]
+  },
+  "include": [
+    "env.d.ts",
+    "docs/.vitepress/**/*.ts",
+    "docs/.vitepress/**/*.mts",
+    "docs/.vitepress/**/*.vue"
+  ],
+  "exclude": ["node_modules", "docs/.vitepress/cache", "docs/.vitepress/dist", "docs/.vitepress/.temp"]
+}

@@ -1,0 +1,16 @@
+/*
+ * themes/reader/theme.css — structural differences of the reader theme (spec board §06 §10).
+ * Every rule is scoped to [data-lec-theme="reader"] and uses only --lec-* contract names.
+ */
+
+/* tables: light header band */
+[data-lec-theme='reader'] .vp-doc table thead th {
+  background: var(--lec-surface);
+  border-bottom: var(--lec-line-hair) solid var(--lec-border);
+}
+
+/* lecture title block (DOM arrives in P5: .lec-tb-spec) — quiet meta grid */
+[data-lec-theme='reader'] .lec-tb-spec {
+  background: var(--lec-surface);
+  border-radius: var(--lec-radius-2);
+}

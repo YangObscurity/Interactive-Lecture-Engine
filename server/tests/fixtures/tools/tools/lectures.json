@@ -1,0 +1,37 @@
+{
+  "version": 1,
+  "tier": "public",
+  "lectures": [
+    {
+      "route": "/g01/L01",
+      "id": "G01-L01",
+      "group": "G01",
+      "title": "第1讲 · 传输层连接",
+      "sections": [
+        {
+          "heading": "连接建立机制",
+          "anchor": "连接建立机制",
+          "text": "TCP 使用三次握手建立连接，防止历史重复连接报文导致错误同步。超时重传定时器保障建链可靠性。"
+        },
+        {
+          "heading": "状态迁移与半开连接",
+          "anchor": "状态迁移与半开连接",
+          "text": "SYN_RCVD 状态维持半连接队列，SYN Flood 防护通常结合 SYN Cookie 实现。"
+        }
+      ]
+    },
+    {
+      "route": "/g02/L01",
+      "id": "G02-L01",
+      "group": "G02",
+      "title": "第1讲 · 并发事务",
+      "sections": [
+        {
+          "heading": "两阶段锁与乐观控制",
+          "anchor": "两阶段锁与乐观控制",
+          "text": "在低冲突场景中，乐观并发控制（OCC）比严格两阶段锁具备更高的吞吐率。"
+        }
+      ]
+    }
+  ]
+}

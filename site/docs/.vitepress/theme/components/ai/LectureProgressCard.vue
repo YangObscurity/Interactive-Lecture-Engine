@@ -9,7 +9,7 @@
  *      - 学习中 (In Progress，工程琥珀黄)
  *      - 已完成 (Completed，高冷极光绿)
  *   3. 单击无缝轮转状态，或快捷打卡标记完成；
- *   4. 0ms 本地优先秒写（neonRepository.ts），异步平滑限流队列回写 Notion（notionSync.ts）；
+ *   4. 进度走 useProgress()（theme/progress：乐观更新 + 待发队列 + 重试），Notion 对齐由 notionBridge 负责；
  *   5. 铁律：零 Emoji、纯工程矢量 SVG、无多余考题弹窗、SSR 严格安全。
  */
 
@@ -17,38 +17,88 @@ import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { useRoute, useData } from 'vitepress'
 import { useLectureContext } from './useLectureContext'
 import { ICONS } from './icons'
+import { useSession } from '../../auth/useSession'
+import { useProgress } from '../../progress/useProgress'
+import { toLegacyStatus } from '../../progress/types'
+import type { ProgressStatus } from '../../progress/types'
 import {
-  saveLectureProgress,
-  getProgressRecordSync,
-  subscribeProgress,
-  type ProgressStatus,
-  type ProgressChangeEvent
-} from './neonRepository'
-import { syncStatusToNotion, subscribeNotionSyncState, type SyncState } from './notionSync'
-import { showStatusToast } from './toast'
+  getLastNotionSyncError,
+  retryFailedNotionSync,
+  subscribeNotionSyncState,
+  type SyncState,
+} from './notionSync'
+import { showMessageToast, showStatusToast } from './toast'
+import { useT } from '../../../i18n/useT.ts'
 
 const route = useRoute()
-const { frontmatter } = useData()
+const { frontmatter, theme } = useData()
 const { lectureInfo } = useLectureContext()
+
+const { t } = useT()
+const session = useSession()
+const progress = useProgress()
+progress.onRejected(({ id }) => {
+  if (!isLecture.value) return
+  showMessageToast(t('progress.rejected', { id: id.toUpperCase() }))
+})
 
 const isMounted = ref(false)
 const targetMount = ref<HTMLElement | null>(null)
-const currentStatus = ref<ProgressStatus>('未开始')
-const completedAt = ref<string | null>(null)
 const syncState = ref<SyncState>('idle')
+const syncErrorDetail = ref<string | null>(null)
 
-let unsubscribeProgress: (() => void) | null = null
 let unsubscribeNotion: (() => void) | null = null
 
 const isLecture = computed<boolean>(() => {
   return Boolean(lectureInfo.value.lectureId && lectureInfo.value.lectureNum > 0)
 })
 
+// Read the (reactive, build-time) site config, not progressRuntime(): that is configured after hydration, so a
+// computed that already ran with a fast session answer would never see the flag flip and the control would stay hidden.
+const notionSyncConfigured = computed<boolean>(
+  () =>
+    (theme.value as { lectureModules?: { progress?: { notionSync?: unknown } } } | undefined)?.lectureModules?.progress
+      ?.notionSync === true
+)
+
+const showNotionSync = computed<boolean>(() => {
+  return Boolean(
+    notionSyncConfigured.value &&
+      session.value.status === 'authenticated' &&
+      session.value.roles.includes('admin')
+  )
+})
+
 const notionNodeId = computed<string>(() => {
   const desc = (frontmatter.value?.description as string) || ''
-  const m = desc.match(/节点\s*`([^`]+)`/)
+  const m = desc.match(/\u8282\u70b9\s*`([^`]+)`/) || desc.match(/\bnode\s*`([^`]+)`/i)
   return m ? m[1].trim() : ''
 })
+
+/** Domain status; stays not_started until client hydration completes. */
+const status = computed<ProgressStatus>(() =>
+  isLecture.value ? progress.statusOf(lectureInfo.value.lectureId) : 'not_started'
+)
+/** Legacy attribute value retained for existing progress tests. */
+const currentStatus = computed(() => toLegacyStatus(status.value))
+const statusLabel = computed<string>(() => {
+  if (status.value === 'completed') return t('ai.lpcStatusCompleted')
+  if (status.value === 'in_progress') return t('ai.lpcStatusInProgress')
+  return t('ai.lpcStatusNotStarted')
+})
+const statusIcon = computed<string>(() => {
+  if (status.value === 'completed') return ICONS.circleCheck
+  if (status.value === 'in_progress') return ICONS.circleHalf
+  return ICONS.circleDot
+})
+const syncStatusIcon = computed<string>(() => {
+  if (syncState.value === 'error') return ICONS.statusUnavailable
+  if (syncState.value === 'idle') return ICONS.statusOk
+  return ICONS.statusRateLimited
+})
+const completedAt = computed<string | null>(() =>
+  isLecture.value ? progress.completedAtOf(lectureInfo.value.lectureId) : null
+)
 
 const formattedCompletedTime = computed<string>(() => {
   if (!completedAt.value) return ''
@@ -66,21 +116,6 @@ const formattedCompletedTime = computed<string>(() => {
   }
 })
 
-function loadCurrentState(): void {
-  if (!isLecture.value) return
-  const record = getProgressRecordSync(lectureInfo.value.lectureId)
-  if (record) {
-    currentStatus.value = record.status
-    completedAt.value = record.completedAt || null
-  } else {
-    currentStatus.value = '未开始'
-    completedAt.value = null
-  }
-}
-
-/**
- * 在客户端精确定位 ## 下一讲预告 并在其前置入挂载锚点
- */
 function resolveMountAnchor(): void {
   if (typeof document === 'undefined' || !isLecture.value) {
     targetMount.value = null
@@ -90,7 +125,12 @@ function resolveMountAnchor(): void {
   const h2Elements = Array.from(document.querySelectorAll<HTMLElement>('.vp-doc h2'))
   const previewH2 = h2Elements.find((el) => {
     const txt = (el.textContent || '').trim()
-    return txt.includes('下一讲预告') || el.id.includes('下一讲预告') || el.id.includes('下一讲')
+    return (
+      txt.includes('\u4e0b\u4e00\u8bb2\u9884\u544a') ||
+      el.id.includes('\u4e0b\u4e00\u8bb2\u9884\u544a') ||
+      el.id.includes('\u4e0b\u4e00\u8bb2') ||
+      /next lecture|preview/i.test(txt)
+    )
   })
 
   if (previewH2 && previewH2.parentElement) {
@@ -108,53 +148,31 @@ function resolveMountAnchor(): void {
   targetMount.value = null
 }
 
-async function setStatus(newStatus: ProgressStatus): Promise<void> {
+function setStatus(newStatus: ProgressStatus): void {
   if (!isLecture.value) return
-
-  currentStatus.value = newStatus
-  const nowIso = new Date().toISOString()
-  completedAt.value = newStatus === '已完成' ? nowIso : null
-
-  // 1. 本地秒存 + 触发全局监听
-  await saveLectureProgress(
-    lectureInfo.value.lectureId,
-    lectureInfo.value.groupDir || lectureInfo.value.groupId,
-    newStatus,
-    notionNodeId.value
-  )
-
-  // 2. 异步限流推送 Notion
-  const rec = getProgressRecordSync(lectureInfo.value.lectureId)
-  syncStatusToNotion(
-    lectureInfo.value.lectureId,
-    newStatus,
-    notionNodeId.value || rec?.notion_node_id || undefined,
-    rec?.notion_page_id || undefined
-  )
-
-  // 3. 屏幕中央快速提示
-  showStatusToast(lectureInfo.value.lectureId.toUpperCase(), newStatus)
+  const info = lectureInfo.value
+  progress.set(info.lectureId, newStatus, { groupId: info.groupDir || info.groupId })
+  showStatusToast(info.lectureId.toUpperCase(), toLegacyStatus(newStatus))
 }
 
 function cycleStatus(): void {
-  if (currentStatus.value === '未开始') {
-    void setStatus('学习中')
-  } else if (currentStatus.value === '学习中') {
-    void setStatus('已完成')
-  } else {
-    void setStatus('未开始')
-  }
+  if (status.value === 'not_started') setStatus('in_progress')
+  else if (status.value === 'in_progress') setStatus('completed')
+  else setStatus('not_started')
 }
 
 function markCompleted(): void {
-  void setStatus('已完成')
+  setStatus('completed')
+}
+
+function handleRetrySync(): void {
+  retryFailedNotionSync()
 }
 
 watch(
   () => route.path,
   () => {
     if (isMounted.value) {
-      loadCurrentState()
       nextTick(() => {
         resolveMountAnchor()
       })
@@ -164,27 +182,17 @@ watch(
 
 onMounted(() => {
   isMounted.value = true
-  loadCurrentState()
   nextTick(() => {
     resolveMountAnchor()
   })
 
-  unsubscribeProgress = subscribeProgress((e: ProgressChangeEvent) => {
-    if (e.lectureId === lectureInfo.value.lectureId.toLowerCase()) {
-      currentStatus.value = e.status
-      if (e.status !== '已完成') {
-        completedAt.value = null
-      }
-    }
-  })
-
   unsubscribeNotion = subscribeNotionSyncState((state) => {
     syncState.value = state
+    syncErrorDetail.value = getLastNotionSyncError()
   })
 })
 
 onUnmounted(() => {
-  if (unsubscribeProgress) unsubscribeProgress()
   if (unsubscribeNotion) unsubscribeNotion()
 
   if (typeof document !== 'undefined') {
@@ -198,88 +206,108 @@ onUnmounted(() => {
 
 <template>
   <div v-if="isMounted && isLecture" class="lec-progress-wrapper">
-    <Teleport :to="targetMount" v-if="targetMount">
-      <div class="lec-progress-card" :data-status="currentStatus">
+    <Teleport :to="targetMount || 'body'" :disabled="!targetMount">
+      <div class="lec-progress-card" :data-status="currentStatus" :data-state="status">
         <div class="lpc-main">
-          <!-- 状态主识别区 -->
-          <div class="lpc-indicator" @click="cycleStatus" role="button" tabindex="0" :title="'当前状态：' + currentStatus + '（点击切换）'">
-            <span class="lpc-icon" v-html="currentStatus === '已完成' ? ICONS.circleCheck : currentStatus === '学习中' ? ICONS.circleHalf : ICONS.circleDot"></span>
+          <div
+            class="lpc-indicator"
+            role="button"
+            tabindex="0"
+            :title="t('ai.lpcStatusTitle', { status: statusLabel })"
+            @click="cycleStatus"
+            @keydown.enter.prevent="cycleStatus"
+            @keydown.space.prevent="cycleStatus"
+          >
+            <span class="lpc-icon" v-html="statusIcon"></span>
             <div class="lpc-meta">
               <div class="lpc-status-line">
-                <span class="lpc-status-label">{{ currentStatus }}</span>
-                <span class="lpc-cycle-hint">点击循环切换</span>
+                <span class="lpc-status-label">{{ statusLabel }}</span>
+                <span class="lpc-cycle-hint">{{ t('ai.lpcCycleHint') }}</span>
               </div>
               <div class="lpc-sub-line">
                 <span class="lpc-id-badge">{{ lectureInfo.lectureId.toUpperCase() }}</span>
-                <span v-if="currentStatus === '已完成' && formattedCompletedTime" class="lpc-time-tag">
-                  打卡时间 {{ formattedCompletedTime }}
+                <span v-if="status === 'completed' && formattedCompletedTime" class="lpc-time-tag">
+                  {{ t('ai.lpcCompletedAt', { time: formattedCompletedTime }) }}
                 </span>
-                <span v-else-if="currentStatus === '学习中'" class="lpc-time-tag">
-                  正在学习本讲
+                <span v-else-if="status === 'in_progress'" class="lpc-time-tag">
+                  {{ t('ai.lpcInProgress') }}
                 </span>
                 <span v-else class="lpc-time-tag">
-                  本讲尚未学习
+                  {{ t('ai.lpcNotStarted') }}
                 </span>
               </div>
             </div>
           </div>
 
-          <!-- 右侧极简三态选择器与打卡快捷按键 -->
           <div class="lpc-actions">
-            <!-- 三态分段切换器 -->
             <div class="lpc-segmented">
               <button
                 type="button"
                 class="lpc-seg-btn"
-                :class="{ active: currentStatus === '未开始' }"
-                @click="setStatus('未开始')"
-                title="标记为未开始"
+                :class="{ active: status === 'not_started' }"
+                :title="t('ai.lpcMarkNotStartedTitle')"
+                @click="setStatus('not_started')"
               >
                 <span class="lpc-seg-icon" v-html="ICONS.circleDot"></span>
-                <span class="lpc-seg-text">未开始</span>
+                <span class="lpc-seg-text">{{ t('ai.lpcStatusNotStarted') }}</span>
               </button>
               <button
                 type="button"
                 class="lpc-seg-btn"
-                :class="{ active: currentStatus === '学习中' }"
-                @click="setStatus('学习中')"
-                title="标记为学习中"
+                :class="{ active: status === 'in_progress' }"
+                :title="t('ai.lpcMarkInProgressTitle')"
+                @click="setStatus('in_progress')"
               >
                 <span class="lpc-seg-icon" v-html="ICONS.circleHalf"></span>
-                <span class="lpc-seg-text">学习中</span>
+                <span class="lpc-seg-text">{{ t('ai.lpcStatusInProgress') }}</span>
               </button>
               <button
                 type="button"
                 class="lpc-seg-btn"
-                :class="{ active: currentStatus === '已完成' }"
-                @click="setStatus('已完成')"
-                title="标记为已完成"
+                :class="{ active: status === 'completed' }"
+                :title="t('ai.lpcMarkCompletedTitle')"
+                @click="setStatus('completed')"
               >
                 <span class="lpc-seg-icon" v-html="ICONS.circleCheck"></span>
-                <span class="lpc-seg-text">已完成</span>
+                <span class="lpc-seg-text">{{ t('ai.lpcStatusCompleted') }}</span>
               </button>
             </div>
 
-            <!-- 主打卡按钮 -->
             <button
-              v-if="currentStatus !== '已完成'"
+              v-if="status !== 'completed'"
               type="button"
               class="lpc-primary-btn"
+              :title="t('ai.lpcCompleteBtnTitle')"
               @click="markCompleted"
-              title="完成本讲阅读并打卡"
             >
               <span class="lpc-btn-icon" v-html="ICONS.check"></span>
-              <span>完读打卡</span>
+              <span>{{ t('ai.lpcCompleteBtnLabel') }}</span>
             </button>
           </div>
         </div>
 
-        <!-- 底部微同步状态栏 -->
-        <div class="lpc-footer">
+        <!-- Admin-only Notion sync control & honest failure status (D-11) -->
+        <div v-if="showNotionSync" class="lpc-footer" data-lpc-notion-control>
           <div class="lpc-footer-left">
-            <span class="lpc-sync-dot" :class="syncState"></span>
-            <span v-if="syncState === 'syncing'" class="lpc-footer-hint">正在同步至知识图谱...</span>
-            <span v-else class="lpc-footer-hint">Neon PostgreSQL 强持久化 ｜ Notion 知识图谱对齐</span>
+            <span class="lpc-sync-glyph" :class="syncState" aria-hidden="true" v-html="syncStatusIcon"></span>
+            <span v-if="syncState === 'error'" class="lpc-footer-hint is-error" data-lpc-notion-error>
+              {{ t('ai.notionSyncFailed', { detail: syncErrorDetail || t('ai.networkError') }) }}
+            </span>
+            <span v-else-if="syncState !== 'idle'" class="lpc-footer-hint">
+              {{ t('ai.notionSyncSyncing') }}
+            </span>
+            <span v-else class="lpc-footer-hint">
+              {{ t('ai.notionSyncIdle') }}
+            </span>
+            <button
+              v-if="syncState === 'error'"
+              type="button"
+              class="lpc-retry-btn"
+              data-lpc-notion-retry
+              @click="handleRetrySync"
+            >
+              {{ t('ai.notionSyncRetry') }}
+            </button>
           </div>
           <div v-if="notionNodeId" class="lpc-node-ref">
             <code>{{ notionNodeId }}</code>
@@ -287,86 +315,6 @@ onUnmounted(() => {
         </div>
       </div>
     </Teleport>
-
-    <!-- 兜底备用：若未找到 ## 下一讲预告，直接在 doc-after 原位呈现 -->
-    <div v-else class="lec-progress-card" :data-status="currentStatus">
-      <div class="lpc-main">
-        <div class="lpc-indicator" @click="cycleStatus" role="button" tabindex="0" :title="'当前状态：' + currentStatus + '（点击切换）'">
-          <span class="lpc-icon" v-html="currentStatus === '已完成' ? ICONS.circleCheck : currentStatus === '学习中' ? ICONS.circleHalf : ICONS.circleDot"></span>
-          <div class="lpc-meta">
-            <div class="lpc-status-line">
-              <span class="lpc-status-label">{{ currentStatus }}</span>
-              <span class="lpc-cycle-hint">点击循环切换</span>
-            </div>
-            <div class="lpc-sub-line">
-              <span class="lpc-id-badge">{{ lectureInfo.lectureId.toUpperCase() }}</span>
-              <span v-if="currentStatus === '已完成' && formattedCompletedTime" class="lpc-time-tag">
-                打卡时间 {{ formattedCompletedTime }}
-              </span>
-              <span v-else-if="currentStatus === '学习中'" class="lpc-time-tag">
-                正在学习本讲
-              </span>
-              <span v-else class="lpc-time-tag">
-                本讲尚未学习
-              </span>
-            </div>
-          </div>
-        </div>
-
-        <div class="lpc-actions">
-          <div class="lpc-segmented">
-            <button
-              type="button"
-              class="lpc-seg-btn"
-              :class="{ active: currentStatus === '未开始' }"
-              @click="setStatus('未开始')"
-            >
-              <span class="lpc-seg-icon" v-html="ICONS.circleDot"></span>
-              <span class="lpc-seg-text">未开始</span>
-            </button>
-            <button
-              type="button"
-              class="lpc-seg-btn"
-              :class="{ active: currentStatus === '学习中' }"
-              @click="setStatus('学习中')"
-            >
-              <span class="lpc-seg-icon" v-html="ICONS.circleHalf"></span>
-              <span class="lpc-seg-text">学习中</span>
-            </button>
-            <button
-              type="button"
-              class="lpc-seg-btn"
-              :class="{ active: currentStatus === '已完成' }"
-              @click="setStatus('已完成')"
-            >
-              <span class="lpc-seg-icon" v-html="ICONS.circleCheck"></span>
-              <span class="lpc-seg-text">已完成</span>
-            </button>
-          </div>
-
-          <button
-            v-if="currentStatus !== '已完成'"
-            type="button"
-            class="lpc-primary-btn"
-            @click="markCompleted"
-          >
-            <span class="lpc-btn-icon" v-html="ICONS.check"></span>
-            <span>完读打卡</span>
-          </button>
-        </div>
-      </div>
-
-      <div class="lpc-footer">
-        <div class="lpc-footer-left">
-          <span class="lpc-sync-dot" :class="syncState"></span>
-          <span v-if="syncState === 'syncing'" class="lpc-footer-hint">正在同步至知识图谱...</span>
-          <span v-else class="lpc-footer-hint">Neon PostgreSQL 强持久化 ｜ Notion 知识图谱对齐</span>
-        </div>
-        <div v-if="notionNodeId" class="lpc-node-ref">
-          <code>{{ notionNodeId }}</code>
-        </div>
-      </div>
-    </div>
   </div>
 </template>
 
@@ -380,26 +328,24 @@ onUnmounted(() => {
 .lec-progress-card {
   margin: 28px 0;
   padding: 16px 20px;
-  border-radius: 12px;
-  border: 1px solid var(--vp-c-divider);
-  background: var(--vp-c-bg-soft);
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03);
+  border-radius: var(--lec-radius-2);
+  border: 1px solid var(--lec-border);
+  background: var(--lec-surface);
   transition: all 0.25s ease;
 }
 
-/* 三态边框与高亮微光 */
-.lec-progress-card[data-status="未开始"] {
-  border-color: var(--vp-c-divider);
+.lec-progress-card[data-state="not_started"] {
+  border-color: var(--lec-border);
 }
 
-.lec-progress-card[data-status="学习中"] {
-  border-color: rgba(245, 158, 11, 0.4);
-  background: linear-gradient(to right, rgba(245, 158, 11, 0.04), var(--vp-c-bg-soft));
+.lec-progress-card[data-state="in_progress"] {
+  border-color: var(--lec-warning);
+  background: var(--lec-warning-tint);
 }
 
-.lec-progress-card[data-status="已完成"] {
-  border-color: rgba(16, 185, 129, 0.45);
-  background: linear-gradient(to right, rgba(16, 185, 129, 0.05), var(--vp-c-bg-soft));
+.lec-progress-card[data-state="completed"] {
+  border-color: var(--lec-done);
+  background: var(--lec-bg);
 }
 
 .lpc-main {
@@ -417,12 +363,12 @@ onUnmounted(() => {
   cursor: pointer;
   user-select: none;
   padding: 4px 6px;
-  border-radius: 8px;
+  border-radius: var(--lec-radius-1);
   transition: background-color 0.15s ease;
 }
 
 .lpc-indicator:hover {
-  background: var(--vp-c-bg-mute);
+  background: var(--lec-bg);
 }
 
 .lpc-icon {
@@ -432,27 +378,25 @@ onUnmounted(() => {
   width: 32px;
   height: 32px;
   border-radius: 50%;
-  background: var(--vp-c-bg);
-  border: 1px solid var(--vp-c-divider);
+  background: var(--lec-bg);
+  border: 1px solid var(--lec-border);
   flex-shrink: 0;
   transition: all 0.2s ease;
 }
 
-.lec-progress-card[data-status="未开始"] .lpc-icon {
-  color: var(--vp-c-text-3);
-  border-color: var(--vp-c-divider);
+.lec-progress-card[data-state="not_started"] .lpc-icon {
+  color: var(--lec-text-muted);
+  border-color: var(--lec-border);
 }
 
-.lec-progress-card[data-status="学习中"] .lpc-icon {
-  color: #f59e0b;
-  border-color: #f59e0b;
-  box-shadow: 0 0 10px rgba(245, 158, 11, 0.25);
+.lec-progress-card[data-state="in_progress"] .lpc-icon {
+  color: var(--lec-warning);
+  border-color: var(--lec-warning);
 }
 
-.lec-progress-card[data-status="已完成"] .lpc-icon {
-  color: #10b981;
-  border-color: #10b981;
-  box-shadow: 0 0 10px rgba(16, 185, 129, 0.25);
+.lec-progress-card[data-state="completed"] .lpc-icon {
+  color: var(--lec-done-text);
+  border-color: var(--lec-done);
 }
 
 .lpc-meta {
@@ -470,16 +414,16 @@ onUnmounted(() => {
 .lpc-status-label {
   font-size: 15px;
   font-weight: 600;
-  color: var(--vp-c-text-1);
+  color: var(--lec-text);
 }
 
 .lpc-cycle-hint {
   font-size: 11px;
-  color: var(--vp-c-text-3);
+  color: var(--lec-text-muted);
   padding: 1px 6px;
-  border-radius: 4px;
-  background: var(--vp-c-bg);
-  border: 1px solid var(--vp-c-divider);
+  border-radius: var(--lec-radius-1);
+  background: var(--lec-bg);
+  border: 1px solid var(--lec-border);
 }
 
 .lpc-sub-line {
@@ -487,19 +431,19 @@ onUnmounted(() => {
   align-items: center;
   gap: 8px;
   font-size: 12px;
-  color: var(--vp-c-text-2);
+  color: var(--lec-text-muted);
 }
 
 .lpc-id-badge {
   font-weight: 700;
   font-size: 11px;
   letter-spacing: 0.5px;
-  color: var(--vp-c-text-2);
+  color: var(--lec-text-muted);
 }
 
 .lpc-time-tag {
   font-variant-numeric: tabular-nums;
-  color: var(--vp-c-text-3);
+  color: var(--lec-text-muted);
 }
 
 .lpc-actions {
@@ -508,14 +452,13 @@ onUnmounted(() => {
   gap: 12px;
 }
 
-/* 分段切换按钮组 */
 .lpc-segmented {
   display: inline-flex;
   align-items: center;
   padding: 3px;
-  background: var(--vp-c-bg);
-  border: 1px solid var(--vp-c-divider);
-  border-radius: 8px;
+  background: var(--lec-bg);
+  border: 1px solid var(--lec-border);
+  border-radius: var(--lec-radius-1);
   gap: 2px;
 }
 
@@ -524,10 +467,10 @@ onUnmounted(() => {
   align-items: center;
   gap: 5px;
   padding: 5px 10px;
-  border-radius: 6px;
+  border-radius: var(--lec-radius-1);
   border: none;
   background: transparent;
-  color: var(--vp-c-text-2);
+  color: var(--lec-text-muted);
   font-size: 12.5px;
   font-weight: 500;
   cursor: pointer;
@@ -535,14 +478,13 @@ onUnmounted(() => {
 }
 
 .lpc-seg-btn:hover {
-  color: var(--vp-c-text-1);
+  color: var(--lec-text);
 }
 
 .lpc-seg-btn.active {
-  background: var(--vp-c-bg-mute);
-  color: var(--vp-c-text-1);
+  background: var(--lec-accent-tint);
+  color: var(--lec-accent);
   font-weight: 600;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
 }
 
 .lpc-seg-icon {
@@ -555,10 +497,10 @@ onUnmounted(() => {
   align-items: center;
   gap: 6px;
   padding: 6px 14px;
-  border-radius: 8px;
-  border: 1px solid rgba(16, 185, 129, 0.3);
-  background: rgba(16, 185, 129, 0.12);
-  color: #10b981;
+  border-radius: var(--lec-radius-1);
+  border: 1px solid var(--lec-done);
+  background: var(--lec-bg);
+  color: var(--lec-done-text);
   font-size: 13px;
   font-weight: 600;
   cursor: pointer;
@@ -566,10 +508,9 @@ onUnmounted(() => {
 }
 
 .lpc-primary-btn:hover {
-  background: #10b981;
-  color: #ffffff;
-  border-color: #10b981;
-  box-shadow: 0 2px 8px rgba(16, 185, 129, 0.3);
+  background: var(--lec-accent);
+  color: var(--lec-on-accent);
+  border-color: var(--lec-accent);
 }
 
 .lpc-btn-icon {
@@ -580,13 +521,13 @@ onUnmounted(() => {
 .lpc-footer {
   margin-top: 12px;
   padding-top: 10px;
-  border-top: 1px solid var(--vp-c-divider);
+  border-top: 1px solid var(--lec-border);
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
   font-size: 11.5px;
-  color: var(--vp-c-text-3);
+  color: var(--lec-text-muted);
 }
 
 .lpc-footer-left {
@@ -595,35 +536,43 @@ onUnmounted(() => {
   gap: 6px;
 }
 
-.lpc-sync-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--vp-c-text-3);
+.lpc-sync-glyph {
+  display: inline-flex;
+  align-items: center;
+  color: var(--lec-done-text);
 }
 
-.lpc-sync-dot.syncing {
-  background: #3b82f6;
-  box-shadow: 0 0 6px #3b82f6;
-  animation: pulse-dot 1.2s infinite ease-in-out;
+.lpc-sync-glyph.syncing,
+.lpc-sync-glyph.throttling,
+.lpc-sync-glyph.retrying {
+  color: var(--lec-accent);
 }
 
-.lpc-sync-dot.error {
-  background: #ef4444;
+.lpc-sync-glyph.error {
+  color: var(--lec-danger);
 }
 
-@keyframes pulse-dot {
-  0%, 100% { opacity: 0.4; }
-  50% { opacity: 1; }
+.lpc-footer-hint.is-error {
+  color: var(--lec-danger);
+}
+
+.lpc-retry-btn {
+  border: 1px solid var(--lec-danger);
+  background: var(--lec-danger-tint);
+  color: var(--lec-danger);
+  border-radius: var(--lec-radius-1);
+  padding: 2px 8px;
+  font-size: 11px;
+  cursor: pointer;
 }
 
 .lpc-node-ref code {
   font-size: 11px;
   padding: 1px 5px;
-  border-radius: 4px;
-  background: var(--vp-c-bg);
-  color: var(--vp-c-text-3);
-  border: 1px solid var(--vp-c-divider);
+  border-radius: var(--lec-radius-1);
+  background: var(--lec-bg);
+  color: var(--lec-text-muted);
+  border: 1px solid var(--lec-border);
 }
 
 @media (max-width: 640px) {
@@ -631,8 +580,15 @@ onUnmounted(() => {
     flex-direction: column;
     align-items: stretch;
   }
+  /* the segmented control plus the primary button are wider than a phone in English: let the button drop below */
+  .lpc-indicator,
+  .lpc-actions {
+    min-width: 0;
+  }
   .lpc-actions {
     justify-content: space-between;
+    flex-wrap: wrap;
+    row-gap: 8px;
   }
   .lpc-footer {
     flex-direction: column;

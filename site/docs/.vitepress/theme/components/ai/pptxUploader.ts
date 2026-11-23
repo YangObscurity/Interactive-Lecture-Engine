@@ -10,7 +10,8 @@
  * 规范：严格 TypeScript 类型，无 any，SSR 安全，无 Emoji。
  */
 
-import { API_ENDPOINTS } from '../../../site.config'
+import { API_ENDPOINTS } from '../../../site.config.mts'
+import { currentLang, translate } from '../../../i18n/index.ts'
 
 /** 允许上传的最大文件尺寸：50MB */
 export const MAX_FILE_SIZE_BYTES = 50 * 1024 * 1024
@@ -101,20 +102,22 @@ export function formatFileSize(bytes: number): string {
  * - MIME 检查：在浏览器提供非空 MIME 时核对白名单
  */
 export function validateLectureFile(file: File): FileValidationResult {
+  const lang = currentLang()
   if (!file) {
-    return { valid: false, error: '未选择任何文件' }
+    return { valid: false, error: translate(lang, 'ai.uploadNoFile') }
   }
 
   // 1. 文件大小检查
   if (file.size === 0) {
-    return { valid: false, error: '文件大小为 0 字节，无法上传空文件' }
+    return { valid: false, error: translate(lang, 'ai.uploadEmptyFile') }
   }
 
   if (file.size > MAX_FILE_SIZE_BYTES) {
+    const size = formatFileSize(file.size)
     return {
       valid: false,
-      error: `文件大小超过 50MB 限制 (当前大小: ${formatFileSize(file.size)})`,
-      fileSizeFormatted: formatFileSize(file.size)
+      error: translate(lang, 'ai.uploadTooLarge', { size }),
+      fileSizeFormatted: size
     }
   }
 
@@ -124,7 +127,7 @@ export function validateLectureFile(file: File): FileValidationResult {
   if (dotIndex === -1) {
     return {
       valid: false,
-      error: '文件缺少扩展名，仅支持 .pptx 或 .pdf 课件文档'
+      error: translate(lang, 'ai.uploadNoExt')
     }
   }
 
@@ -133,7 +136,7 @@ export function validateLectureFile(file: File): FileValidationResult {
   if (!matchedExt) {
     return {
       valid: false,
-      error: `不支持的文件格式 [${rawExt}]，仅支持 .pptx 或 .pdf 课件文档`
+      error: translate(lang, 'ai.uploadBadExt', { ext: rawExt })
     }
   }
 
@@ -143,7 +146,7 @@ export function validateLectureFile(file: File): FileValidationResult {
     if (!isMimeSupported) {
       return {
         valid: false,
-        error: `文件 MIME 类型不匹配 [${file.type}]，请上传标准的 PPTX 或 PDF 课件文档`
+        error: translate(lang, 'ai.uploadBadMime', { mime: file.type })
       }
     }
   }
@@ -193,11 +196,12 @@ export function uploadLectureFile(
   file: File,
   options: UploadOptions = {}
 ): Promise<UploadResult> {
+  const lang = currentLang()
   // SSR 安全保护
   if (typeof window === 'undefined' || typeof XMLHttpRequest === 'undefined') {
     return Promise.resolve({
       success: false,
-      error: '当前环境不支持浏览器文件上传 API (SSR 保护)'
+      error: translate(lang, 'ai.uploadNoBrowser')
     })
   }
 
@@ -205,7 +209,7 @@ export function uploadLectureFile(
   if (!validation.valid) {
     return Promise.resolve({
       success: false,
-      error: validation.error || '文件校验未通过'
+      error: validation.error || translate(lang, 'ai.uploadInvalid')
     })
   }
 
@@ -215,7 +219,6 @@ export function uploadLectureFile(
     const formData = new FormData()
 
     formData.append('file', file)
-    formData.append('user', options.user || 'lecture-learner')
 
     // 监听函数引用以供事后解绑，杜绝内存泄漏
     let onSignalAbort: (() => void) | null = null
@@ -239,13 +242,13 @@ export function uploadLectureFile(
     // 监听外部取消信号
     if (options.signal) {
       if (options.signal.aborted) {
-        resolve({ success: false, error: '上传已被用户主动取消' })
+        resolve({ success: false, error: translate(lang, 'ai.uploadAborted') })
         return
       }
       onSignalAbort = () => {
         cleanupListeners()
         xhr.abort()
-        resolve({ success: false, error: '上传已被用户主动取消' })
+        resolve({ success: false, error: translate(lang, 'ai.uploadAborted') })
       }
       options.signal.addEventListener('abort', onSignalAbort)
     }
@@ -273,17 +276,17 @@ export function uploadLectureFile(
           } else {
             resolve({
               success: false,
-              error: '上传响应缺少核心文件标识'
+              error: translate(lang, 'ai.uploadMissingId')
             })
           }
         } catch {
           resolve({
             success: false,
-            error: '接口返回数据非合规 JSON 结构'
+            error: translate(lang, 'ai.uploadBadJson')
           })
         }
       } else {
-        let errorMsg = `上传失败 (HTTP ${xhr.status})`
+        let errorMsg = translate(lang, 'ai.uploadHttpError', { status: xhr.status })
         try {
           const errData: unknown = JSON.parse(xhr.responseText)
           if (typeof errData === 'object' && errData !== null) {
@@ -305,14 +308,14 @@ export function uploadLectureFile(
     // 网络异常监听
     onError = () => {
       cleanupListeners()
-      resolve({ success: false, error: '网络通信中断，文件上传失败' })
+      resolve({ success: false, error: translate(lang, 'ai.uploadNetError') })
     }
     xhr.addEventListener('error', onError)
 
     // 超时或中断监听
     onAbort = () => {
       cleanupListeners()
-      resolve({ success: false, error: '文件上传已终止' })
+      resolve({ success: false, error: translate(lang, 'ai.uploadAborted') })
     }
     xhr.addEventListener('abort', onAbort)
 
@@ -374,19 +377,22 @@ function normalizeMappingItem(raw: Record<string, unknown>): SlideLectureMapping
     }
   }
 
+  const lang = currentLang()
   const slideTitle = typeof raw.slideTitle === 'string'
     ? raw.slideTitle
     : typeof raw.title === 'string'
     ? raw.title
     : typeof raw.topic === 'string'
     ? raw.topic
-    : `幻灯片第 ${slideNumber} 页考点`
+    : translate(lang, 'ai.uploadFallbackTitle', { n: slideNumber })
 
   const matchedLectureTitle = typeof raw.matchedLectureTitle === 'string'
     ? raw.matchedLectureTitle
     : typeof raw.lectureTitle === 'string'
     ? raw.lectureTitle
-    : matchedLectureId ? `讲义 ${matchedLectureId}` : '待定讲次'
+    : matchedLectureId
+    ? translate(lang, 'ai.uploadLectureLabel', { id: matchedLectureId })
+    : translate(lang, 'ai.uploadPendingLecture')
 
   const matchedSection = typeof raw.matchedSection === 'string'
     ? raw.matchedSection
@@ -426,7 +432,7 @@ function normalizeMappingItem(raw: Record<string, unknown>): SlideLectureMapping
     ? raw.notes
     : typeof raw.summary === 'string'
     ? raw.summary
-    : '课件重点内容推导'
+    : translate(lang, 'ai.uploadFallbackTakeaway')
 
   const isCompleted = typeof raw.isCompleted === 'boolean'
     ? raw.isCompleted
@@ -508,17 +514,18 @@ function tryParseMarkdownTable(content: string): SlideLectureMapping[] {
     .slice(1, -1)
     .map((c) => c.trim().toLowerCase())
 
-  // 定位各列索引
-  const slideIdx = headerCells.findIndex((c) => /页码|幻灯片|slide|page/.test(c))
-  const titleIdx = headerCells.findIndex((c) => /考点|主题|知识点|title|topic/.test(c))
-  const lectureIdx = headerCells.findIndex((c) => /讲次|讲号|匹配|lecture/.test(c))
-  const sectionIdx = headerCells.findIndex((c) => /小节|章节|section/.test(c))
-  const pathIdx = headerCells.findIndex((c) => /链接|路径|直达|path|url/.test(c))
-  const takeawayIdx = headerCells.findIndex((c) => /重点|建议|备考|解析|takeaway|note/.test(c))
+  // 定位各列索引（使用 Unicode 转义兼容中英表格列名，不引入硬编码汉字）
+  const slideIdx = headerCells.findIndex((c) => /\u9875\u7801|\u5e7b\u706f\u7247|slide|page/.test(c))
+  const titleIdx = headerCells.findIndex((c) => /\u8003\u70b9|\u4e3b\u9898|\u77e5\u8bc6\u70b9|title|topic/.test(c))
+  const lectureIdx = headerCells.findIndex((c) => /\u8bb2\u6b21|\u8bb2\u53f7|\u5339\u914d|lecture/.test(c))
+  const sectionIdx = headerCells.findIndex((c) => /\u5c0f\u8282|\u7ae0\u8282|section/.test(c))
+  const pathIdx = headerCells.findIndex((c) => /\u94fe\u63a5|\u8def\u5f84|\u76f4\u8fbe|path|url/.test(c))
+  const takeawayIdx = headerCells.findIndex((c) => /\u91cd\u70b9|\u5efa\u8bae|\u5907\u8003|\u89e3\u6790|takeaway|note/.test(c))
 
   if (slideIdx === -1 && lectureIdx === -1) return []
 
   const results: SlideLectureMapping[] = []
+  const lang = currentLang()
 
   // 跳过表头和分隔线（第二行）
   for (let i = 2; i < tableRows.length; i++) {
@@ -536,10 +543,10 @@ function tryParseMarkdownTable(content: string): SlideLectureMapping[] {
     const lectureIdMatch = rawLectureText.match(/[A-Za-z0-9]+-L\d{2}/i)
     const matchedLectureId = lectureIdMatch ? lectureIdMatch[0].toUpperCase() : ''
 
-    const slideTitle = titleIdx !== -1 ? cells[titleIdx] : `幻灯片第 ${slideNumber} 页`
+    const slideTitle = titleIdx !== -1 ? cells[titleIdx] : translate(lang, 'ai.uploadFallbackTitle', { n: slideNumber })
     const matchedSection = sectionIdx !== -1 ? cells[sectionIdx] : ''
     let lecturePath = pathIdx !== -1 ? cells[pathIdx] : ''
-    const keyTakeaway = takeawayIdx !== -1 ? cells[takeawayIdx] : '考点精读对照'
+    const keyTakeaway = takeawayIdx !== -1 ? cells[takeawayIdx] : translate(lang, 'ai.uploadDefaultTakeaway')
 
     if (!lecturePath && matchedLectureId) {
       const parts = matchedLectureId.split('-')
@@ -557,7 +564,7 @@ function tryParseMarkdownTable(content: string): SlideLectureMapping[] {
       slideNumber,
       slideTitle,
       matchedLectureId,
-      matchedLectureTitle: rawLectureText || (matchedLectureId ? `讲义 ${matchedLectureId}` : ''),
+      matchedLectureTitle: rawLectureText || (matchedLectureId ? translate(lang, 'ai.uploadLectureLabel', { id: matchedLectureId }) : ''),
       matchedSection,
       lecturePath,
       keyTakeaway,
@@ -592,10 +599,11 @@ export function parseSlideMappings(aiResponseText: string): SlideLectureMapping[
   // 3. 兜底逐行正则匹配
   const fallbackResults: SlideLectureMapping[] = []
   const lines = aiResponseText.split('\n')
+  const lang = currentLang()
 
   for (const line of lines) {
     const trimmed = line.trim()
-    const pageMatch = trimmed.match(/(?:第\s*(\d+)\s*页|[Pp](?:age)?\.?\s*(\d+))/i)
+    const pageMatch = trimmed.match(/(?:\u7b2c\s*(\d+)\s*\u9875|[Pp](?:age)?\.?\s*(\d+))/i)
     const idMatch = trimmed.match(/([A-Za-z0-9]+-L\d{2})/i)
 
     if (pageMatch && idMatch) {
@@ -607,9 +615,9 @@ export function parseSlideMappings(aiResponseText: string): SlideLectureMapping[
 
       fallbackResults.push({
         slideNumber,
-        slideTitle: `幻灯片第 ${slideNumber} 页考点`,
+        slideTitle: translate(lang, 'ai.uploadFallbackTitle', { n: slideNumber }),
         matchedLectureId,
-        matchedLectureTitle: `讲义 ${matchedLectureId}`,
+        matchedLectureTitle: translate(lang, 'ai.uploadLectureLabel', { id: matchedLectureId }),
         matchedSection: '',
         lecturePath,
         keyTakeaway: trimmed.replace(/^[*-]\s*/, ''),
@@ -626,16 +634,19 @@ export function parseSlideMappings(aiResponseText: string): SlideLectureMapping[
  */
 export function formatMappingsToMarkdown(mappings: SlideLectureMapping[]): string {
   if (!mappings.length) return ''
+  const lang = currentLang()
 
   const rows = [
-    '| 课件页码 | 核心考点 | 对应讲次 | 推荐小节 | 站内直达 | 备考重点与建议 |',
+    translate(lang, 'ai.uploadTableHeader'),
     '| :--- | :--- | :--- | :--- | :--- | :--- |'
   ]
 
+  const linkLabel = translate(lang, 'ai.uploadTableLink')
   for (const m of mappings) {
-    const link = m.lecturePath ? `[直达讲义](${m.lecturePath})` : '-'
+    const link = m.lecturePath ? `[${linkLabel}](${m.lecturePath})` : '-'
+    const slideLabel = translate(lang, 'ai.uploadSlideRowLabel', { n: m.slideNumber })
     rows.push(
-      `| 第 ${m.slideNumber} 页 | ${m.slideTitle || '-'} | ${m.matchedLectureId || '-'} | ${m.matchedSection || '-'} | ${link} | ${m.keyTakeaway || '-'} |`
+      `| ${slideLabel} | ${m.slideTitle || '-'} | ${m.matchedLectureId || '-'} | ${m.matchedSection || '-'} | ${link} | ${m.keyTakeaway || '-'} |`
     )
   }
 
@@ -649,6 +660,7 @@ export function formatMappingsForChecklist(
   mappings: SlideLectureMapping[],
   fallbackLectureId = ''
 ): ChecklistPayload[] {
+  const lang = currentLang()
   return mappings.map((m) => {
     const lectureId = m.matchedLectureId || fallbackLectureId
     const sectionAnchor = m.matchedSection ? generateSectionAnchor(m.matchedSection) : ''
@@ -657,7 +669,7 @@ export function formatMappingsForChecklist(
       slidePage: m.slideNumber,
       lectureId,
       sectionAnchor,
-      keyTakeaway: m.keyTakeaway || m.slideTitle || '核心考点',
+      keyTakeaway: m.keyTakeaway || m.slideTitle || translate(lang, 'ai.uploadKeyPoint'),
       isCompleted: m.isCompleted
     }
   })
@@ -670,12 +682,15 @@ export async function uploadAndMapPptx(file: File): Promise<{
   mappings: SlideLectureMapping[]
   formattedMarkdown: string
 }> {
+  const lang = currentLang()
   const uploadRes = await uploadLectureFile(file)
   if (!uploadRes.success || !uploadRes.file) {
-    throw new Error(uploadRes.error || '课件上传失败')
+    throw new Error(uploadRes.error || translate(lang, 'ai.uploadFailed'))
   }
 
-  const text = uploadRes.analysisText || `已成功解析课件文件: ${file.name} (大小: ${formatFileSize(file.size)})。正在对齐全站讲义考点...`
+  const text =
+    uploadRes.analysisText ||
+    translate(lang, 'ai.uploadSuccessNotice', { name: file.name, size: formatFileSize(file.size) })
   const mappings = parseSlideMappings(text)
   const formattedMarkdown = formatMappingsToMarkdown(mappings) || text
 

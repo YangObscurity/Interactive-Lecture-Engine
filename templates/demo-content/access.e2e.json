@@ -1,0 +1,14 @@
+{
+  "default": "public",
+  "enforcement": "gateway",
+  "groups": {
+    "PLN": {
+      "read": "authenticated"
+    },
+    "DAT": {
+      "read": [
+        "staff"
+      ]
+    }
+  }
+}

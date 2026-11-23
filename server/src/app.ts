@@ -1,0 +1,217 @@
+import type { LanguageModel } from 'ai'
+import { Hono, type MiddlewareHandler } from 'hono'
+import { bodyLimit } from 'hono/body-limit'
+import { createAuthMiddleware, type AuthResult, type WireSession, type WireSessionUser } from './auth/index.js'
+import type { AppConfig } from './config/schema.js'
+import type { Db } from './db/types.js'
+import { handleAppError, rateLimited } from './http/errors.js'
+import { type Clock, WriteRateLimiter } from './http/rateLimit.js'
+import { createAdminRouter } from './routes/admin/index.js'
+import { createAiRouter } from './routes/ai/index.js'
+import { type AiCallRecord, createAiRuntime } from './routes/ai/runtime.js'
+import { createHealthHandler } from './routes/health.js'
+import { createMcpRouter } from './routes/mcp.js'
+import { createMessagesRouter } from './routes/messages.js'
+import { createProgressRouter } from './routes/progress.js'
+import { createReviewChecklistsRouter } from './routes/reviewChecklists.js'
+import { createSessionRouter } from './routes/session.js'
+import { createSessionsRouter } from './routes/sessions.js'
+import { createToolsRouter } from './routes/tools.js'
+import type { McpClientFactory } from './tools/index.js'
+
+export interface AppVariables {
+  auth: AuthResult
+  session: WireSession
+  effectiveUserId: string | null
+  userId: string | null
+  user: WireSessionUser | null
+  aiCall: AiCallRecord | null
+}
+
+export type AppEnv = {
+  Variables: AppVariables
+}
+
+export interface AppOptions {
+  /** Clock used by limits, health cache and AI status (tests inject a fake one). */
+  now?: Clock
+  /** Test hook to supply an AI SDK LanguageModel (e.g. MockLanguageModelV4) instead of HTTP OpenAI. */
+  modelFactory?: (config: AppConfig) => LanguageModel
+  /** Test hook to supply an MCP client factory (e.g. InMemoryTransport) for external MCP tests. */
+  mcpClientFactory?: McpClientFactory
+}
+
+const appCloseHandlers = new WeakMap<object, () => Promise<void>>()
+
+export async function closeAppResources(app: Hono<AppEnv>): Promise<void> {
+  const closeFn = appCloseHandlers.get(app)
+  if (closeFn) {
+    await closeFn()
+  }
+}
+
+export function createApp(config: AppConfig, db: Db, options: AppOptions = {}): Hono<AppEnv> {
+  const app = new Hono<AppEnv>()
+  const now = options.now ?? Date.now
+  const aiRuntime = createAiRuntime(config, {
+    now,
+    ...(options.modelFactory ? { modelFactory: options.modelFactory } : {}),
+    ...(options.mcpClientFactory ? { mcpClientFactory: options.mcpClientFactory } : {}),
+  })
+  appCloseHandlers.set(app, () => aiRuntime.mcpManager.closeAll())
+  const writeLimiter = new WriteRateLimiter(config.writeRatePerMinute, now)
+
+  // 1. Global Date Header & Read Cache-Control (Outermost middleware)
+  app.use('*', async (c, next) => {
+    await next()
+    c.header('Date', new Date().toUTCString())
+    if (c.req.method === 'GET' || c.req.method === 'HEAD') {
+      c.header('Cache-Control', 'no-store')
+    }
+  })
+
+  // 2. Request body limit:
+  // Standard routes: 256 KB (262144 bytes)
+  // Upload route (/api/ai/upload): config.aiUploadMaxBytes (default 20 MB)
+  const standardLimitMiddleware = bodyLimit({
+    maxSize: 256 * 1024,
+    onError: (c) => {
+      c.header('Date', new Date().toUTCString())
+      c.header('Connection', 'close')
+      return c.json({ error: 'payload_too_large' }, 413)
+    },
+  })
+
+  const uploadLimitMiddleware = bodyLimit({
+    maxSize: config.aiUploadMaxBytes,
+    onError: (c) => {
+      c.header('Date', new Date().toUTCString())
+      c.header('Connection', 'close')
+      return c.json({ error: 'payload_too_large' }, 413)
+    },
+  })
+
+  app.use('*', async (c, next) => {
+    const isUpload =
+      c.req.method === 'POST' &&
+      (c.req.path === '/api/ai/upload' || c.req.path === '/api/ai/upload/')
+
+    if (isUpload) {
+      const cl = c.req.header('content-length')
+      if (cl && Number(cl) > config.aiUploadMaxBytes) {
+        c.header('Date', new Date().toUTCString())
+        c.header('Connection', 'close')
+        return c.json({ error: 'payload_too_large' }, 413)
+      }
+      return uploadLimitMiddleware(c, next)
+    }
+
+    return standardLimitMiddleware(c, next)
+  })
+
+  // 3. Auth context extraction
+  app.use('*', createAuthMiddleware(config))
+
+  // 4. Route Tier Access Guards
+  const requireUser: MiddlewareHandler<AppEnv> = async (c, next) => {
+    const effectiveUserId = c.get('effectiveUserId')
+    if (!effectiveUserId) {
+      return c.json({ error: 'unauthenticated' }, 401)
+    }
+    await next()
+  }
+
+  const requireAdmin: MiddlewareHandler<AppEnv> = async (c, next) => {
+    const effectiveUserId = c.get('effectiveUserId')
+    if (!effectiveUserId) {
+      return c.json({ error: 'unauthenticated' }, 401)
+    }
+    const session = c.get('session')
+    if (!session || !session.roles.includes('admin')) {
+      return c.json({ error: 'forbidden' }, 403)
+    }
+    await next()
+  }
+
+  // Per-user write limit for progress, sessions and messages. With AUTH_ADAPTER=none every
+  // visitor shares the 'anonymous' identity, so a per-user cap would throttle the whole site:
+  // it is skipped there (nginx limit_req is the only cap in that mode).
+  const limitWrites: MiddlewareHandler<AppEnv> = async (c, next) => {
+    const method = c.req.method
+    const isWrite = method === 'POST' || method === 'PATCH' || method === 'PUT' || method === 'DELETE'
+    const userId = c.get('effectiveUserId')
+    if (isWrite && userId && config.authAdapter !== 'none') {
+      const decision = writeLimiter.check(userId)
+      if (!decision.ok) {
+        throw rateLimited(decision.kind ?? 'write_rate', decision.retryAfterSec)
+      }
+    }
+    await next()
+  }
+
+  // Tier guards
+  app.use('/api/db', requireUser)
+  app.use('/api/db/*', requireUser)
+  app.use('/api/progress', requireUser)
+  app.use('/api/progress/*', requireUser)
+  app.use('/api/notion', requireUser)
+  app.use('/api/notion/*', requireUser)
+  app.use('/api/ai', requireUser)
+  app.use('/api/ai/*', requireUser)
+  app.use('/api/tools', requireUser)
+  app.use('/api/tools/*', requireUser)
+  app.use('/api/db', limitWrites)
+  app.use('/api/db/*', limitWrites)
+  app.use('/api/progress', limitWrites)
+  app.use('/api/progress/*', limitWrites)
+  app.use('/api/admin', requireAdmin)
+  app.use('/api/admin/*', requireAdmin)
+
+  // 5. Mount Route Handlers
+  // Tier 1: Public Routes
+  app.get('/api/health', createHealthHandler(config, db, { ai: aiRuntime.recorder, now }))
+  app.route('/api/auth/session', createSessionRouter())
+
+  // Tier 2: User Routes
+  const progressRouter = createProgressRouter(db)
+  app.route('/api/db/progress', progressRouter)
+  app.route('/api/progress', progressRouter)
+
+  const sessionsRouter = createSessionsRouter(db)
+  app.route('/api/db/sessions', sessionsRouter)
+
+  const messagesRouter = createMessagesRouter(db)
+  app.route('/api/db/messages', messagesRouter)
+
+  const reviewChecklistsRouter = createReviewChecklistsRouter(db)
+  app.route('/api/db/review-checklists', reviewChecklistsRouter)
+  app.route('/api/db/checklist', reviewChecklistsRouter)
+
+  const aiRouter = createAiRouter(config, aiRuntime)
+  app.route('/api/ai', aiRouter)
+
+  const toolsRouter = createToolsRouter(aiRuntime)
+  app.route('/api/tools', toolsRouter)
+
+  // Stateless MCP endpoint for Dify (Bearer AI_MCP_TOKEN checked inside mcpRouter)
+  const mcpRouter = createMcpRouter(
+    config,
+    aiRuntime.toolEngine,
+    now,
+    async (name) => (await aiRuntime.mcpManager.loadConfig()).engineTools[name]?.enabled !== false,
+  )
+  app.route('/api/mcp', mcpRouter)
+
+  // Tier 3: Admin Routes
+  const adminRouter = createAdminRouter(config, db, aiRuntime)
+  app.route('/api/admin', adminRouter)
+
+  // Unimplemented routes fall through
+  app.all('/api/notion/*', (c) => c.json({ error: 'not_found' }, 404))
+
+  // 6. Global 404 Not Found & Error Handlers
+  app.notFound((c) => c.json({ error: 'not_found' }, 404))
+  app.onError(handleAppError)
+
+  return app
+}

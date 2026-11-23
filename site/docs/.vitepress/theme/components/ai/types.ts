@@ -6,6 +6,12 @@
 
 export type ScopeType = 'lecture' | 'group' | 'all' | 'selection'
 
+export interface ChatToolCall {
+  id: string
+  name: string
+  state: 'running' | 'done' | 'error'
+}
+
 export interface ChatMessage {
   id: string
   role: 'user' | 'assistant' | 'system'
@@ -13,13 +19,20 @@ export interface ChatMessage {
   createdAt: number
   selectedText?: string
   scope?: ScopeType
+  toolCalls?: ChatToolCall[]
   isStreaming?: boolean
+  isError?: boolean
+  isIncomplete?: boolean
+  isMock?: boolean
+  error?: string
+  errorDetail?: string
 }
 
 export interface SendPayload {
   query: string
   scope: ScopeType
   selectedText?: string
+  actionId?: string
 }
 
 export interface ScopeChipItem {

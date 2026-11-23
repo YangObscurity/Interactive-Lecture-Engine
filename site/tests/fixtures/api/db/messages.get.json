@@ -1,0 +1,35 @@
+[
+  {
+    "id": "msg_fixture_1",
+    "session_id": "sess_fixture_g01_l01_a",
+    "role": "user",
+    "content": "这一节的核心概念用一句话怎么概括？",
+    "selected_context": null,
+    "model": "",
+    "prompt_tokens": 0,
+    "completion_tokens": 0,
+    "created_at": "2026-11-10T09:12:00.000Z"
+  },
+  {
+    "id": "msg_fixture_2",
+    "session_id": "sess_fixture_g01_l01_a",
+    "role": "assistant",
+    "content": "**[fixture 演示数据]** 一句话概括：先建立模型，再检查边界条件。\n\n$$a^2 + b^2 = c^2$$",
+    "selected_context": null,
+    "model": "fixture",
+    "prompt_tokens": 312,
+    "completion_tokens": 58,
+    "created_at": "2026-11-10T09:12:06.000Z"
+  },
+  {
+    "id": "msg_fixture_3",
+    "session_id": "sess_fixture_g01_l01_b",
+    "role": "user",
+    "content": "第二问为什么可以忽略高阶项？",
+    "selected_context": "当 x 足够小时，高阶项可以忽略。",
+    "model": "",
+    "prompt_tokens": 0,
+    "completion_tokens": 0,
+    "created_at": "2026-11-12T14:03:10.000Z"
+  }
+]

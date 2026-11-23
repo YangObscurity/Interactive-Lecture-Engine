@@ -36,12 +36,12 @@ export const SITE_APP_ID = 'lecture-site'
 /**
  * 站点身份信息。
  *
- * ⚠️ 与 `groups.mts` 的 `SITE_META` 的分工：
- *   - `groups.mts` 的 `SITE_META` 是**站点文案真源**（name / text / tagline），
+ * ⚠️ 与站点文案（`site/site-texts.json`，读取入口 `site-texts.mts`）的分工：
+ *   - `site-texts.json` 是**站点文案真源**（name / shortName / navText / tagline / description），
  *     会被 config.mts 注入 themeConfig 并渲染到页面上，改动会影响可见文案；
  *   - 这里的 `BRANDING` 只收拢**运行时代码里散落的品牌字符串**（例如演示数据
  *     的署名、诊断信息里的站点名），不参与页面主文案渲染。
- *   之所以不把 SITE_META 搬过来，是为了避免页面可见文案出现「两个真源」——
+ *   之所以不把站点文案搬过来，是为了避免页面可见文案出现「两个真源」——
  *   那正是本次重构想消除的问题，不能反过来制造一个。
  */
 export const BRANDING = {
@@ -90,12 +90,16 @@ export const API_ENDPOINTS = {
   aiChat: '/api/ai/chat',
   /** 课件（pptx/pdf）上传解析。适配协议：返回 { id, name, size, extension, mime_type } 的 JSON */
   aiUpload: '/api/ai/upload',
+  /** 引擎只读工具清单与调用前缀（GET 列举启用工具与 maxSteps，POST /:name 执行）。 */
+  aiTools: '/api/tools',
   /** 学习进度回写主端点（POST）。适配协议：服务端保存 Notion 令牌并代为 PATCH Notion 页面 */
   notionSyncPrimary: '/api/progress/notion-sync',
   /** 学习进度回写降级端点（PATCH）。主端点返回 404 时平滑切换到这里 */
   notionSyncFallback: '/api/notion/sync-status',
   /** 数据仓储 base（会话 / 消息 / 进度 / 清单的 CRUD 前缀）。适配协议：RESTful，见 neonRepository.ts */
   db: '/api/db',
+  /** 服务健康检查（GET，公开只读）。适配协议：{ ok, checks: { db, ai, notion }, ... } */
+  health: '/api/health',
 } as const
 
 /**
@@ -110,6 +114,20 @@ export const DB_ROUTES = {
   progress: '/progress',
   progressBatch: '/progress/batch',
   reviewChecklists: '/review-checklists',
+} as const
+
+/**
+ * 进度状态的线上取值（协议常量，P3）。
+ *
+ * 前端内部用 `not_started | in_progress | completed`；这三个中文值只出现在协议边界：
+ * `rest` 适配器的请求与响应、V1 本地进度迁移、Notion 同步。后端 v1 保持中文值
+ * （与现有数据库约束和 Notion 状态一致，见 docs/backend-handoff/API_CONTRACT.md §2.1）。
+ * `theme/` 下不得再新增中文字面量，需要时从这里取。
+ */
+export const PROGRESS_WIRE_STATUS = {
+  not_started: '未开始',
+  in_progress: '学习中',
+  completed: '已完成',
 } as const
 
 /**
@@ -159,10 +177,25 @@ export const DATA_FILES = {
     /** docs/public 下的相对位置（供需要在构建期读取的脚本引用） */
     docsRelativePath: 'public/notion_knowledge_graph.json',
     /** 数据版本号：图谱内容变更时必须 bump，用于触发客户端进度缓存整体重铺 */
-    graphVersion: '20261014_align_v3',
+    graphVersion: '20261117_restore_g03_v4',
   },
   /** 讲义图表 sidecar（每讲一个，懒加载） */
   chartsDir: '/charts',
+} as const
+
+/**
+ * AI 伴读系统提示词与快捷动作配置位置（站点业主数据，WP-F7）。
+ * 站点构建与 lecture-api 共用同一个环境变量键（`AI_PROMPTS_FILE`）与相对默认路径约定。
+ */
+export const AI_PROMPTS = {
+  /** 环境变量 / .env 配置键名 */
+  envKey: 'AI_PROMPTS_FILE',
+  /** 仅作显示/文档用的默认路径（相对于 site/）；真实位置由 `content/paths.mts` 决定 */
+  defaultFile: 'prompts/companion.json',
+  /** 仅作显示/文档用的示例文件名（相对于 site/）；真实位置由 `content/paths.mts` 决定 */
+  exampleFile: 'prompts/companion.example.json',
+  /** 构建输出目录（dist/）中的相对路径，供旁路部署的 lecture-api 读取 */
+  distRelativePath: 'prompts/companion.json',
 } as const
 
 // =============================================================================
@@ -281,6 +314,17 @@ export const AI_MOCK = {
  */
 export const CHART_FONT = "'Noto Sans SC','PingFang SC','Microsoft YaHei',sans-serif"
 
+/**
+ * 图表标签里 `<code>` 的等宽字体栈（= VitePress 默认 --vp-font-family-mono，即 V1 的实际值）。
+ *
+ * V2（P2b）起页面的 --vp-font-family-mono 跟随主题包（datasheet 为自托管 JetBrains Mono）。
+ * mermaid 先在 body 下的临时节点里量标签宽度、再放进正文渲染，若 `<code>` 跟随主题字体，
+ * 量与画之间字体可能不同（web 字体尚未下载完），标签就会偏离节点中心。图表内部的排版
+ * 交给 P5 统一处理，这里先把它钉回 V1 的字体栈，保证图表与 V1 逐像素一致。
+ */
+export const CHART_CODE_FONT =
+  "ui-monospace,'Menlo','Monaco','Consolas','Liberation Mono','Courier New',monospace"
+
 /** 图表类型标签（图表下方 figcaption 里显示的中文说明） */
 export const CHART_TAG_LABELS: Record<string, string> = {
   mermaid: '流程图 / 关系图',
@@ -292,12 +336,12 @@ export const CHART_TAG_LABELS: Record<string, string> = {
  * 各图表类型可用的工具按钮（键名对应 CHART_TOOL_DEFS）。
  *
  * 内联视图**不提供缩放/拖动**（滚轮或拖动会打断阅读、且极易误触）；
- * 缩放能力全部收进全屏层，所以这里每个类型都只有「全屏」与「看源码」两个按钮。
+ * 缩放能力全部收进全屏层，所以这里每个类型都只有「全屏」一个入口（悬停图标）；看源码只在本机开发模式（`injectSource`）。
  */
 export const CHART_TOOLS_BY_TYPE: Record<string, string[]> = {
-  mermaid: ['expand', 'src'],
-  wavedrom: ['expand', 'src'],
-  echarts: ['expand', 'src'],
+  mermaid: ['expand'],
+  wavedrom: ['expand'],
+  echarts: ['expand'],
 }
 
 /** 工具按钮定义：[动作名, 悬停提示/无障碍标签, 按钮内显示的字符] */
@@ -369,28 +413,29 @@ export const CHART_ECHARTS_GRID = {
  * 对于「引擎文档里要演示 mermaid 语法」这类场景，那恰恰是反效果。
  * 因此默认关闭，由部署方按自己的讲义风格显式打开。
  *
- * 为什么要有 `className` 而不是匹配所有 ```mermaid：VitePress 把围栏渲染为
- * `div.language-mermaid`，无法区分「作者想展示源码」与「作者想看图」。
- * 约定：只想看图就用 ` ```mermaid:chart `（语言标签带 `:chart` 后缀），
- * 想要源码就写普通 ` ```mermaid `。这样两种意图可以并存于同一篇讲义。
+ * 选择器怎么选：VitePress 把围栏渲染为 `div.language-mermaid`（` ```mermaid:chart ` 渲染为
+ * `div.language-mermaid:chart`，二者都以 `language-mermaid` 开头）。开源默认值只认 `:chart`
+ * 后缀，以保留「文档里展示 mermaid 源码」的用法。
  *
- * ⚠️ 本站当前取 `true`：仓库自带的示例讲义（docs/examples/g01/L01.md）
- * 需要在开箱状态下就能演示这项能力。改回 `false` 只会让示例退回
- * 「显示源码」，不会报错 —— 这是刻意保留的降级路径。
+ * ⚠️ 本站（私有讲义站）取值与 V1 运行时的**实际行为**一致（review FE-057）：
+ *   - `enabled: true`：仓库示例讲义与正文都依赖它；
+ *   - `selectors` 覆盖**裸** ` ```mermaid `（`div[class*="language-mermaid"]`，也包含 `:chart`）
+ *     与 `pre.mermaid`。V1 的 charts.ts 一直硬编码这两个选择器而无视本配置；若照开源默认值
+ *     只认 `:chart`，全站讲义里的裸 mermaid 会退回源码显示（大面积图表回归）。
+ *     开源同步时把 selectors 换回 `['div[class*="language-mermaid:chart"]']` 即可。
  */
 export const CHART_INLINE_MERMAID = {
   /** 总开关：关闭时下面的选择器一律不生效 */
   enabled: true,
-  /**
-   * 需要接管的选择器（CSS 选择器数组）。
-   *
-   * ⚠️ 默认只认显式的 `:chart` 后缀标记，**不碰裸 ```mermaid** ——
-   * 这是为了不破坏「文档里展示 mermaid 源码」这一正当用法。
-   */
-  selectors: ['div[class*="language-mermaid:chart"]'],
-  /** 接管后生成的卡片上附加的类名（供 CSS 与外部脚本识别） */
+  /** 需要接管的选择器（CSS 选择器数组）。本站 = V1 实际行为：裸 ```mermaid 与 pre.mermaid 都接管 */
+  selectors: ['div[class*="language-mermaid"]', 'pre.mermaid'],
+  /** 接管后生成的卡片上附加的类名（供 CSS 与外部脚本识别；dom-contract 依赖 `inline-mermaid`） */
   className: 'inline-mermaid',
-  /** 是否把被接管的原始代码块折叠为「查看源码」（false 则直接隐藏） */
+  /**
+   * 是否在生成的卡片里附带可折叠的「图表源码」（`details.chart-code`）。
+   * 原始代码块无论如何都会被隐藏（display:none，接管失败时恢复显示）。
+   * true = V1 行为（内联图与 sidecar 图一样带源码折叠）。
+   */
   keepSource: true,
 } as const
 
@@ -431,17 +476,60 @@ export const STORAGE_KEYS = {
   aiSidebarWidth: 'lecture-ai-sidebar-custom-width',
 
   /**
-   * AI 对话匿名用户标识（用于 Dify 侧会话归属统计）。
-   * 消费方：components/ai/useDifyChat.ts。
-   */
-  aiChatUserId: 'dify_chat_user_id',
-
-  /**
    * 本地数据仓储键前缀（LocalStorageAdapter 与 NeonRepository 共用）。
    * 实际键形如 `tut_neon_sessions_g01-l01`、`tut_neon_progress_all_map`。
    * 消费方：components/ai/neonRepository.ts。
    */
   neonPrefix: 'tut_neon_',
+
+  /**
+   * 读者层主题偏好（V2 新增；JSON：{ theme?, tint?, fontSize?, bodyFont? }）。
+   * 消费方：theme/tokens/prefs.ts（首帧 <head> 内联脚本与运行期同一份白名单）。
+   */
+  readerPrefs: 'lecture:reader-prefs',
+
+  /**
+   * 读者语言偏好（P2d 新增；值是 LangCode，如 'en' / 'zh-CN'）。
+   * 用语言切换器切换、或访问任何非根语言页面时写入；只决定根语言讲义页是否显示「未译 / 有译本」提示条，不做自动跳转。
+   * 消费方：theme/core/readerLang.ts（读写）、components/LangHint.vue、components/LangSwitch.vue。
+   */
+  readerLang: 'lecture-reader-lang',
+
+  /**
+   * 学习进度 store 的持久化状态（P3 新增；JSON：{ schema, owner, server, outbox, seedVersion, migratedV1, skewMs }）。
+   * 与 V1 的 `tut_neon_progress_*` 并存：V1 键只读不删。状态损坏时原值另存一份到 `<键>:corrupt`。
+   * 消费方：theme/progress/progressStore.ts。
+   */
+  progressV2: 'tut:v2:progress',
+
+  /**
+   * 首页速览的「展开」选择（P4a 新增；值是 'reading' | 'progress' | 'all' | 'none'）。
+   * 读者选过就用读者的，读不到时用站点默认（lecture.config.ts 的 home.atlasExpand）。
+   * 消费方：theme/map/atlas/useAtlas.ts。
+   */
+  atlasExpand: 'lecture:atlas-expand',
+
+  /**
+   * 组页关系面板里「说明」默认展开还是折叠（P4a WP-H3 新增；值是 '1'（展开，默认）或 '0'（折叠））。
+   * 读者设置，只记在本机；P6 的阅读设置面板再加入口。
+   * 消费方：theme/group/GroupPage.vue 与 components/ReaderSettingsPanel.vue。
+   */
+  groupDesc: 'lecture:group-desc',
+
+  /** 伴读自带模型（BYOK）设置（P6 新增；JSON：{ enabled, baseUrl, apiKey, model }），只存本机。 */
+  companionByok: 'lecture:companion-byok',
+
+  /** 读者导入的主题覆盖层（P6 新增；JSON：ThemeLayer），只存本机。 */
+  readerThemeLayer: 'lecture:reader-theme-layer',
+
+  /** 读者自定义底色（P6 新增；JSON：{ hue, lightness }），只存本机。 */
+  readerCustomTint: 'lecture:reader-custom-tint',
+
+  /** 首页主地图模式（F5 新增；值是 'atlas' | 'graph'），只存本机。 */
+  homeMapMode: 'lecture:home-map-mode',
+
+  /** datasheet 依赖画布板布局（F5 新增；值是 'compact' | 'zones'），只存本机。 */
+  canvasDsMode: 'lecture:canvas-ds-mode',
 } as const
 
 /**

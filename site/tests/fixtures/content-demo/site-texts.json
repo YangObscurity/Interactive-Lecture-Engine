@@ -1,0 +1,16 @@
+{
+  "zh": {
+    "name": "Fixture Content Demo",
+    "shortName": "Demo",
+    "navText": "Fixture Content Demo",
+    "tagline": "Fixture content repository for content loading verification",
+    "description": "Fixture content repository for content loading verification"
+  },
+  "en": {
+    "name": "Fixture Content Demo",
+    "shortName": "Demo",
+    "navText": "Fixture Content Demo",
+    "tagline": "Fixture content repository for content loading verification",
+    "description": "Fixture content repository for content loading verification"
+  }
+}
