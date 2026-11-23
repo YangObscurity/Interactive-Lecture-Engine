@@ -1,102 +1,125 @@
 /**
- * groups.example.mts — 现代系统架构与软件工程演示课程体系 (6 课程大系 / 12 核心讲次 / 20 交互图表)
+ * groups.example.mts — 课程组元信息结构示例与默认回退源。
+ *
+ * ────────────────────────────────────────────────────────────────────────────
+ * 设计理念与扩展机制
+ * ────────────────────────────────────────────────────────────────────────────
+ * 本文件提供课程组元信息（GroupMeta）的通用结构与占位示范。
+ *
+ * `config.mts` 按以下优先级顺序动态解析加载课程组配置：
+ *   1. `.vitepress/content-groups.mts`  ← 外部内容源通过 scripts/mount_content.py 挂载生成（推荐）
+ *   2. `.vitepress/groups.mts`          ← 本地自定义配置文件（被 .gitignore 忽略，适合单机私有配置）
+ *   3. 本文件                            ← 开箱即用兜底配置，保证独立克隆后随时可构建
+ *
+ * ────────────────────────────────────────────────────────────────────────────
+ * 自定义课程配置方式
+ * ────────────────────────────────────────────────────────────────────────────
+ * 参照本文件导出的 `GROUPS` 结构定义您的课程组，支持以下接入方式：
+ *   a. 独立内容源：在 content-sources/<名称>/groups.mts 组织内容，
+ *      通过 `python scripts/mount_content.py --mount <名称>` 接入（优先级最高）；
+ *   b. 本地独立配置：在 .vitepress/ 目录下新建 `groups.mts`（优先级次之）；
+ *   c. 直接修改本文件作为站点根配置。
+ *
+ * 完整契约见 `content/CONTENT_SOURCE.md` 与 `content-sources/README.md`。
+ *
+ * ⚠️ 讲数与图表数**不要写在这里** —— 由 config.mts 扫描目录与 charts JSON 自动统计，
+ *    避免「手写数字和实际不同步」。
  */
 
+import type { GroupI18n } from './i18n/data.ts'
+
+/** 单个课程组的元信息。字段口径与内容源契约 v1 完全一致。 */
 export type GroupMeta = {
+  /** 课程组编号（显示在卡片徽章上），如 'G01'；也用于按 `<id>-` 前缀统计图表 sidecar */
   id: string
+  /** docs 下的目录名。允许是嵌套路径（如 'examples/g01'），config.mts 直接交给 path.join */
   dir: string
+  /** 课程名（不含编号） */
   title: string
+  /** 一句话定位 */
   tagline: string
+  /** 卡片正文：这组课解决什么问题、覆盖什么 */
   summary: string
+  /** 卡片强调色（十六进制） */
   accent: string
+  /** 关键词标签 */
   tags: string[]
+  /** 临时挂载的课程组：卡片上会有「临时」标记，且永远排在最后（方便日后移除） */
   temp?: boolean
+  /** 设为 false 时不进入首页依赖画布（仍保留在速览与组卡片） */
+  map?: false
+  /**
+   * 分类（可选，纯数据）。引擎按分类在 `GROUPS` 里**首次出现的顺序**分配色槽
+   * `--lec-cat-1…8`（超过 8 类循环）；没有分类的组共用一个「未分类」色槽。`accent` 仅作覆盖。
+   * V1 忽略此字段。
+   */
+  category?: string
+  /**
+   * 多语言文案（可选，纯数据）：`title` / `tagline` / `summary` 的其它语言版本。
+   * 缺哪种语言或哪个字段，就回落根语言（上面的中文字段）。V1 忽略此字段。
+   */
+  i18n?: GroupI18n
 }
 
-export const SITE_META = {
-  name: '现代系统架构与工程体系',
-  text: '可交互工程讲义引擎 · 演示系统',
-  tagline: '从底层微架构、现代语言运行时与网络协议，到分布式共识、高性能存储与云原生可观测性 —— 原生可交互式知识演进网络',
-} as const
-
-export const SITE_FEATURES: { title: string; details: string }[] = [
-  {
-    title: '图表原生可交互',
-    details: '内联视图只看不操作：点一下图表即进入全屏放大，无缝自适应整幅；缩放与拖动在全屏层进行。ECharts 悬停看数值、点图例开关数据线，WaveDrom 时钟沿对齐。',
-  },
-  {
-    title: '沉浸式阅读',
-    details: '一键收起导航与大纲，版心放宽、行距上调；状态本地记忆，跨页面自动保持。',
-  },
-  {
-    title: '构建期 KaTeX 公式',
-    details: 'LaTeX 在构建期由 KaTeX 渲染成 HTML，首屏零闪烁；点击公式直接复制 TeX 源码。',
-  },
-  {
-    title: '出版级打印导出',
-    details: '右上角常驻导出浮层，支持 A4 跨页防截断多页 PDF 与超长全景 Canvas 切片导出。',
-  },
-  {
-    title: '内容与引擎物理解耦',
-    details: '引擎只带结构，讲义放置于独立内容源按需挂载；同一套引擎承载任意学科，私有数据绝不入库。',
-  },
-]
-
+/**
+ * 默认课程组：**两个通用的虚构示例**（freely-invented placeholder），
+ * 用来演示 `GroupMeta` 的两种典型形态：
+ *
+ *   · 组 1 —— 普通课程组的完整字段（含 `tags`）；`dir` 指向引擎自带的示例讲义目录
+ *     `site/docs/examples/g01/`，所以开源后**点进去是有内容的**（演示讲义 EX-L01）。
+ *   · 组 2 —— 演示 `dir` 允许是**嵌套路径**，以及 `temp: true` 的临时组行为
+ *     （排最后 + 卡片上加「临时」标记）。它的目录在开源版里并不存在，
+ *     引擎对此**天然降级**：`scanLectures()` 扫不到 `L*.md` 就返回空数组，
+ *     组内页照常渲染、只是讲次表为空 —— **不会报错，也不会阻断构建**。
+ *
+ * 换成你自己的课程时，把这里的条目整段替换掉即可。
+ */
 export const GROUPS: GroupMeta[] = [
   {
     id: 'G01',
     dir: 'examples/g01',
-    title: '计算机组成与系统底层',
-    tagline: 'CPU 微架构、缓存层次与内存屏障',
-    summary: '从物理门电路与时序逻辑，深入现代多核处理器缓存一致性（MESI）、虚拟内存多级页表推演与分支预测器工作机制，建立软硬件协同的底层系统心智模型。',
-    accent: '#2563EB',
-    tags: ["计算机组成", "CPU微架构", "MESI协议", "虚拟内存"],
+    title: '示例课程',
+    tagline: '引擎自带的原创最小示例',
+    summary:
+      '一个刻意做小的示例课程组：用一件最朴素的工程事，演示本引擎的全部核心特性 —— 三类原生可交互图表（mermaid / echarts / wavedrom）、构建期 LaTeX 公式、.cite 引用胶囊、代码高亮，以及「下一讲预告」收尾契约。示例正文完全原创，供第三方照此结构装入自己的课程。',
+    accent: '#3B82F6',
+    tags: ['示例内容源', '原创', '引擎特性演示'],
+    i18n: {
+      en: {
+        title: 'Example course',
+        tagline: 'A small, original example shipped with the engine',
+        summary:
+          'A deliberately small example course group. It uses one plain engineering task to show every core feature of the engine: three kinds of native interactive charts (mermaid / echarts / wavedrom), build-time LaTeX formulas, .cite citation capsules, code highlighting, and the closing "next lecture preview" contract. The text is entirely original, so third parties can follow the same structure when loading their own course.',
+      },
+    },
   },
   {
     id: 'G02',
-    dir: 'examples/g02',
-    title: '现代语言运行时与并发工程',
-    tagline: '协程调度、垃圾回收与内存模型',
-    summary: '剖析现代高性能系统语言运行时的内部机理，涵盖 M:N 协程调度器（Work-Stealing）、分代并发垃圾回收（三色标记法）以及内存屏障与无锁数据结构。',
-    accent: '#7C3AED',
-    tags: ["语言运行时", "GMP调度", "并发编程", "三色标记GC"],
-  },
-  {
-    id: 'G03',
-    dir: 'examples/g03',
-    title: '高性能网络与传输协议',
-    tagline: '传输层演进、QUIC 协议与拥塞控制',
-    summary: '从经典 TCP 三次握手与四次挥手状态机出发，深入现代基于 UDP 的 QUIC 单往返建连、连接迁移特性，并对 BBR 与 CUBIC 拥塞控制算法展开数学建模与吞吐推演。',
-    accent: '#059669',
-    tags: ["网络协议栈", "QUIC协议", "BBR算法", "全双工通信"],
-  },
-  {
-    id: 'G04',
-    dir: 'examples/g04',
-    title: '分布式共识与容错架构',
-    tagline: 'Raft 状态机、分布式事务与租约机制',
-    summary: '系统探讨在不可靠网络环境下实现强一致性共识的核心算法：Raft 领导者选举与日志复制、分布式两阶段提交（2PC/3PC）以及分布式锁与租约安全保证。',
-    accent: '#D97706',
-    tags: ["分布式系统", "Raft共识", "CAP定理", "两阶段提交"],
-  },
-  {
-    id: 'G05',
-    dir: 'examples/g05',
-    title: '高性能存储引擎与索引结构',
-    tagline: 'LSM 树、B+ 树与分层存储架构',
-    summary: '对比现代主流存储引擎的底层索引结构：面向写优化的 LSM 树（MemTable/SSTable 压缩与布隆过滤器）与面向读优化的 B+ 树并发分裂控制，量化分析写放大与读放大权衡。',
-    accent: '#DC2626',
-    tags: ["存储引擎", "LSM-Tree", "B+树", "写放大分析"],
-  },
-  {
-    id: 'G06',
-    dir: 'examples/g06',
-    title: '云原生网格与全链路可观测性',
-    tagline: 'eBPF 内核探测、服务网格与可观测性',
-    summary: '探索现代云原生基础设施观测底座：利用 eBPF 技术在 Linux 内核层实现无侵入性能剖析，结合 W3C TraceContext 与 OpenTelemetry 规范构建微服务分布式追踪链路。',
-    accent: '#0891B2',
-    tags: ["云原生", "eBPF", "服务网格", "分布式追踪"],
+    dir: 'examples/nested/group-b',
+    title: '进阶示例（嵌套目录）',
+    tagline: '演示嵌套 dir 与临时挂载标记',
+    summary:
+      '第二个占位课程组，只为一件事存在：演示 `dir` 可以是嵌套路径（如 `examples/nested/group-b`），以及 `temp: true` 的临时组会被排到最末并标注「临时」。它的讲义目录在本仓库中并不存在，引擎扫不到讲义时组内页照常渲染、仅讲次表为空 —— 用来说明「目录缺失不阻断构建」。请整段替换为你自己的课程组。',
+    accent: '#8B5CF6',
+    tags: ['占位示例', '嵌套路径', '临时组'],
+    temp: true,
+    i18n: {
+      en: {
+        title: 'Advanced example (nested directory)',
+        tagline: 'Shows a nested dir and the temporary-mount marker',
+        summary:
+          'A second placeholder course group that exists for one reason: to show that `dir` may be a nested path (such as `examples/nested/group-b`), and that a group with `temp: true` is sorted last and marked as temporary. Its lecture directory does not exist in this repository; when the engine finds no lectures, the group page still renders with an empty lecture table, which shows that a missing directory does not block the build. Replace this whole entry with your own course group.',
+      },
+    },
   },
 ]
 
+/**
+ * 兼容别名。
+ *
+ * 引擎侧的规范名是 `GROUPS`；而内容源契约（content/CONTENT_SOURCE.md §3.1）
+ * 与 `site/docs/examples/groups.mts` 用的是 `GROUP_META`。两个名字都导出，
+ * 让「本文件 / 本地 groups.mts / 挂载来的 content-groups.mts」三种来源
+ * 具有**完全一致的消费口径**，config.mts 的解析逻辑因此不必为来源分支。
+ */
 export const GROUP_META: GroupMeta[] = GROUPS

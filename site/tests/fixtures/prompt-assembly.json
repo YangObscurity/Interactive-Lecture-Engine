@@ -1,0 +1,1005 @@
+{
+  "note": "Golden fixture shared by site/tests/unit/ai-prompts.test.ts and server/tests/unit/prompts.test.ts. Server proxy and browser BYOK must assemble exactly these messages. Regenerate only on purpose and review the diff.",
+  "prompts": {
+    "version": 7,
+    "system": {
+      "zh": "你是讲义伴读助手。只依据给定的讲义上下文回答，超出范围时直接说明。",
+      "en": "You are a lecture reading companion. Answer only from the supplied lecture context and say so when a question is outside it."
+    },
+    "actions": [
+      {
+        "id": "explain",
+        "label": {
+          "zh": "解释这段",
+          "en": "Explain this passage"
+        },
+        "template": {
+          "zh": "讲义 {lecture}（{group}），小节 {outline}。请解释这段选文：\n\n{selection}",
+          "en": "Lecture {lecture} ({group}), section {outline}. Explain this passage:\n\n{selection}"
+        },
+        "needsSelection": true,
+        "surfaces": [
+          "panel",
+          "menu"
+        ],
+        "enabled": true
+      },
+      {
+        "id": "quiz",
+        "label": {
+          "zh": "出一道自测题",
+          "en": "Make a self-test question"
+        },
+        "template": {
+          "zh": "围绕 {lecture} 的小节 {outline} 出一道自测题。",
+          "en": "Write one self-test question on section {outline} of {lecture}."
+        },
+        "needsSelection": false,
+        "surfaces": [
+          "panel"
+        ],
+        "enabled": true
+      },
+      {
+        "id": "retired",
+        "label": {
+          "zh": "已停用",
+          "en": "Retired"
+        },
+        "template": {
+          "zh": "停用动作 {lecture}",
+          "en": "Retired action {lecture}"
+        },
+        "needsSelection": false,
+        "surfaces": [
+          "menu"
+        ],
+        "enabled": false
+      }
+    ]
+  },
+  "cases": [
+    {
+      "name": "action with selection (zh)",
+      "lang": "zh",
+      "action": "explain",
+      "query": "",
+      "inputs": {
+        "current_lecture": "G05-L19 Joins",
+        "group": "G05 SQL",
+        "outline": "LEFT JOIN filtering",
+        "selection": "WHERE filters after the join completes {lecture}"
+      },
+      "history": [
+        {
+          "role": "user",
+          "content": "Start with foreign keys."
+        },
+        {
+          "role": "assistant",
+          "content": "A foreign key only checks references."
+        }
+      ],
+      "expect": {
+        "openai": [
+          {
+            "role": "system",
+            "content": "你是讲义伴读助手。只依据给定的讲义上下文回答，超出范围时直接说明。\n\nLecture: G05-L19 Joins\n\nGroup: G05 SQL\n\nContext:\nLEFT JOIN filtering\n\nSelection:\nWHERE filters after the join completes {lecture}"
+          },
+          {
+            "role": "user",
+            "content": "Start with foreign keys."
+          },
+          {
+            "role": "assistant",
+            "content": "A foreign key only checks references."
+          },
+          {
+            "role": "user",
+            "content": "讲义 G05-L19 Joins（G05 SQL），小节 LEFT JOIN filtering。请解释这段选文：\n\nWHERE filters after the join completes {lecture}"
+          }
+        ],
+        "dify": {
+          "query": "[Site Instructions v7]\n你是讲义伴读助手。只依据给定的讲义上下文回答，超出范围时直接说明。\n\n[User Request]\n讲义 G05-L19 Joins（G05 SQL），小节 LEFT JOIN filtering。请解释这段选文：\n\nWHERE filters after the join completes {lecture}",
+          "inputs": {
+            "current_lecture": "G05-L19 Joins",
+            "group": "G05 SQL",
+            "outline": "LEFT JOIN filtering",
+            "selection": "WHERE filters after the join completes {lecture}"
+          }
+        },
+        "actionId": "explain"
+      }
+    },
+    {
+      "name": "action with selection and follow-up question (zh)",
+      "lang": "zh",
+      "action": "explain",
+      "query": "Is the order of clauses relevant?",
+      "inputs": {
+        "current_lecture": "G05-L19 Joins",
+        "group": "G05 SQL",
+        "outline": "LEFT JOIN filtering",
+        "selection": "WHERE filters after the join completes {lecture}"
+      },
+      "history": [
+        {
+          "role": "user",
+          "content": "Start with foreign keys."
+        },
+        {
+          "role": "assistant",
+          "content": "A foreign key only checks references."
+        }
+      ],
+      "expect": {
+        "openai": [
+          {
+            "role": "system",
+            "content": "你是讲义伴读助手。只依据给定的讲义上下文回答，超出范围时直接说明。\n\nLecture: G05-L19 Joins\n\nGroup: G05 SQL\n\nContext:\nLEFT JOIN filtering\n\nSelection:\nWHERE filters after the join completes {lecture}"
+          },
+          {
+            "role": "user",
+            "content": "Start with foreign keys."
+          },
+          {
+            "role": "assistant",
+            "content": "A foreign key only checks references."
+          },
+          {
+            "role": "user",
+            "content": "讲义 G05-L19 Joins（G05 SQL），小节 LEFT JOIN filtering。请解释这段选文：\n\nWHERE filters after the join completes {lecture}\n\nIs the order of clauses relevant?"
+          }
+        ],
+        "dify": {
+          "query": "[Site Instructions v7]\n你是讲义伴读助手。只依据给定的讲义上下文回答，超出范围时直接说明。\n\n[User Request]\n讲义 G05-L19 Joins（G05 SQL），小节 LEFT JOIN filtering。请解释这段选文：\n\nWHERE filters after the join completes {lecture}\n\nIs the order of clauses relevant?",
+          "inputs": {
+            "current_lecture": "G05-L19 Joins",
+            "group": "G05 SQL",
+            "outline": "LEFT JOIN filtering",
+            "selection": "WHERE filters after the join completes {lecture}"
+          }
+        },
+        "actionId": "explain"
+      }
+    },
+    {
+      "name": "action needing a selection, none given (zh)",
+      "lang": "zh",
+      "action": "explain",
+      "query": "",
+      "inputs": {
+        "current_lecture": "G05-L19 Joins",
+        "group": "G05 SQL",
+        "outline": "LEFT JOIN filtering"
+      },
+      "history": [
+        {
+          "role": "user",
+          "content": "Start with foreign keys."
+        },
+        {
+          "role": "assistant",
+          "content": "A foreign key only checks references."
+        }
+      ],
+      "expect": {
+        "error": "selection_required"
+      }
+    },
+    {
+      "name": "selection sentinel counts as no selection (zh)",
+      "lang": "zh",
+      "action": "explain",
+      "query": "",
+      "inputs": {
+        "current_lecture": "G05-L19 Joins",
+        "group": "G05 SQL",
+        "outline": "LEFT JOIN filtering",
+        "selection": "None"
+      },
+      "history": [
+        {
+          "role": "user",
+          "content": "Start with foreign keys."
+        },
+        {
+          "role": "assistant",
+          "content": "A foreign key only checks references."
+        }
+      ],
+      "expect": {
+        "error": "selection_required"
+      }
+    },
+    {
+      "name": "action without selection requirement (zh)",
+      "lang": "zh",
+      "action": "quiz",
+      "query": "",
+      "inputs": {
+        "current_lecture": "G05-L19 Joins",
+        "group": "G05 SQL",
+        "outline": "LEFT JOIN filtering"
+      },
+      "history": [
+        {
+          "role": "user",
+          "content": "Start with foreign keys."
+        },
+        {
+          "role": "assistant",
+          "content": "A foreign key only checks references."
+        }
+      ],
+      "expect": {
+        "openai": [
+          {
+            "role": "system",
+            "content": "你是讲义伴读助手。只依据给定的讲义上下文回答，超出范围时直接说明。\n\nLecture: G05-L19 Joins\n\nGroup: G05 SQL\n\nContext:\nLEFT JOIN filtering"
+          },
+          {
+            "role": "user",
+            "content": "Start with foreign keys."
+          },
+          {
+            "role": "assistant",
+            "content": "A foreign key only checks references."
+          },
+          {
+            "role": "user",
+            "content": "围绕 G05-L19 Joins 的小节 LEFT JOIN filtering 出一道自测题。"
+          }
+        ],
+        "dify": {
+          "query": "[Site Instructions v7]\n你是讲义伴读助手。只依据给定的讲义上下文回答，超出范围时直接说明。\n\n[User Request]\n围绕 G05-L19 Joins 的小节 LEFT JOIN filtering 出一道自测题。",
+          "inputs": {
+            "current_lecture": "G05-L19 Joins",
+            "group": "G05 SQL",
+            "outline": "LEFT JOIN filtering"
+          }
+        },
+        "actionId": "quiz"
+      }
+    },
+    {
+      "name": "action without selection, selection present (zh)",
+      "lang": "zh",
+      "action": "quiz",
+      "query": "",
+      "inputs": {
+        "current_lecture": "G05-L19 Joins",
+        "group": "G05 SQL",
+        "outline": "LEFT JOIN filtering",
+        "selection": "WHERE filters after the join completes {lecture}"
+      },
+      "history": [
+        {
+          "role": "user",
+          "content": "Start with foreign keys."
+        },
+        {
+          "role": "assistant",
+          "content": "A foreign key only checks references."
+        }
+      ],
+      "expect": {
+        "openai": [
+          {
+            "role": "system",
+            "content": "你是讲义伴读助手。只依据给定的讲义上下文回答，超出范围时直接说明。\n\nLecture: G05-L19 Joins\n\nGroup: G05 SQL\n\nContext:\nLEFT JOIN filtering\n\nSelection:\nWHERE filters after the join completes {lecture}"
+          },
+          {
+            "role": "user",
+            "content": "Start with foreign keys."
+          },
+          {
+            "role": "assistant",
+            "content": "A foreign key only checks references."
+          },
+          {
+            "role": "user",
+            "content": "围绕 G05-L19 Joins 的小节 LEFT JOIN filtering 出一道自测题。"
+          }
+        ],
+        "dify": {
+          "query": "[Site Instructions v7]\n你是讲义伴读助手。只依据给定的讲义上下文回答，超出范围时直接说明。\n\n[User Request]\n围绕 G05-L19 Joins 的小节 LEFT JOIN filtering 出一道自测题。",
+          "inputs": {
+            "current_lecture": "G05-L19 Joins",
+            "group": "G05 SQL",
+            "outline": "LEFT JOIN filtering",
+            "selection": "WHERE filters after the join completes {lecture}"
+          }
+        },
+        "actionId": "quiz"
+      }
+    },
+    {
+      "name": "plain question, no action (zh)",
+      "lang": "zh",
+      "action": "",
+      "query": "What does LEFT JOIN keep?",
+      "inputs": {
+        "current_lecture": "G05-L19 Joins",
+        "group": "G05 SQL",
+        "outline": "LEFT JOIN filtering"
+      },
+      "history": [
+        {
+          "role": "user",
+          "content": "Start with foreign keys."
+        },
+        {
+          "role": "assistant",
+          "content": "A foreign key only checks references."
+        }
+      ],
+      "expect": {
+        "openai": [
+          {
+            "role": "system",
+            "content": "你是讲义伴读助手。只依据给定的讲义上下文回答，超出范围时直接说明。\n\nLecture: G05-L19 Joins\n\nGroup: G05 SQL\n\nContext:\nLEFT JOIN filtering"
+          },
+          {
+            "role": "user",
+            "content": "Start with foreign keys."
+          },
+          {
+            "role": "assistant",
+            "content": "A foreign key only checks references."
+          },
+          {
+            "role": "user",
+            "content": "What does LEFT JOIN keep?"
+          }
+        ],
+        "dify": {
+          "query": "[Site Instructions v7]\n你是讲义伴读助手。只依据给定的讲义上下文回答，超出范围时直接说明。\n\n[User Request]\nWhat does LEFT JOIN keep?",
+          "inputs": {
+            "current_lecture": "G05-L19 Joins",
+            "group": "G05 SQL",
+            "outline": "LEFT JOIN filtering"
+          }
+        },
+        "actionId": null
+      }
+    },
+    {
+      "name": "plain question with selection (zh)",
+      "lang": "zh",
+      "action": "",
+      "query": "What does this mean?",
+      "inputs": {
+        "current_lecture": "G05-L19 Joins",
+        "group": "G05 SQL",
+        "outline": "LEFT JOIN filtering",
+        "selection": "WHERE filters after the join completes {lecture}"
+      },
+      "history": [
+        {
+          "role": "user",
+          "content": "Start with foreign keys."
+        },
+        {
+          "role": "assistant",
+          "content": "A foreign key only checks references."
+        }
+      ],
+      "expect": {
+        "openai": [
+          {
+            "role": "system",
+            "content": "你是讲义伴读助手。只依据给定的讲义上下文回答，超出范围时直接说明。\n\nLecture: G05-L19 Joins\n\nGroup: G05 SQL\n\nContext:\nLEFT JOIN filtering\n\nSelection:\nWHERE filters after the join completes {lecture}"
+          },
+          {
+            "role": "user",
+            "content": "Start with foreign keys."
+          },
+          {
+            "role": "assistant",
+            "content": "A foreign key only checks references."
+          },
+          {
+            "role": "user",
+            "content": "What does this mean?"
+          }
+        ],
+        "dify": {
+          "query": "[Site Instructions v7]\n你是讲义伴读助手。只依据给定的讲义上下文回答，超出范围时直接说明。\n\n[User Request]\nWhat does this mean?",
+          "inputs": {
+            "current_lecture": "G05-L19 Joins",
+            "group": "G05 SQL",
+            "outline": "LEFT JOIN filtering",
+            "selection": "WHERE filters after the join completes {lecture}"
+          }
+        },
+        "actionId": null
+      }
+    },
+    {
+      "name": "plain question, no context at all (zh)",
+      "lang": "zh",
+      "action": "",
+      "query": "Hello",
+      "inputs": {},
+      "history": [
+        {
+          "role": "user",
+          "content": "Start with foreign keys."
+        },
+        {
+          "role": "assistant",
+          "content": "A foreign key only checks references."
+        }
+      ],
+      "expect": {
+        "openai": [
+          {
+            "role": "system",
+            "content": "你是讲义伴读助手。只依据给定的讲义上下文回答，超出范围时直接说明。"
+          },
+          {
+            "role": "user",
+            "content": "Start with foreign keys."
+          },
+          {
+            "role": "assistant",
+            "content": "A foreign key only checks references."
+          },
+          {
+            "role": "user",
+            "content": "Hello"
+          }
+        ],
+        "dify": {
+          "query": "[Site Instructions v7]\n你是讲义伴读助手。只依据给定的讲义上下文回答，超出范围时直接说明。\n\n[User Request]\nHello",
+          "inputs": {}
+        },
+        "actionId": null
+      }
+    },
+    {
+      "name": "disabled action is unknown (zh)",
+      "lang": "zh",
+      "action": "retired",
+      "query": "",
+      "inputs": {
+        "current_lecture": "G05-L19 Joins",
+        "group": "G05 SQL",
+        "outline": "LEFT JOIN filtering"
+      },
+      "history": [
+        {
+          "role": "user",
+          "content": "Start with foreign keys."
+        },
+        {
+          "role": "assistant",
+          "content": "A foreign key only checks references."
+        }
+      ],
+      "expect": {
+        "error": "unknown_action"
+      }
+    },
+    {
+      "name": "unknown action (zh)",
+      "lang": "zh",
+      "action": "nope",
+      "query": "x",
+      "inputs": {
+        "current_lecture": "G05-L19 Joins",
+        "group": "G05 SQL",
+        "outline": "LEFT JOIN filtering"
+      },
+      "history": [
+        {
+          "role": "user",
+          "content": "Start with foreign keys."
+        },
+        {
+          "role": "assistant",
+          "content": "A foreign key only checks references."
+        }
+      ],
+      "expect": {
+        "error": "unknown_action"
+      }
+    },
+    {
+      "name": "empty question and no action (zh)",
+      "lang": "zh",
+      "action": "",
+      "query": "   ",
+      "inputs": {
+        "current_lecture": "G05-L19 Joins",
+        "group": "G05 SQL",
+        "outline": "LEFT JOIN filtering"
+      },
+      "history": [
+        {
+          "role": "user",
+          "content": "Start with foreign keys."
+        },
+        {
+          "role": "assistant",
+          "content": "A foreign key only checks references."
+        }
+      ],
+      "expect": {
+        "error": "empty_query"
+      }
+    },
+    {
+      "name": "action with selection (en)",
+      "lang": "en",
+      "action": "explain",
+      "query": "",
+      "inputs": {
+        "current_lecture": "G05-L19 Joins",
+        "group": "G05 SQL",
+        "outline": "LEFT JOIN filtering",
+        "selection": "WHERE filters after the join completes {lecture}"
+      },
+      "history": [
+        {
+          "role": "user",
+          "content": "Start with foreign keys."
+        },
+        {
+          "role": "assistant",
+          "content": "A foreign key only checks references."
+        }
+      ],
+      "expect": {
+        "openai": [
+          {
+            "role": "system",
+            "content": "You are a lecture reading companion. Answer only from the supplied lecture context and say so when a question is outside it.\n\nLecture: G05-L19 Joins\n\nGroup: G05 SQL\n\nContext:\nLEFT JOIN filtering\n\nSelection:\nWHERE filters after the join completes {lecture}"
+          },
+          {
+            "role": "user",
+            "content": "Start with foreign keys."
+          },
+          {
+            "role": "assistant",
+            "content": "A foreign key only checks references."
+          },
+          {
+            "role": "user",
+            "content": "Lecture G05-L19 Joins (G05 SQL), section LEFT JOIN filtering. Explain this passage:\n\nWHERE filters after the join completes {lecture}"
+          }
+        ],
+        "dify": {
+          "query": "[Site Instructions v7]\nYou are a lecture reading companion. Answer only from the supplied lecture context and say so when a question is outside it.\n\n[User Request]\nLecture G05-L19 Joins (G05 SQL), section LEFT JOIN filtering. Explain this passage:\n\nWHERE filters after the join completes {lecture}",
+          "inputs": {
+            "current_lecture": "G05-L19 Joins",
+            "group": "G05 SQL",
+            "outline": "LEFT JOIN filtering",
+            "selection": "WHERE filters after the join completes {lecture}"
+          }
+        },
+        "actionId": "explain"
+      }
+    },
+    {
+      "name": "action with selection and follow-up question (en)",
+      "lang": "en",
+      "action": "explain",
+      "query": "Is the order of clauses relevant?",
+      "inputs": {
+        "current_lecture": "G05-L19 Joins",
+        "group": "G05 SQL",
+        "outline": "LEFT JOIN filtering",
+        "selection": "WHERE filters after the join completes {lecture}"
+      },
+      "history": [
+        {
+          "role": "user",
+          "content": "Start with foreign keys."
+        },
+        {
+          "role": "assistant",
+          "content": "A foreign key only checks references."
+        }
+      ],
+      "expect": {
+        "openai": [
+          {
+            "role": "system",
+            "content": "You are a lecture reading companion. Answer only from the supplied lecture context and say so when a question is outside it.\n\nLecture: G05-L19 Joins\n\nGroup: G05 SQL\n\nContext:\nLEFT JOIN filtering\n\nSelection:\nWHERE filters after the join completes {lecture}"
+          },
+          {
+            "role": "user",
+            "content": "Start with foreign keys."
+          },
+          {
+            "role": "assistant",
+            "content": "A foreign key only checks references."
+          },
+          {
+            "role": "user",
+            "content": "Lecture G05-L19 Joins (G05 SQL), section LEFT JOIN filtering. Explain this passage:\n\nWHERE filters after the join completes {lecture}\n\nIs the order of clauses relevant?"
+          }
+        ],
+        "dify": {
+          "query": "[Site Instructions v7]\nYou are a lecture reading companion. Answer only from the supplied lecture context and say so when a question is outside it.\n\n[User Request]\nLecture G05-L19 Joins (G05 SQL), section LEFT JOIN filtering. Explain this passage:\n\nWHERE filters after the join completes {lecture}\n\nIs the order of clauses relevant?",
+          "inputs": {
+            "current_lecture": "G05-L19 Joins",
+            "group": "G05 SQL",
+            "outline": "LEFT JOIN filtering",
+            "selection": "WHERE filters after the join completes {lecture}"
+          }
+        },
+        "actionId": "explain"
+      }
+    },
+    {
+      "name": "action needing a selection, none given (en)",
+      "lang": "en",
+      "action": "explain",
+      "query": "",
+      "inputs": {
+        "current_lecture": "G05-L19 Joins",
+        "group": "G05 SQL",
+        "outline": "LEFT JOIN filtering"
+      },
+      "history": [
+        {
+          "role": "user",
+          "content": "Start with foreign keys."
+        },
+        {
+          "role": "assistant",
+          "content": "A foreign key only checks references."
+        }
+      ],
+      "expect": {
+        "error": "selection_required"
+      }
+    },
+    {
+      "name": "selection sentinel counts as no selection (en)",
+      "lang": "en",
+      "action": "explain",
+      "query": "",
+      "inputs": {
+        "current_lecture": "G05-L19 Joins",
+        "group": "G05 SQL",
+        "outline": "LEFT JOIN filtering",
+        "selection": "None"
+      },
+      "history": [
+        {
+          "role": "user",
+          "content": "Start with foreign keys."
+        },
+        {
+          "role": "assistant",
+          "content": "A foreign key only checks references."
+        }
+      ],
+      "expect": {
+        "error": "selection_required"
+      }
+    },
+    {
+      "name": "action without selection requirement (en)",
+      "lang": "en",
+      "action": "quiz",
+      "query": "",
+      "inputs": {
+        "current_lecture": "G05-L19 Joins",
+        "group": "G05 SQL",
+        "outline": "LEFT JOIN filtering"
+      },
+      "history": [
+        {
+          "role": "user",
+          "content": "Start with foreign keys."
+        },
+        {
+          "role": "assistant",
+          "content": "A foreign key only checks references."
+        }
+      ],
+      "expect": {
+        "openai": [
+          {
+            "role": "system",
+            "content": "You are a lecture reading companion. Answer only from the supplied lecture context and say so when a question is outside it.\n\nLecture: G05-L19 Joins\n\nGroup: G05 SQL\n\nContext:\nLEFT JOIN filtering"
+          },
+          {
+            "role": "user",
+            "content": "Start with foreign keys."
+          },
+          {
+            "role": "assistant",
+            "content": "A foreign key only checks references."
+          },
+          {
+            "role": "user",
+            "content": "Write one self-test question on section LEFT JOIN filtering of G05-L19 Joins."
+          }
+        ],
+        "dify": {
+          "query": "[Site Instructions v7]\nYou are a lecture reading companion. Answer only from the supplied lecture context and say so when a question is outside it.\n\n[User Request]\nWrite one self-test question on section LEFT JOIN filtering of G05-L19 Joins.",
+          "inputs": {
+            "current_lecture": "G05-L19 Joins",
+            "group": "G05 SQL",
+            "outline": "LEFT JOIN filtering"
+          }
+        },
+        "actionId": "quiz"
+      }
+    },
+    {
+      "name": "action without selection, selection present (en)",
+      "lang": "en",
+      "action": "quiz",
+      "query": "",
+      "inputs": {
+        "current_lecture": "G05-L19 Joins",
+        "group": "G05 SQL",
+        "outline": "LEFT JOIN filtering",
+        "selection": "WHERE filters after the join completes {lecture}"
+      },
+      "history": [
+        {
+          "role": "user",
+          "content": "Start with foreign keys."
+        },
+        {
+          "role": "assistant",
+          "content": "A foreign key only checks references."
+        }
+      ],
+      "expect": {
+        "openai": [
+          {
+            "role": "system",
+            "content": "You are a lecture reading companion. Answer only from the supplied lecture context and say so when a question is outside it.\n\nLecture: G05-L19 Joins\n\nGroup: G05 SQL\n\nContext:\nLEFT JOIN filtering\n\nSelection:\nWHERE filters after the join completes {lecture}"
+          },
+          {
+            "role": "user",
+            "content": "Start with foreign keys."
+          },
+          {
+            "role": "assistant",
+            "content": "A foreign key only checks references."
+          },
+          {
+            "role": "user",
+            "content": "Write one self-test question on section LEFT JOIN filtering of G05-L19 Joins."
+          }
+        ],
+        "dify": {
+          "query": "[Site Instructions v7]\nYou are a lecture reading companion. Answer only from the supplied lecture context and say so when a question is outside it.\n\n[User Request]\nWrite one self-test question on section LEFT JOIN filtering of G05-L19 Joins.",
+          "inputs": {
+            "current_lecture": "G05-L19 Joins",
+            "group": "G05 SQL",
+            "outline": "LEFT JOIN filtering",
+            "selection": "WHERE filters after the join completes {lecture}"
+          }
+        },
+        "actionId": "quiz"
+      }
+    },
+    {
+      "name": "plain question, no action (en)",
+      "lang": "en",
+      "action": "",
+      "query": "What does LEFT JOIN keep?",
+      "inputs": {
+        "current_lecture": "G05-L19 Joins",
+        "group": "G05 SQL",
+        "outline": "LEFT JOIN filtering"
+      },
+      "history": [
+        {
+          "role": "user",
+          "content": "Start with foreign keys."
+        },
+        {
+          "role": "assistant",
+          "content": "A foreign key only checks references."
+        }
+      ],
+      "expect": {
+        "openai": [
+          {
+            "role": "system",
+            "content": "You are a lecture reading companion. Answer only from the supplied lecture context and say so when a question is outside it.\n\nLecture: G05-L19 Joins\n\nGroup: G05 SQL\n\nContext:\nLEFT JOIN filtering"
+          },
+          {
+            "role": "user",
+            "content": "Start with foreign keys."
+          },
+          {
+            "role": "assistant",
+            "content": "A foreign key only checks references."
+          },
+          {
+            "role": "user",
+            "content": "What does LEFT JOIN keep?"
+          }
+        ],
+        "dify": {
+          "query": "[Site Instructions v7]\nYou are a lecture reading companion. Answer only from the supplied lecture context and say so when a question is outside it.\n\n[User Request]\nWhat does LEFT JOIN keep?",
+          "inputs": {
+            "current_lecture": "G05-L19 Joins",
+            "group": "G05 SQL",
+            "outline": "LEFT JOIN filtering"
+          }
+        },
+        "actionId": null
+      }
+    },
+    {
+      "name": "plain question with selection (en)",
+      "lang": "en",
+      "action": "",
+      "query": "What does this mean?",
+      "inputs": {
+        "current_lecture": "G05-L19 Joins",
+        "group": "G05 SQL",
+        "outline": "LEFT JOIN filtering",
+        "selection": "WHERE filters after the join completes {lecture}"
+      },
+      "history": [
+        {
+          "role": "user",
+          "content": "Start with foreign keys."
+        },
+        {
+          "role": "assistant",
+          "content": "A foreign key only checks references."
+        }
+      ],
+      "expect": {
+        "openai": [
+          {
+            "role": "system",
+            "content": "You are a lecture reading companion. Answer only from the supplied lecture context and say so when a question is outside it.\n\nLecture: G05-L19 Joins\n\nGroup: G05 SQL\n\nContext:\nLEFT JOIN filtering\n\nSelection:\nWHERE filters after the join completes {lecture}"
+          },
+          {
+            "role": "user",
+            "content": "Start with foreign keys."
+          },
+          {
+            "role": "assistant",
+            "content": "A foreign key only checks references."
+          },
+          {
+            "role": "user",
+            "content": "What does this mean?"
+          }
+        ],
+        "dify": {
+          "query": "[Site Instructions v7]\nYou are a lecture reading companion. Answer only from the supplied lecture context and say so when a question is outside it.\n\n[User Request]\nWhat does this mean?",
+          "inputs": {
+            "current_lecture": "G05-L19 Joins",
+            "group": "G05 SQL",
+            "outline": "LEFT JOIN filtering",
+            "selection": "WHERE filters after the join completes {lecture}"
+          }
+        },
+        "actionId": null
+      }
+    },
+    {
+      "name": "plain question, no context at all (en)",
+      "lang": "en",
+      "action": "",
+      "query": "Hello",
+      "inputs": {},
+      "history": [
+        {
+          "role": "user",
+          "content": "Start with foreign keys."
+        },
+        {
+          "role": "assistant",
+          "content": "A foreign key only checks references."
+        }
+      ],
+      "expect": {
+        "openai": [
+          {
+            "role": "system",
+            "content": "You are a lecture reading companion. Answer only from the supplied lecture context and say so when a question is outside it."
+          },
+          {
+            "role": "user",
+            "content": "Start with foreign keys."
+          },
+          {
+            "role": "assistant",
+            "content": "A foreign key only checks references."
+          },
+          {
+            "role": "user",
+            "content": "Hello"
+          }
+        ],
+        "dify": {
+          "query": "[Site Instructions v7]\nYou are a lecture reading companion. Answer only from the supplied lecture context and say so when a question is outside it.\n\n[User Request]\nHello",
+          "inputs": {}
+        },
+        "actionId": null
+      }
+    },
+    {
+      "name": "disabled action is unknown (en)",
+      "lang": "en",
+      "action": "retired",
+      "query": "",
+      "inputs": {
+        "current_lecture": "G05-L19 Joins",
+        "group": "G05 SQL",
+        "outline": "LEFT JOIN filtering"
+      },
+      "history": [
+        {
+          "role": "user",
+          "content": "Start with foreign keys."
+        },
+        {
+          "role": "assistant",
+          "content": "A foreign key only checks references."
+        }
+      ],
+      "expect": {
+        "error": "unknown_action"
+      }
+    },
+    {
+      "name": "unknown action (en)",
+      "lang": "en",
+      "action": "nope",
+      "query": "x",
+      "inputs": {
+        "current_lecture": "G05-L19 Joins",
+        "group": "G05 SQL",
+        "outline": "LEFT JOIN filtering"
+      },
+      "history": [
+        {
+          "role": "user",
+          "content": "Start with foreign keys."
+        },
+        {
+          "role": "assistant",
+          "content": "A foreign key only checks references."
+        }
+      ],
+      "expect": {
+        "error": "unknown_action"
+      }
+    },
+    {
+      "name": "empty question and no action (en)",
+      "lang": "en",
+      "action": "",
+      "query": "   ",
+      "inputs": {
+        "current_lecture": "G05-L19 Joins",
+        "group": "G05 SQL",
+        "outline": "LEFT JOIN filtering"
+      },
+      "history": [
+        {
+          "role": "user",
+          "content": "Start with foreign keys."
+        },
+        {
+          "role": "assistant",
+          "content": "A foreign key only checks references."
+        }
+      ],
+      "expect": {
+        "error": "empty_query"
+      }
+    }
+  ]
+}

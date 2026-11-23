@@ -1,41 +1,48 @@
 /**
- * useDifyChat.ts - Dify Cloud Agent Beta SSE 流式通信与会话管理引擎
+ * useDifyChat.ts — AI companion streaming composable (P6, FE-003/006/022/024, port ledger §3.2).
  *
- * 架构规范：
- * 1. 采用 Vue 3 Composable 规范，对外暴露响应式状态与会话控制器；
- * 2. 深度适配 Dify Cloud Agent Beta (Linux 沙箱环境) 标准 SSE 协议；
- * 3. 严格解析 event: message, event: agent_thought, event: error, event: message_end；
- * 4. 支持 AbortController 中途随时无损终止生成；
- * 5. 动态注入讲义上下文变量：current_lecture, group, selection, outline；
- * 6. 内置全功能降级 Mock 引擎，在网络离线或无后端反代时自动平滑自愈；
- * 7. 严格类型约束（Zero any），完备异常边界处理与 SSR 安全隔离；
- * 8. 严格遵守 Zero-Emoji 规范，全域禁止任何表情符号。
+ * Responsibilities:
+ *   - Supports two real transport paths: same-origin proxy (`API_ENDPOINTS.aiChat`, Dify SSE) and
+ *     browser-direct BYOK OpenAI-compatible endpoint (`byokClient.ts`, OpenAI SSE).
+ *   - Parses SSE streams cleanly via `sseParser.ts` (handles arbitrary chunks and `event: error`).
+ *   - Offline truth (`FE-003`): never hides failures behind fake mock responses; mock fallback runs
+ *     only when `fallbackToMock` is explicitly true (`VITE_AI_MOCK === '1'` or option override),
+ *     using domain-neutral templates from `AI_MOCK` (`site.config.mts`) labeled as demo output.
  */
 
-import { ref, readonly, getCurrentInstance, onUnmounted, type Ref, type DeepReadonly } from 'vue'
-// 注意：这里必须写**无扩展名**的 '../../../site.config'，不能写 '.mts'。
-// 原因见 AGENTS.md §6.4：Vite SSR 构建会把 .mts externalize 成绝对 Windows 路径
-// 写进产物，Node ESM 加载器会把 "G:" 当成 URL scheme 而抛
-// ERR_UNSUPPORTED_ESM_URL_SCHEME。无扩展名写法由 Vite 正常内联打包。
-// topic 文案（Mock 演示答案 / 思考步骤）一律来自 site.config.mts，本文件不内置领域内容。
+import { ref, readonly, type Ref, type DeepReadonly } from 'vue'
+import { AI_MOCK, API_ENDPOINTS, BRANDING } from '../../../site.config.mts'
+import { currentLang, translate, type LangCode } from '../../../i18n/index.ts'
+import { normalizePromptLang } from '../../../prompts/companion.ts'
+import { getQuickActions } from '../../../prompts/store.ts'
+import { isEnabled } from '../../debug/flags'
 import {
-  API_ENDPOINTS,
-  BRANDING,
-  STORAGE_KEYS,
-  AI_MOCK,
-  storageKeysFor,
-  readRawWithFallback,
-  writeRawWithDualWrite,
-} from '../../../site.config'
+  buildOpenAiChatRequest,
+  buildOpenAiInitialMessages,
+  createOpenAiToolCallAccumulator,
+  DEFAULT_BYOK_TIMEOUT_MS,
+  executeReaderToolCall,
+  fetchReaderTools,
+  isByokActive,
+  readByokConfig,
+  setByokVerifyState,
+  toOpenAiTools,
+  type OpenAiChatLoopMessage,
+  type OpenAiHistoryTurn,
+  type OpenAiToolCall,
+} from './byokClient'
+import { companionRuntime, type CompanionAdapter } from './companionRuntime'
+import { createSseParser, type ParsedSseEvent } from './sseParser'
+import type { ChatToolCall } from './types'
 
 export type MessageRole = 'user' | 'assistant' | 'system'
 
 export interface AgentThought {
   id: string
   thought: string
+  observation?: string
   tool?: string
   toolInput?: string
-  observation?: string
   position?: number
 }
 
@@ -45,10 +52,14 @@ export interface ChatMessage {
   content: string
   thought?: string
   thoughts?: AgentThought[]
+  toolCalls?: ChatToolCall[]
   createdAt: number
   isStreaming?: boolean
+  isError?: boolean
+  isIncomplete?: boolean
+  isMock?: boolean
   error?: string
-  /** 划词引用上下文（与 types.ts 的 ChatMessage 对齐，供 ChatContainer 渲染引用卡片） */
+  errorDetail?: string
   selectedText?: string
 }
 
@@ -67,16 +78,39 @@ export interface DifyTokenUsage {
   latency?: number
 }
 
+export interface SendMessageOutcome {
+  ok: boolean
+  isError: boolean
+  isIncomplete?: boolean
+  isMock: boolean
+  conversationId: string
+  userMessage: ChatMessage
+  assistantMessage: ChatMessage
+}
+
 export interface UseDifyChatOptions {
   apiEndpoint?: string
+  toolsEndpoint?: string
+  fetchFn?: typeof fetch
+  adapter?: CompanionAdapter
   initialConversationId?: string
   defaultInputs?: DifyChatInputs
-  userId?: string
   fallbackToMock?: boolean
+  timeoutMs?: number
   onMessage?: (message: ChatMessage) => void
   onThought?: (thought: AgentThought) => void
   onError?: (error: Error | string) => void
   onFinish?: (message: ChatMessage, usage?: DifyTokenUsage) => void
+  onRateLimited?: (retryAfterSec: number) => void
+  onUnconfigured?: () => void
+  onUnavailable?: (detail: string) => void
+  onProxyOk?: () => void
+}
+
+export interface SendChatMessageOptions {
+  actionId?: string
+  displayLabel?: string
+  lang?: LangCode
 }
 
 export interface UseDifyChatReturn {
@@ -85,70 +119,16 @@ export interface UseDifyChatReturn {
   error: DeepReadonly<Ref<string | null>>
   conversationId: DeepReadonly<Ref<string>>
   usage: DeepReadonly<Ref<DifyTokenUsage>>
-  sendMessage: (query: string, customInputs?: Partial<DifyChatInputs>) => Promise<void>
+  sendMessage: (
+    query: string,
+    customInputs?: Partial<DifyChatInputs>,
+    sendOptions?: SendChatMessageOptions,
+  ) => Promise<SendMessageOutcome | null>
   stopStreaming: () => void
   clearMessages: () => void
   setConversationId: (id: string) => void
   removeMessage: (id: string) => void
-  retryLastMessage: () => Promise<void>
-}
-
-interface RawDifyMessageEvent {
-  event: 'message' | 'agent_message'
-  task_id?: string
-  id?: string
-  message_id?: string
-  conversation_id?: string
-  answer?: string
-  created_at?: number
-  from_variable_selector?: unknown
-}
-
-interface RawDifyThoughtEvent {
-  event: 'agent_thought'
-  id?: string
-  task_id?: string
-  message_id?: string
-  position?: number
-  thought?: string
-  observation?: string
-  tool?: string
-  tool_input?: string
-  created_at?: number
-}
-
-interface RawDifyMessageEndEvent {
-  event: 'message_end'
-  task_id?: string
-  id?: string
-  message_id?: string
-  conversation_id?: string
-  metadata?: {
-    usage?: {
-      prompt_tokens?: number
-      completion_tokens?: number
-      total_tokens?: number
-      latency?: number
-    }
-  }
-}
-
-interface RawDifyMessageReplaceEvent {
-  event: 'message_replace'
-  task_id?: string
-  message_id?: string
-  conversation_id?: string
-  answer?: string
-}
-
-interface RawDifyErrorEvent {
-  event: 'error'
-  task_id?: string
-  id?: string
-  message_id?: string
-  status?: number
-  code?: string
-  message?: string
+  retryLastMessage: () => Promise<SendMessageOutcome | null>
 }
 
 function generateId(prefix = 'msg'): string {
@@ -157,67 +137,67 @@ function generateId(prefix = 'msg'): string {
   return `${prefix}_${time}_${rand}`
 }
 
-function getStoredOrNewUserId(): string {
-  if (typeof window === 'undefined') {
-    return 'ssr_reader_guest'
-  }
-  const keys = storageKeysFor(STORAGE_KEYS.aiChatUserId)
-  const stored = readRawWithFallback(keys)
-  if (stored && stored.trim().length > 0) {
-    return stored
-  }
-  const newId = `user_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`
-  writeRawWithDualWrite(keys, newId)
-  return newId
-}
-
-function parseSSEBlock(rawBlock: string): { event: string; data: string } | null {
-  const lines = rawBlock.split(/\r?\n/)
-  let eventType = 'message'
-  const dataLines: string[] = []
-
-  for (const line of lines) {
-    if (line.startsWith('event:')) {
-      eventType = line.slice(6).trim()
-    } else if (line.startsWith('data:')) {
-      dataLines.push(line.slice(5).trimStart())
-    }
-  }
-
-  if (dataLines.length === 0 && eventType === 'message') {
-    return null
-  }
-
-  return {
-    event: eventType,
-    data: dataLines.join('\n')
-  }
-}
-
 /**
- * 通用占位符渲染：把模板里的 `{name}` 替换成 vars 里对应的值。
- *
- * 稳健性约定（刻意如此，勿改成抛错）：**未知占位符原样保留**。
- * 第三方用户在 site.config.mts 里往模板写了没约定的占位符，
- * 或演示正文本身含花括号时，最坏结果只是把字面量显示出来，
- * 而不会让整个离线降级链路炸掉。
- *
- * 只替换 `{标识符}` 形态（字母/数字/下划线），因此不会误伤
- * 代码块里的 `${...}`、JSON 花括号等文本。
+ * Pure literal placeholder substitution (`AI_MOCK` templates leave unknown `{tokens}` intact).
  */
-function renderTemplate(template: string, vars: Record<string, string>): string {
-  return template.replace(/\{([A-Za-z_][A-Za-z0-9_]*)\}/g, (whole, name: string) =>
-    Object.prototype.hasOwnProperty.call(vars, name) ? vars[name] : whole
+export function renderTemplate(template: string, vars: Record<string, string>): string {
+  return template.replace(/\{([a-zA-Z0-9_]+)\}/g, (match, key: string) =>
+    Object.prototype.hasOwnProperty.call(vars, key) ? vars[key]! : match
   )
 }
 
+function sanitizeTemplatePlaceholders(text: string, inputs?: DifyChatInputs): string {
+  if (!text) return ''
+  const lang = currentLang()
+  const lecture = inputs?.current_lecture || translate(lang, 'ai.globalContextName')
+  const group = inputs?.group || translate(lang, 'ai.globalGroupName')
+  const outline = inputs?.outline || translate(lang, 'ai.lectureOutlineName')
+  const selection = inputs?.selection || translate(lang, 'ai.noSelection')
+
+  return text
+    .replace(/\{\{\s*current_lecture\s*\}\}/gi, lecture)
+    .replace(/\{\{\s*group\s*\}\}/gi, group)
+    .replace(/\{\{\s*outline\s*\}\}/gi, outline)
+    .replace(/\{\{\s*selection\s*\}\}/gi, selection)
+}
+
+function isDebugMockRequested(explicitOption?: boolean): boolean {
+  if (explicitOption === true) return true
+  if (explicitOption === false) return false
+  try {
+    return isEnabled('aiMock')
+  } catch {
+    return false
+  }
+}
+
+function parseRetryAfterSeconds(response: Response, bodyText: string): number {
+  const rawHeader = response.headers?.get?.('retry-after')
+  if (rawHeader) {
+    const asNum = Number(rawHeader.trim())
+    if (Number.isFinite(asNum) && asNum > 0) return Math.max(1, Math.ceil(asNum))
+    const asDate = Date.parse(rawHeader)
+    if (Number.isFinite(asDate)) {
+      const diff = Math.ceil((asDate - Date.now()) / 1000)
+      if (diff > 0) return diff
+    }
+  }
+  try {
+    const json = JSON.parse(bodyText) as { retry_after?: unknown } | null
+    if (json && typeof json.retry_after === 'number' && Number.isFinite(json.retry_after) && json.retry_after > 0) {
+      return Math.max(1, Math.ceil(json.retry_after))
+    }
+  } catch {
+    // ignore non-JSON body
+  }
+  return 10
+}
+
 export function useDifyChat(options: UseDifyChatOptions = {}): UseDifyChatReturn {
-  // 默认端点来自 site.config.mts：换后端反代部署时只改配置，不必翻本文件
   const apiEndpoint = options.apiEndpoint || API_ENDPOINTS.aiChat
-  // 调用方显式传 fallbackToMock 时以调用方为准；否则看 AI_MOCK.enabled（默认 true，
-  // 因此不传参时的行为与历史版本逐字节一致）
-  const fallbackToMock =
-    options.fallbackToMock !== undefined ? options.fallbackToMock : AI_MOCK.enabled
+  const toolsEndpoint = options.toolsEndpoint || API_ENDPOINTS.aiTools
+  const fetchImpl: typeof fetch = options.fetchFn ?? ((input, init) => fetch(input, init))
+  const timeoutMs = options.timeoutMs ?? DEFAULT_BYOK_TIMEOUT_MS
 
   const messages = ref<ChatMessage[]>([])
   const isStreaming = ref<boolean>(false)
@@ -227,19 +207,12 @@ export function useDifyChat(options: UseDifyChatOptions = {}): UseDifyChatReturn
     promptTokens: 0,
     completionTokens: 0,
     totalTokens: 0,
-    latency: 0
   })
 
   let abortController: AbortController | null = null
   let lastUserQuery = ''
-  let lastInputs: DifyChatInputs = {}
-  let hasReceivedAgentMessage = false
-
-  if (getCurrentInstance()) {
-    onUnmounted(() => {
-      stopStreaming()
-    })
-  }
+  let lastInputs: Partial<DifyChatInputs> | undefined
+  let lastSendOptions: SendChatMessageOptions | undefined
 
   const stopStreaming = (): void => {
     if (abortController) {
@@ -259,6 +232,8 @@ export function useDifyChat(options: UseDifyChatOptions = {}): UseDifyChatReturn
     stopStreaming()
     messages.value = []
     error.value = null
+    conversationId.value = ''
+    usage.value = { promptTokens: 0, completionTokens: 0, totalTokens: 0 }
   }
 
   const setConversationId = (id: string): void => {
@@ -275,280 +250,245 @@ export function useDifyChat(options: UseDifyChatOptions = {}): UseDifyChatReturn
     assistantMsg: ChatMessage,
     signal: AbortSignal
   ): Promise<void> => {
+    assistantMsg.isMock = true
     const lectureTitle = inputs.current_lecture || BRANDING.unknownLectureName
-
-    // 演示文案整体外置在 site.config.mts 的 AI_MOCK 中。
-    // 本文件只负责「取模板 → 填占位符 → 打字机输出」，保持领域中立。
-    const templateVars: Record<string, string> = {
+    const vars: Record<string, string> = {
       lecture: lectureTitle,
-      section: inputs.outline
-        ? renderTemplate(AI_MOCK.sectionHintWithOutline, { outline: inputs.outline })
-        : AI_MOCK.sectionHintWithoutOutline,
-      selection: inputs.selection
-        ? renderTemplate(AI_MOCK.selectionQuoteTemplate, { text: inputs.selection })
-        : '',
-      demo: AI_MOCK.demoAnswer,
       group: inputs.group || BRANDING.genericGroupName,
+      outline: inputs.outline || BRANDING.wholeOutlineName,
+      selection: inputs.selection || '',
       query,
     }
 
-    const thoughtSteps: Array<{ thought: string; tool?: string; toolInput?: string; obs?: string }> =
-      AI_MOCK.thinkingSteps.map((step) => ({
-        thought: renderTemplate(step.thought, templateVars),
-        tool: 'tool' in step ? step.tool : undefined,
-        toolInput: 'toolInput' in step ? renderTemplate(step.toolInput, templateVars) : undefined,
-        obs: 'obs' in step ? renderTemplate(step.obs, templateVars) : undefined
-      }))
+    const sectionHint = inputs.outline
+      ? renderTemplate(AI_MOCK.sectionHintWithOutline, vars)
+      : AI_MOCK.sectionHintWithoutOutline
+    const selectionQuote =
+      inputs.selection && inputs.selection !== BRANDING.noSelectionName && inputs.selection !== translate(currentLang(), 'ai.noSelection')
+        ? renderTemplate(AI_MOCK.selectionQuoteTemplate, { text: inputs.selection })
+        : ''
+    const demoText = renderTemplate(AI_MOCK.demoAnswer, vars)
+    const bodyText = renderTemplate(AI_MOCK.replyTemplate, {
+      lecture: lectureTitle,
+      section: sectionHint,
+      selection: selectionQuote,
+      demo: demoText,
+    })
 
-    for (let i = 0; i < thoughtSteps.length; i++) {
+    for (let i = 0; i < AI_MOCK.thinkingSteps.length; i++) {
       if (signal.aborted) return
-      await new Promise((resolve) => setTimeout(resolve, 180))
+      await new Promise((resolve) => setTimeout(resolve, 60))
       if (signal.aborted) return
 
-      const step = thoughtSteps[i]
+      const step = AI_MOCK.thinkingSteps[i]!
+      const thoughtText = renderTemplate(step.thought, vars)
       const thoughtItem: AgentThought = {
         id: `mock_thought_${i}_${Date.now()}`,
-        thought: step.thought,
-        tool: step.tool,
-        toolInput: step.toolInput,
-        observation: step.obs,
-        position: i + 1
+        thought: thoughtText,
+        tool: 'tool' in step ? step.tool : undefined,
+        toolInput: 'toolInput' in step ? renderTemplate(step.toolInput, vars) : undefined,
+        observation: 'obs' in step ? renderTemplate(step.obs, vars) : undefined,
+        position: i + 1,
       }
-
-      if (!assistantMsg.thoughts) {
-        assistantMsg.thoughts = []
-      }
+      if (!assistantMsg.thoughts) assistantMsg.thoughts = []
       assistantMsg.thoughts.push(thoughtItem)
-      assistantMsg.thought = step.thought
+      assistantMsg.thought = thoughtText
       options.onThought?.(thoughtItem)
     }
 
-    const mockResponseText = renderTemplate(AI_MOCK.replyTemplate, templateVars)
-
-    const chunks = mockResponseText.match(/.{1,4}/gu) || [mockResponseText]
-
+    const prefix = translate(currentLang(), 'ai.mockLabel')
+    const fullText = prefix + bodyText
+    const chunks = fullText.match(/.{1,12}/gu) || [fullText]
     for (const chunk of chunks) {
       if (signal.aborted) return
-      await new Promise((resolve) => setTimeout(resolve, 35))
+      await new Promise((resolve) => setTimeout(resolve, 15))
       if (signal.aborted) return
-
       assistantMsg.content += chunk
       options.onMessage?.(assistantMsg)
     }
 
     if (signal.aborted) return
-
-    usage.value = {
-      promptTokens: 320,
-      completionTokens: 180,
-      totalTokens: 500,
-      latency: 0.85
-    }
-
-    if (!conversationId.value) {
-      conversationId.value = `mock_conv_${Date.now().toString(36)}`
-    }
-
+    usage.value = { promptTokens: 0, completionTokens: 0, totalTokens: 0 }
     assistantMsg.isStreaming = false
     isStreaming.value = false
     options.onFinish?.(assistantMsg, usage.value)
   }
 
-  /** 模板占位符净化：兜底替换模型可能直接输出的未解析 {{variable}} 变量 */
-  const sanitizeTemplatePlaceholders = (text: string, inputs?: DifyChatInputs): string => {
-    if (!text) return ''
-    const lecture = inputs?.current_lecture || BRANDING.knowledgeBaseName
-    const group = inputs?.group || BRANDING.allGroupsName
-    const outline = inputs?.outline || BRANDING.wholeOutlineName
-    const selection = inputs?.selection || BRANDING.noSelectionName
-
-    return text
-      .replace(/\{\{\s*current_lecture\s*\}\}/gi, lecture)
-      .replace(/\{\{\s*group\s*\}\}/gi, group)
-      .replace(/\{\{\s*outline\s*\}\}/gi, outline)
-      .replace(/\{\{\s*selection\s*\}\}/gi, selection)
+  interface SseStepState {
+    stepText: string
+    finishReason: string
+    toolAcc: ReturnType<typeof createOpenAiToolCallAccumulator>
+    deferFinalizeOnDone?: boolean
+    prependParagraphBreak?: boolean
   }
 
-  const handleSSEEvent = (
-    eventType: string,
-    dataStr: string,
-    assistantMsg: ChatMessage
+  const applyParsedEvent = (
+    ev: ParsedSseEvent,
+    assistantMsg: ChatMessage,
+    inputs: DifyChatInputs,
+    stepState?: SseStepState,
   ): void => {
-    if (!dataStr || dataStr === '[DONE]') {
-      return
-    }
-
-    let parsedJson: Record<string, unknown>
-    try {
-      parsedJson = JSON.parse(dataStr) as Record<string, unknown>
-    } catch {
-      return
-    }
-
-    const eventName = (typeof parsedJson.event === 'string' ? parsedJson.event : eventType) || 'message'
-
-    switch (eventName) {
-      case 'agent_message': {
-        hasReceivedAgentMessage = true
-        const payload = parsedJson as unknown as RawDifyMessageEvent
-        if (payload.answer) {
-          assistantMsg.content += sanitizeTemplatePlaceholders(payload.answer, lastInputs)
-          options.onMessage?.(assistantMsg)
-        }
-        if (payload.conversation_id && !conversationId.value) {
-          conversationId.value = payload.conversation_id
-        }
-        break
-      }
-
-      case 'message': {
-        const payload = parsedJson as unknown as RawDifyMessageEvent
-        if (payload.answer) {
-          const sanitizedAnswer = sanitizeTemplatePlaceholders(payload.answer, lastInputs)
-          if (hasReceivedAgentMessage) {
-            assistantMsg.content = sanitizedAnswer
-          } else {
-            assistantMsg.content += sanitizedAnswer
-          }
-          options.onMessage?.(assistantMsg)
-        }
-        if (payload.conversation_id && !conversationId.value) {
-          conversationId.value = payload.conversation_id
-        }
-        break
-      }
-
-      case 'agent_thought': {
-        const payload = parsedJson as unknown as RawDifyThoughtEvent
-        const thoughtItem: AgentThought = {
-          id: payload.id || generateId('thought'),
-          thought: payload.thought || '',
-          tool: payload.tool,
-          toolInput: payload.tool_input,
-          observation: payload.observation,
-          position: payload.position
-        }
-
-        if (!assistantMsg.thoughts) {
-          assistantMsg.thoughts = []
-        }
-
-        const existingIdx = assistantMsg.thoughts.findIndex((t) => t.id === thoughtItem.id)
-        if (existingIdx >= 0) {
-          assistantMsg.thoughts[existingIdx] = thoughtItem
+    if (ev.type === 'tool_call') {
+      if (!assistantMsg.toolCalls) assistantMsg.toolCalls = []
+      if (ev.state === 'start') {
+        assistantMsg.toolCalls.push({
+          id: generateId('tc'),
+          name: ev.name,
+          state: 'running',
+        })
+      } else {
+        const runningMatch = [...assistantMsg.toolCalls]
+          .reverse()
+          .find((item) => item.name === ev.name && item.state === 'running')
+        if (runningMatch) {
+          runningMatch.state = ev.ok === false ? 'error' : 'done'
         } else {
-          assistantMsg.thoughts.push(thoughtItem)
+          assistantMsg.toolCalls.push({
+            id: generateId('tc'),
+            name: ev.name,
+            state: ev.ok === false ? 'error' : 'done',
+          })
         }
-
-        if (thoughtItem.thought) {
-          assistantMsg.thought = thoughtItem.thought
-        }
-
-        options.onThought?.(thoughtItem)
-        break
       }
+      options.onMessage?.(assistantMsg)
+      return
+    }
 
-      case 'message_replace': {
-        const payload = parsedJson as unknown as RawDifyMessageReplaceEvent
-        if (typeof payload.answer === 'string') {
-          assistantMsg.content = sanitizeTemplatePlaceholders(payload.answer, lastInputs)
-          options.onMessage?.(assistantMsg)
-        }
-        break
+    if (ev.type === 'tool_call_delta') {
+      stepState?.toolAcc.pushDelta(ev)
+      return
+    }
+
+    if (ev.type === 'finish_reason') {
+      if (stepState) stepState.finishReason = ev.reason
+      return
+    }
+
+    if (ev.type === 'thought') {
+      if (ev.conversationId) conversationId.value = ev.conversationId
+      const item: AgentThought = {
+        id: ev.messageId || generateId('thought'),
+        thought: sanitizeTemplatePlaceholders(ev.thought, inputs),
+        observation: ev.observation,
+        tool: ev.tool,
+        toolInput: ev.toolInput,
       }
+      if (!assistantMsg.thoughts) assistantMsg.thoughts = []
+      assistantMsg.thoughts.push(item)
+      assistantMsg.thought = item.thought
+      options.onThought?.(item)
+      return
+    }
 
-      case 'message_end': {
-        const payload = parsedJson as unknown as RawDifyMessageEndEvent
-        if (payload.conversation_id) {
-          conversationId.value = payload.conversation_id
+    if (ev.type === 'delta') {
+      if (ev.conversationId) conversationId.value = ev.conversationId
+      const clean = sanitizeTemplatePlaceholders(ev.text, inputs)
+      if (stepState) {
+        if (stepState.prependParagraphBreak && clean.length > 0 && assistantMsg.content.length > 0) {
+          assistantMsg.content += '\n\n'
+          stepState.prependParagraphBreak = false
         }
+        stepState.stepText += clean
+      }
+      assistantMsg.content += clean
+      options.onMessage?.(assistantMsg)
+      return
+    }
 
-        const rawUsage = payload.metadata?.usage
-        if (rawUsage) {
-          usage.value = {
-            promptTokens: rawUsage.prompt_tokens ?? 0,
-            completionTokens: rawUsage.completion_tokens ?? 0,
-            totalTokens: rawUsage.total_tokens ?? 0,
-            latency: rawUsage.latency ?? 0
-          }
+    if (ev.type === 'done') {
+      if (ev.conversationId) conversationId.value = ev.conversationId
+      if (ev.usage) {
+        usage.value = {
+          promptTokens: ev.usage.prompt_tokens ?? usage.value.promptTokens,
+          completionTokens: ev.usage.completion_tokens ?? usage.value.completionTokens,
+          totalTokens: ev.usage.total_tokens ?? usage.value.totalTokens,
         }
-
+      }
+      if (!stepState?.deferFinalizeOnDone) {
         assistantMsg.isStreaming = false
         isStreaming.value = false
         options.onFinish?.(assistantMsg, usage.value)
-        break
       }
+      return
+    }
 
-      case 'error': {
-        const payload = parsedJson as unknown as RawDifyErrorEvent
-        const errMsg = payload.message || payload.code || 'Dify API 执行发生异常'
-        error.value = errMsg
-        assistantMsg.error = errMsg
-        assistantMsg.isStreaming = false
-        isStreaming.value = false
-        options.onError?.(errMsg)
-        break
-      }
-
-      case 'ping':
-      default:
-        break
+    if (ev.type === 'error') {
+      throw new Error(ev.message)
     }
   }
 
   const readSSEStream = async (
     response: Response,
     assistantMsg: ChatMessage,
-    signal: AbortSignal
-  ): Promise<void> => {
+    inputs: DifyChatInputs,
+    signal: AbortSignal,
+    resetTimeout?: () => void,
+    stepState?: SseStepState,
+  ): Promise<{ completedCleanly: boolean; sawError: boolean }> => {
+    const ctype = response.headers?.get?.('content-type')?.toLowerCase() ?? ''
+    if (ctype.includes('application/json')) {
+      const json = (await response.json()) as {
+        choices?: Array<{
+          message?: { content?: string | null; tool_calls?: OpenAiToolCall[] }
+          finish_reason?: string | null
+        }>
+        usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number }
+      }
+      resetTimeout?.()
+      const choice = json.choices?.[0]
+      const msgText = choice?.message?.content
+      if (typeof msgText === 'string' && msgText.length > 0) {
+        applyParsedEvent({ type: 'delta', text: msgText }, assistantMsg, inputs, stepState)
+      }
+      const rawCalls = choice?.message?.tool_calls
+      if (Array.isArray(rawCalls) && stepState) {
+        rawCalls.forEach((tc, idx) => {
+          stepState.toolAcc.pushDelta({
+            index: idx,
+            id: tc.id,
+            callType: tc.type,
+            name: tc.function?.name,
+            argumentsChunk: tc.function?.arguments ?? '',
+          })
+        })
+      }
+      if (typeof choice?.finish_reason === 'string' && stepState) {
+        stepState.finishReason = choice.finish_reason
+      }
+      applyParsedEvent({ type: 'done', usage: json.usage }, assistantMsg, inputs, stepState)
+      return { completedCleanly: true, sawError: false }
+    }
+
+    const parser = createSseParser()
     if (!response.body) {
-      throw new Error('响应体为空，无法建立流式传输')
+      const text = await response.text()
+      resetTimeout?.()
+      for (const ev of [...parser.feed(text), ...parser.flush()]) {
+        applyParsedEvent(ev, assistantMsg, inputs, stepState)
+      }
+      return { completedCleanly: parser.sawDone(), sawError: parser.sawError() }
     }
 
     const reader = response.body.getReader()
     const decoder = new TextDecoder('utf-8')
-    let buffer = ''
-
     try {
       while (true) {
-        if (signal.aborted) {
-          await reader.cancel().catch(() => {})
-          break
-        }
-
+        if (signal.aborted) break
         const { done, value } = await reader.read()
-        if (done) {
-          break
-        }
-
-        buffer += decoder.decode(value, { stream: true })
-
-        let boundaryIndex = buffer.search(/\r?\n\r?\n/)
-        while (boundaryIndex !== -1) {
-          const rawBlock = buffer.slice(0, boundaryIndex)
-          const match = buffer.slice(boundaryIndex).match(/^\r?\n\r?\n/)
-          const delimLen = match ? match[0].length : 2
-          buffer = buffer.slice(boundaryIndex + delimLen)
-
-          const trimmed = rawBlock.trim()
-          if (trimmed) {
-            const parsed = parseSSEBlock(trimmed)
-            if (parsed) {
-              handleSSEEvent(parsed.event, parsed.data, assistantMsg)
-            }
+        if (done) break
+        resetTimeout?.()
+        if (value) {
+          const text = decoder.decode(value, { stream: true })
+          for (const ev of parser.feed(text)) {
+            applyParsedEvent(ev, assistantMsg, inputs, stepState)
           }
-
-          boundaryIndex = buffer.search(/\r?\n\r?\n/)
         }
       }
-
-      buffer += decoder.decode()
-      if (buffer.trim()) {
-        const parsed = parseSSEBlock(buffer.trim())
-        if (parsed) {
-          handleSSEEvent(parsed.event, parsed.data, assistantMsg)
-        }
+      const tail = decoder.decode()
+      for (const ev of [...parser.feed(tail), ...parser.flush()]) {
+        applyParsedEvent(ev, assistantMsg, inputs, stepState)
       }
+      return { completedCleanly: parser.sawDone(), sawError: parser.sawError() }
     } finally {
       reader.releaseLock()
     }
@@ -556,154 +496,385 @@ export function useDifyChat(options: UseDifyChatOptions = {}): UseDifyChatReturn
 
   const sendMessage = async (
     query: string,
-    customInputs: Partial<DifyChatInputs> = {}
-  ): Promise<void> => {
+    customInputs?: Partial<DifyChatInputs>,
+    sendOptions?: SendChatMessageOptions,
+  ): Promise<SendMessageOutcome | null> => {
     const trimmedQuery = query.trim()
-    if (!trimmedQuery) {
-      return
+    const actionId = sendOptions?.actionId?.trim() || undefined
+    if (!trimmedQuery && !actionId) return null
+
+    const runtimeAdapter = options.adapter ?? companionRuntime().adapter
+    if (runtimeAdapter === 'off') {
+      return null
     }
 
     if (isStreaming.value) {
       stopStreaming()
     }
 
-    error.value = null
-    hasReceivedAgentMessage = false
     lastUserQuery = trimmedQuery
+    lastInputs = customInputs
+    lastSendOptions = sendOptions
+    error.value = null
 
     const mergedInputs: DifyChatInputs = {
-      ...(options.defaultInputs || {}),
-      ...customInputs
+      ...options.defaultInputs,
+      ...customInputs,
     }
-    lastInputs = mergedInputs
 
-    const rawSel = (customInputs.selection || '').trim()
-    const validSelection = rawSel && rawSel !== BRANDING.noSelectionName ? rawSel : undefined
+    const rawSel = (mergedInputs.selection || '').trim()
+    const cleanSel =
+      rawSel && rawSel !== translate(currentLang(), 'ai.noSelection') && rawSel !== BRANDING.noSelectionName
+        ? rawSel
+        : undefined
 
-    const userMessage: ChatMessage = {
-      id: generateId('usr'),
+    const activeLang = sendOptions?.lang ?? currentLang()
+    const promptLang = normalizePromptLang(activeLang)
+    const actionSpec = actionId ? getQuickActions().find((a) => a.id === actionId) : undefined
+    const visibleUserContent = trimmedQuery || sendOptions?.displayLabel || actionSpec?.label[promptLang] || actionId || ''
+
+    const priorHistory: OpenAiHistoryTurn[] = messages.value
+      .filter((m) => (m.role === 'user' || m.role === 'assistant') && !m.isError && !m.isIncomplete && !m.isMock && m.content.trim().length > 0)
+      .map((m) => ({
+        role: m.role === 'user' ? 'user' : 'assistant',
+        content: m.content,
+      }))
+
+    const userMsg: ChatMessage = {
+      id: generateId('user'),
       role: 'user',
-      content: trimmedQuery,
-      selectedText: validSelection,
-      createdAt: Date.now()
+      content: visibleUserContent,
+      selectedText: cleanSel,
+      createdAt: Date.now(),
     }
-    const assistantMessage: ChatMessage = {
-      id: generateId('ast'),
+    messages.value.push(userMsg)
+
+    const liveAssistantMsg: ChatMessage = {
+      id: generateId('assistant'),
       role: 'assistant',
       content: '',
+      thoughts: [],
+      toolCalls: [],
       createdAt: Date.now(),
-      isStreaming: true
+      isStreaming: true,
     }
-
-    messages.value.push(userMessage)
-    messages.value.push(assistantMessage)
-    // 关键响应式守卫：从 Proxy 数组中获取已代理的响应式引用，确保每个分块追加即时驱动 Vue 3 视图打字机渲染
-    const liveAssistantMsg = messages.value[messages.value.length - 1]
+    messages.value.push(liveAssistantMsg)
+    const reactiveAssistantMsg = messages.value[messages.value.length - 1] ?? liveAssistantMsg
     isStreaming.value = true
 
     abortController = new AbortController()
     const signal = abortController.signal
-
-    const userId = options.userId || getStoredOrNewUserId()
-
-    // 上下文注入双重保障：
-    // 1. 在 requestPayload.inputs 依然传递 mergedInputs（标准 Dify 变量协议）；
-    // 2. 针对 Dify 后台可能未显式声明变量导致的 inputs 丢失，将上下文元数据作为结构化隐式提示置入 query 头部，
-    //    确保大模型能无损感知讲义、课程组、小节与选区。用户界面上保持 userMessage.content 为用户原话。
-    const hasContext = Boolean(mergedInputs.current_lecture || mergedInputs.group)
-    let queryForModel = trimmedQuery
-    if (hasContext) {
-      const secPart = mergedInputs.outline && mergedInputs.outline !== BRANDING.wholeOutlineName ? ` | 当前小节: ${mergedInputs.outline}` : ''
-      const selPart = mergedInputs.selection && mergedInputs.selection !== BRANDING.noSelectionName ? ` | 划选内容: "${mergedInputs.selection}"` : ''
-      const ctxPrefix = `[系统注入上下文 | 讲义: ${mergedInputs.current_lecture || BRANDING.siteWideLectureName} | 课程组: ${mergedInputs.group || BRANDING.genericGroupName}${secPart}${selPart}]\n\n`
-      queryForModel = `${ctxPrefix}${trimmedQuery}`
+    let timeoutHandle: ReturnType<typeof setTimeout> | null = null
+    let timedOut = false
+    const clearTimer = () => {
+      if (timeoutHandle !== null) {
+        clearTimeout(timeoutHandle)
+        timeoutHandle = null
+      }
+    }
+    const armTimeout = () => {
+      clearTimer()
+      if (timeoutMs > 0) {
+        timeoutHandle = setTimeout(() => {
+          timedOut = true
+          abortController?.abort()
+        }, timeoutMs)
+      }
     }
 
-    const requestPayload = {
-      inputs: mergedInputs,
-      query: queryForModel,
-      response_mode: 'streaming',
-      conversation_id: conversationId.value || '',
-      user: userId
+    const byok = readByokConfig()
+    const useByok = isByokActive(byok)
+    // true once the proxy status callbacks have seen this failure (HTTP error or fetch failure)
+    let proxyStatusHandled = false
+
+    const handleCancelled = (): SendMessageOutcome => {
+      reactiveAssistantMsg.isStreaming = false
+      isStreaming.value = false
+      return {
+        ok: false,
+        isError: true,
+        isMock: false,
+        conversationId: conversationId.value,
+        userMessage: userMsg,
+        assistantMessage: reactiveAssistantMsg,
+      }
     }
 
-    try {
-      let response: Response | null = null
+    const handleIncomplete = (msg: string): SendMessageOutcome => {
+      reactiveAssistantMsg.isStreaming = false
+      reactiveAssistantMsg.isIncomplete = true
+      reactiveAssistantMsg.isError = true
+      reactiveAssistantMsg.error = msg
+      reactiveAssistantMsg.errorDetail = msg
+      error.value = msg
+      isStreaming.value = false
+      if (useByok) setByokVerifyState('failed', 'incomplete_stream')
+      else options.onUnavailable?.('incomplete_stream')
+      options.onError?.(msg)
+      return {
+        ok: false,
+        isError: true,
+        isIncomplete: true,
+        isMock: false,
+        conversationId: conversationId.value,
+        userMessage: userMsg,
+        assistantMessage: reactiveAssistantMsg,
+      }
+    }
 
+    const executeFetch = async (fetchUrl: string, fetchInit: RequestInit): Promise<Response> => {
+      let response: Response
       try {
-        response = await fetch(apiEndpoint, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Accept: 'text/event-stream'
-          },
-          body: JSON.stringify(requestPayload),
-          signal
-        })
+        response = await fetchImpl(fetchUrl, fetchInit)
       } catch (fetchErr: unknown) {
-        if (signal.aborted) {
-          return
+        clearTimer()
+        if (signal.aborted && !timedOut) {
+          throw Object.assign(new Error('aborted'), { __lecAborted: true })
         }
-        if (fallbackToMock) {
-          await streamFromMock(trimmedQuery, mergedInputs, liveAssistantMsg, signal)
-          return
+        if (useByok) {
+          const msg = timedOut ? 'timeout' : fetchErr instanceof Error ? fetchErr.message : 'network_error'
+          setByokVerifyState('failed', msg)
+        } else {
+          proxyStatusHandled = true
+          options.onUnavailable?.(fetchErr instanceof Error ? fetchErr.message : 'network_error')
         }
         throw fetchErr
       }
 
       if (!response.ok) {
-        // Mock 降级白名单：dev 无反代(404) / 网关坏网关(502/503) / 未认证被认证网关拦截(401) / 禁止访问(403)
-        // 生产实测（task-3 T4）：匿名 POST /api/ai/chat 返回 401，故 401 必须纳入降级而非抛错白屏。
-        if (
-          fallbackToMock &&
-          (response.status === 404 ||
-            response.status === 401 ||
-            response.status === 403 ||
-            response.status === 502 ||
-            response.status === 503)
-        ) {
-          await streamFromMock(trimmedQuery, mergedInputs, liveAssistantMsg, signal)
-          return
-        }
+        clearTimer()
         const errorText = await response.text().catch(() => '')
-        throw new Error(`HTTP ${response.status}: ${errorText || response.statusText}`)
+        let friendlyMsg = ''
+        proxyStatusHandled = true
+        const errLang = sendOptions?.lang ?? currentLang()
+        if (useByok) {
+          const msg = `HTTP ${response.status}${errorText ? `: ${errorText.slice(0, 160)}` : ''}`
+          setByokVerifyState('failed', `HTTP ${response.status}`)
+          friendlyMsg = msg
+        } else if (response.status === 429) {
+          const waitSec = parseRetryAfterSeconds(response, errorText)
+          options.onRateLimited?.(waitSec)
+          friendlyMsg = translate(errLang, 'ai.errRateLimited', { seconds: waitSec })
+        } else if (response.status === 413) {
+          friendlyMsg = translate(errLang, 'ai.errPayloadTooLarge')
+        } else if (response.status === 403) {
+          friendlyMsg = translate(errLang, 'ai.errAnonymousDisabled')
+        } else if (response.status === 401) {
+          friendlyMsg = translate(errLang, 'ai.errUnauthorized')
+        } else if (response.status === 503) {
+          options.onUnconfigured?.()
+          friendlyMsg = translate(errLang, 'ai.errNotConfigured')
+        } else {
+          const detail = `HTTP ${response.status}${errorText ? `: ${errorText.slice(0, 120)}` : ''}`
+          options.onUnavailable?.(detail)
+          friendlyMsg = translate(errLang, 'ai.errUpstream', { detail })
+        }
+        throw new Error(friendlyMsg)
+      }
+      return response
+    }
+
+    try {
+      const lang = sendOptions?.lang ?? currentLang()
+      const requestPromptLang = normalizePromptLang(lang)
+
+      if (runtimeAdapter === 'openai-compatible' && !useByok && !isDebugMockRequested(options.fallbackToMock)) {
+        throw new Error(translate(lang, 'ai.byokRequiredNotice'))
       }
 
-      await readSSEStream(response, liveAssistantMsg, signal)
+      if (isDebugMockRequested(options.fallbackToMock) && !useByok) {
+        await streamFromMock(visibleUserContent, mergedInputs, reactiveAssistantMsg, signal)
+        return {
+          ok: true,
+          isError: false,
+          isMock: true,
+          conversationId: conversationId.value,
+          userMessage: userMsg,
+          assistantMessage: reactiveAssistantMsg,
+        }
+      }
 
-      if (liveAssistantMsg.isStreaming) {
-        liveAssistantMsg.isStreaming = false
-        isStreaming.value = false
-        options.onFinish?.(liveAssistantMsg, usage.value)
+      if (useByok) {
+        const catalog = await fetchReaderTools(fetchImpl, toolsEndpoint, signal)
+        if (signal.aborted && !timedOut) return handleCancelled()
+
+        const openAiTools = catalog.tools.length > 0 ? toOpenAiTools(catalog.tools) : []
+        const maxModelCalls = openAiTools.length > 0 ? catalog.maxSteps : 1
+        const loopMessages: OpenAiChatLoopMessage[] = buildOpenAiInitialMessages(
+          trimmedQuery,
+          mergedInputs,
+          priorHistory,
+          { actionId, lang: requestPromptLang },
+        )
+
+        for (let step = 1; step <= maxModelCalls; step++) {
+          const req = buildOpenAiChatRequest(byok, trimmedQuery, mergedInputs, priorHistory, {
+            actionId,
+            lang: requestPromptLang,
+            messagesOverride: loopMessages,
+            ...(openAiTools.length > 0 ? { tools: openAiTools } : {}),
+          })
+          armTimeout()
+          const response = await executeFetch(req.url, { ...req.init, signal })
+
+          const stepState: SseStepState = {
+            stepText: '',
+            finishReason: '',
+            toolAcc: createOpenAiToolCallAccumulator(),
+            deferFinalizeOnDone: true,
+            prependParagraphBreak: step > 1 && reactiveAssistantMsg.content.trim().length > 0,
+          }
+          const streamResult = await readSSEStream(
+            response,
+            reactiveAssistantMsg,
+            mergedInputs,
+            signal,
+            armTimeout,
+            stepState,
+          )
+          clearTimer()
+
+          if (signal.aborted && !timedOut) return handleCancelled()
+          if (!streamResult.completedCleanly) {
+            return handleIncomplete(translate(lang, 'ai.incompleteBanner'))
+          }
+
+          const toolCalls = stepState.toolAcc.finalize()
+          const wantsToolLoop =
+            openAiTools.length > 0 &&
+            toolCalls.length > 0 &&
+            (stepState.finishReason === 'tool_calls' || !stepState.finishReason || stepState.stepText === '')
+
+          if (wantsToolLoop && step < maxModelCalls) {
+            loopMessages.push({
+              role: 'assistant',
+              content: stepState.stepText || null,
+              tool_calls: toolCalls,
+            })
+            for (const tc of toolCalls) {
+              if (signal.aborted && !timedOut) return handleCancelled()
+              if (!reactiveAssistantMsg.toolCalls) reactiveAssistantMsg.toolCalls = []
+              const entry: ChatToolCall = {
+                id: tc.id || generateId('tc'),
+                name: tc.function.name,
+                state: 'running',
+              }
+              reactiveAssistantMsg.toolCalls.push(entry)
+              const reactiveEntry =
+                reactiveAssistantMsg.toolCalls[reactiveAssistantMsg.toolCalls.length - 1] ?? entry
+              options.onMessage?.(reactiveAssistantMsg)
+
+              const toolRes = await executeReaderToolCall(
+                tc.function.name,
+                tc.function.arguments,
+                fetchImpl,
+                toolsEndpoint,
+                signal,
+              )
+              if (signal.aborted && !timedOut) return handleCancelled()
+              reactiveEntry.state = toolRes.ok ? 'done' : 'error'
+              options.onMessage?.(reactiveAssistantMsg)
+              loopMessages.push({
+                role: 'tool',
+                tool_call_id: tc.id,
+                content: toolRes.content,
+              })
+            }
+            continue
+          }
+
+          reactiveAssistantMsg.isStreaming = false
+          isStreaming.value = false
+          setByokVerifyState('ok', '')
+          options.onFinish?.(reactiveAssistantMsg, usage.value)
+          return {
+            ok: true,
+            isError: false,
+            isIncomplete: false,
+            isMock: false,
+            conversationId: conversationId.value,
+            userMessage: userMsg,
+            assistantMessage: reactiveAssistantMsg,
+          }
+        }
+      }
+
+      const requestPayload = {
+        inputs: mergedInputs,
+        query: trimmedQuery,
+        ...(actionId ? { action: actionId } : {}),
+        lang: requestPromptLang,
+        response_mode: 'streaming',
+        conversation_id: conversationId.value || '',
+      }
+      const response = await executeFetch(apiEndpoint, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Accept: 'text/event-stream',
+        },
+        body: JSON.stringify(requestPayload),
+        signal,
+      })
+
+      const streamResult = await readSSEStream(response, reactiveAssistantMsg, mergedInputs, signal)
+      clearTimer()
+
+      if (signal.aborted && !timedOut) return handleCancelled()
+      if (!streamResult.completedCleanly || reactiveAssistantMsg.isStreaming) {
+        return handleIncomplete(translate(lang, 'ai.incompleteBanner'))
+      }
+
+      options.onProxyOk?.()
+      return {
+        ok: true,
+        isError: false,
+        isIncomplete: false,
+        isMock: Boolean(reactiveAssistantMsg.isMock),
+        conversationId: conversationId.value,
+        userMessage: userMsg,
+        assistantMessage: reactiveAssistantMsg,
       }
     } catch (err: unknown) {
-      if (signal.aborted) {
-        liveAssistantMsg.isStreaming = false
-        isStreaming.value = false
-        return
+      clearTimer()
+      if ((err as { __lecAborted?: boolean } | null)?.__lecAborted || (signal.aborted && !timedOut)) {
+        return handleCancelled()
       }
 
-      const errMsg = err instanceof Error ? err.message : String(err)
-      error.value = errMsg
-      liveAssistantMsg.error = errMsg
-      if (!liveAssistantMsg.content) {
-        liveAssistantMsg.content = `[提示] ${errMsg}`
+      const detail = err instanceof Error ? err.message : String(err || translate(currentLang(), 'ai.networkError'))
+      error.value = detail
+      if (reactiveAssistantMsg.content.trim().length > 0) {
+        reactiveAssistantMsg.isIncomplete = true
       }
-      liveAssistantMsg.isStreaming = false
+      reactiveAssistantMsg.isError = true
+      reactiveAssistantMsg.error = detail
+      reactiveAssistantMsg.errorDetail = detail
+      reactiveAssistantMsg.isStreaming = false
       isStreaming.value = false
-      options.onError?.(errMsg)
+      if (useByok) setByokVerifyState('failed', detail)
+      else if (!proxyStatusHandled) options.onUnavailable?.(detail) // SSE `error` frame after the stream started
+      options.onError?.(detail)
+      return {
+        ok: false,
+        isError: true,
+        isIncomplete: Boolean(reactiveAssistantMsg.isIncomplete),
+        isMock: false,
+        conversationId: conversationId.value,
+        userMessage: userMsg,
+        assistantMessage: reactiveAssistantMsg,
+      }
     } finally {
+      clearTimer()
       if (abortController?.signal === signal) {
         abortController = null
       }
     }
   }
 
-  const retryLastMessage = async (): Promise<void> => {
-    if (!lastUserQuery || isStreaming.value) {
-      return
+  const retryLastMessage = async (): Promise<SendMessageOutcome | null> => {
+    if ((!lastUserQuery && !lastSendOptions?.actionId) || isStreaming.value) {
+      return null
     }
-
     const lastMsg = messages.value[messages.value.length - 1]
     if (lastMsg && lastMsg.role === 'assistant') {
       messages.value.pop()
@@ -712,8 +883,7 @@ export function useDifyChat(options: UseDifyChatOptions = {}): UseDifyChatReturn
     if (prevUserMsg && prevUserMsg.role === 'user') {
       messages.value.pop()
     }
-
-    await sendMessage(lastUserQuery, lastInputs)
+    return sendMessage(lastUserQuery, lastInputs, lastSendOptions)
   }
 
   return {
@@ -727,6 +897,6 @@ export function useDifyChat(options: UseDifyChatOptions = {}): UseDifyChatReturn
     clearMessages,
     setConversationId,
     removeMessage,
-    retryLastMessage
+    retryLastMessage,
   }
 }

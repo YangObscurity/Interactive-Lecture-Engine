@@ -5,16 +5,33 @@
  * 1. 任意位置（屏幕几何正中央上方 18% 处，不遮挡操作焦点）；
  * 2. 自动 1.6s 淡出；多条纵向堆叠，后进在上；
  * 3. 颜色随三态：已完成 = 极光翠绿 / 学习中 = 琥珀暖金 / 未开始 = 中性灰；
- * 4. 零 Emoji：左侧为纯工程矢量状态点（CSS 绘制），文案简洁「EX-L01 · 已完成」；
+ * 4. 零 Emoji：左侧为纯工程矢量状态点（CSS 绘制），文案简洁「G03-L08 · 已完成」；
  * 5. 严格 SSR 守卫：服务端调用直接 noop。
  */
 
-type ToastKind = '已完成' | '学习中' | '未开始'
+import { currentLang, translate } from '../../../i18n/index.ts'
+import { toLegacyStatus, type ProgressStatus } from '../../progress/types'
 
-const KIND_COLOR: Record<ToastKind, string> = {
-  已完成: '#10b981',
-  学习中: '#f59e0b',
-  未开始: '#64748b'
+const COLOR_BY_STATUS: Record<ProgressStatus, string> = {
+  completed: 'var(--lec-done)',
+  in_progress: 'var(--lec-warning)',
+  not_started: 'var(--lec-text-muted)',
+}
+
+const LEGACY_STATUS_LOOKUP: Record<string, ProgressStatus> = {
+  [toLegacyStatus('completed')]: 'completed',
+  [toLegacyStatus('in_progress')]: 'in_progress',
+  [toLegacyStatus('not_started')]: 'not_started',
+  completed: 'completed',
+  in_progress: 'in_progress',
+  not_started: 'not_started',
+}
+
+function statusLabelForToast(status: ProgressStatus): string {
+  const lang = currentLang()
+  if (status === 'completed') return translate(lang, 'ai.lpcStatusCompleted')
+  if (status === 'in_progress') return translate(lang, 'ai.lpcStatusInProgress')
+  return translate(lang, 'ai.lpcStatusNotStarted')
 }
 
 let host: HTMLDivElement | null = null
@@ -29,18 +46,17 @@ function ensureHost(): HTMLDivElement | null {
   return host
 }
 
-/** 学习状态切换提示：showStatusToast('EX-L01', '已完成') */
-export function showStatusToast(lectureLabel: string, kind: ToastKind): void {
+function pushToast(text: string, accent: string): void {
   const container = ensureHost()
   if (!container) return
 
   const el = document.createElement('div')
   el.className = 'ai-toast-item'
-  el.style.setProperty('--toast-accent', KIND_COLOR[kind] || '#64748b')
+  el.style.setProperty('--toast-accent', accent)
   el.innerHTML = `<span class="ai-toast-dot"></span><span class="ai-toast-text"></span>`
   const textEl = el.querySelector('.ai-toast-text')
   if (textEl) {
-    textEl.textContent = `${lectureLabel} · ${kind}`
+    textEl.textContent = text
   }
   container.appendChild(el)
 
@@ -51,4 +67,15 @@ export function showStatusToast(lectureLabel: string, kind: ToastKind): void {
   window.setTimeout(() => {
     if (el.parentNode) el.parentNode.removeChild(el)
   }, 2100)
+}
+
+/** 学习状态切换提示 */
+export function showStatusToast(lectureLabel: string, kind: string): void {
+  const status: ProgressStatus = LEGACY_STATUS_LOOKUP[kind] ?? 'not_started'
+  pushToast(`${lectureLabel} · ${statusLabelForToast(status)}`, COLOR_BY_STATUS[status])
+}
+
+/** 一般提示（例如写入被后端拒绝）：文案由调用方按当前语言给出，危险色状态点 */
+export function showMessageToast(message: string): void {
+  pushToast(message, 'var(--lec-danger)')
 }

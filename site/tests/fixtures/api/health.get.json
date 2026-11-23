@@ -1,0 +1,7 @@
+{
+  "ok": true,
+  "service": "lecture-api (fixture)",
+  "version": "fixture-1",
+  "checks": { "db": "ok", "ai": "ok", "notion": "ok" },
+  "time": "2026-11-16T08:00:00.000Z"
+}

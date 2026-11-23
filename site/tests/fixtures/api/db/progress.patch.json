@@ -1,0 +1,12 @@
+{
+  "_doc": "Sample body of PATCH /api/db/progress/:lecture_id as sent by neonRepository.updateLectureProgress (request fixture, not a response). The mock merges it into in-memory state and returns the full AiLectureProgress record with a server-side updated_at.",
+  "lecture_id": "g01-l03",
+  "request": {
+    "status": "学习中",
+    "completed_at": null,
+    "updated_at": "2026-11-16T08:00:00.000Z",
+    "group_id": "g01",
+    "notion_node_id": null,
+    "notion_page_id": null
+  }
+}

@@ -2,23 +2,25 @@
   <Transition name="drawer-slide">
     <div
       v-if="isOpen"
+      ref="drawerRef"
       class="session-history-drawer"
       role="dialog"
       aria-modal="true"
-      aria-label="历史会话管理抽屉"
+      :aria-label="t('ai.drawerAria')"
     >
       <!-- 抽屉顶栏 -->
       <header class="drawer-header">
         <div class="header-left">
           <span class="header-icon" v-html="ICONS.history"></span>
-          <h3 class="header-title">历史会话</h3>
+          <h3 class="header-title">{{ t('ai.drawerTitle') }}</h3>
           <span v-if="lectureBadge" class="lecture-badge">{{ lectureBadge }}</span>
         </div>
         <button
+          ref="closeBtnRef"
           type="button"
           class="header-close-btn"
-          title="关闭历史抽屉"
-          aria-label="关闭历史抽屉"
+          :title="t('ai.drawerClose')"
+          :aria-label="t('ai.drawerClose')"
           @click="handleClose"
         >
           <span class="btn-icon" v-html="ICONS.close"></span>
@@ -30,12 +32,12 @@
         <button
           type="button"
           class="action-btn action-create"
-          :title="currentLectureId ? '新建当前讲会话' : '新建会话'"
+          :title="currentLectureId ? t('ai.newLectureSessionTitle') : t('ai.newSession')"
           :disabled="isLoading"
           @click="handleCreateSession"
         >
           <span class="btn-icon" v-html="ICONS.plus"></span>
-          <span class="btn-text">新建会话</span>
+          <span class="btn-text">{{ t('ai.newSession') }}</span>
         </button>
 
         <button
@@ -43,32 +45,32 @@
           class="action-btn action-clear"
           :class="{ 'is-confirming': isConfirmingClear }"
           :disabled="isLoading || (currentLectureId ? sessions.length === 0 : allSessions.length === 0)"
-          :title="currentLectureId ? '清空当前讲会话' : '清空历史会话'"
+          :title="currentLectureId ? t('ai.clearLectureSessions') : t('ai.clearSessions')"
           @click="handleClearClick"
         >
           <span class="btn-icon" v-html="ICONS.trash"></span>
-          <span class="btn-text">{{ isConfirmingClear ? '取消清空' : (currentLectureId ? '清空当前讲会话' : '清空历史会话') }}</span>
+          <span class="btn-text">{{ isConfirmingClear ? t('ai.cancelClear') : (currentLectureId ? t('ai.clearLectureSessions') : t('ai.clearSessions')) }}</span>
         </button>
       </section>
 
       <!-- 二次确认清空条 -->
       <Transition name="fade">
         <div v-if="isConfirmingClear" class="clear-confirm-bar">
-          <p class="confirm-message">{{ currentLectureId ? '确定清空本讲所有历史会话？数据不可恢复。' : '确定清空所有历史会话？数据不可恢复。' }}</p>
+          <p class="confirm-message">{{ currentLectureId ? t('ai.clearConfirmLecture') : t('ai.clearConfirmAll') }}</p>
           <div class="confirm-buttons">
             <button
               type="button"
               class="confirm-btn danger"
               @click="confirmClearAll"
             >
-              确认清空
+              {{ t('ai.confirm') }}
             </button>
             <button
               type="button"
               class="confirm-btn cancel"
               @click="isConfirmingClear = false"
             >
-              取消
+              {{ t('ai.cancel') }}
             </button>
           </div>
         </div>
@@ -79,14 +81,14 @@
         <!-- 加载状态 -->
         <div v-if="isLoading" class="state-container loading-state">
           <span class="pulse-line"></span>
-          <span class="state-text">正在读取历史会话...</span>
+          <span class="state-text">{{ t('ai.loadingHistory') }}</span>
         </div>
 
         <!-- 空数据状态 -->
         <div v-else-if="allSessions.length === 0" class="state-container empty-state">
           <span class="empty-icon" v-html="ICONS.history"></span>
-          <p class="empty-title">当前暂无历史会话</p>
-          <p class="empty-subtitle">点击上方「新建会话」即可开启多轮技术探讨</p>
+          <p class="empty-title">{{ t('ai.emptyHistoryTitle') }}</p>
+          <p class="empty-subtitle">{{ t('ai.emptyHistorySubtitle') }}</p>
         </div>
 
         <!-- 历史会话三层分级列表 (议题 5: 本讲 -> 本组 -> 全站历史) -->
@@ -94,7 +96,7 @@
           <!-- 1. 本讲/全站历史会话 -->
           <div v-if="currentLectureSessions.length > 0" class="history-category-block">
             <div class="category-header">
-              <span class="category-title">{{ currentLectureId ? '本讲会话' : '全站历史会话' }}</span>
+              <span class="category-title">{{ currentLectureId ? t('ai.historyGroupThisLecture') : t('ai.historyGroupAllSite') }}</span>
               <span class="category-count">{{ currentLectureSessions.length }}</span>
             </div>
             <ul class="session-list" role="list">
@@ -114,7 +116,7 @@
                       class="session-title-input"
                       type="text"
                       maxlength="36"
-                      placeholder="输入会话主题..."
+                      :placeholder="t('ai.sessionTitlePlaceholder')"
                       @click.stop
                       @keydown.enter.stop="saveRename(sess)"
                       @keydown.esc.stop="cancelRename"
@@ -126,10 +128,10 @@
                       :title="sess.title"
                       @dblclick.stop="startRename(sess)"
                     >
-                      {{ sess.title || '新会话' }}
+                      {{ sess.title || t('ai.userSessionDefault') }}
                     </span>
                     <span v-if="sess.id === activeSessionId" class="active-pill">
-                      当前
+                      {{ t('ai.sessionCurrentBadge') }}
                     </span>
                   </div>
                   <div class="session-meta">
@@ -143,8 +145,8 @@
                   <button
                     type="button"
                     class="session-action-btn"
-                    title="重命名（双击标题亦可修改）"
-                    aria-label="重命名会话"
+                    :title="t('ai.renameHintTitle')"
+                    :aria-label="t('ai.renameAria')"
                     @click.stop="startRename(sess)"
                   >
                     <span class="btn-icon" v-html="ICONS.edit"></span>
@@ -152,8 +154,8 @@
                   <button
                     type="button"
                     class="session-action-btn delete-btn"
-                    title="删除该会话"
-                    aria-label="删除该会话"
+                    :title="t('ai.deleteSessionTitle')"
+                    :aria-label="t('ai.deleteSessionAria')"
                     @click.stop="handleDeleteSingle(sess.id)"
                   >
                     <span class="btn-icon" v-html="ICONS.trash"></span>
@@ -166,7 +168,7 @@
           <!-- 2. 本课程组其他讲次会话 -->
           <div v-if="currentGroupSessions.length > 0" class="history-category-block">
             <div class="category-header">
-              <span class="category-title">本课程组其他讲次</span>
+              <span class="category-title">{{ t('ai.historyGroupPeers') }}</span>
               <span class="category-count">{{ currentGroupSessions.length }}</span>
             </div>
             <ul class="session-list" role="list">
@@ -175,7 +177,7 @@
                 :key="sess.id"
                 class="session-item is-jumpable"
                 role="listitem"
-                title="点击一键跳转回该讲提问位置"
+                :title="t('ai.jumpToLectureTitle')"
                 @click="handleSelectSession(sess)"
               >
                 <div class="session-main">
@@ -187,7 +189,7 @@
                       class="session-title-input"
                       type="text"
                       maxlength="36"
-                      placeholder="输入会话主题..."
+                      :placeholder="t('ai.sessionTitlePlaceholder')"
                       @click.stop
                       @keydown.enter.stop="saveRename(sess)"
                       @keydown.esc.stop="cancelRename"
@@ -199,11 +201,11 @@
                       :title="sess.title"
                       @dblclick.stop="startRename(sess)"
                     >
-                      {{ sess.title || '新探讨' }}
+                      {{ sess.title || t('ai.defaultTopicTitle') }}
                     </span>
                   </div>
                   <div class="session-meta">
-                    <span class="jump-action-tip">点击一键跳转回该讲</span>
+                    <span class="jump-action-tip">{{ t('ai.jumpToLectureTip') }}</span>
                     <time class="session-time" :datetime="sess.updated_at || sess.created_at">
                       {{ formatTime(sess.updated_at || sess.created_at) }}
                     </time>
@@ -214,8 +216,8 @@
                   <button
                     type="button"
                     class="session-action-btn"
-                    title="重命名（双击标题亦可修改）"
-                    aria-label="重命名会话"
+                    :title="t('ai.renameHintTitle')"
+                    :aria-label="t('ai.renameAria')"
                     @click.stop="startRename(sess)"
                   >
                     <span class="btn-icon" v-html="ICONS.edit"></span>
@@ -223,8 +225,8 @@
                   <button
                     type="button"
                     class="session-action-btn delete-btn"
-                    title="删除该会话"
-                    aria-label="删除该会话"
+                    :title="t('ai.deleteSessionTitle')"
+                    :aria-label="t('ai.deleteSessionAria')"
                     @click.stop="handleDeleteSingle(sess.id)"
                   >
                     <span class="btn-icon" v-html="ICONS.trash"></span>
@@ -237,7 +239,7 @@
           <!-- 3. 全站其他讲次历史 -->
           <div v-if="otherSessions.length > 0" class="history-category-block">
             <div class="category-header">
-              <span class="category-title">全站其他历史</span>
+              <span class="category-title">{{ t('ai.historyGroupOther') }}</span>
               <span class="category-count">{{ otherSessions.length }}</span>
             </div>
             <ul class="session-list" role="list">
@@ -246,7 +248,7 @@
                 :key="sess.id"
                 class="session-item is-jumpable"
                 role="listitem"
-                title="点击一键跳转回该讲提问位置"
+                :title="t('ai.jumpToLectureTitle')"
                 @click="handleSelectSession(sess)"
               >
                 <div class="session-main">
@@ -258,7 +260,7 @@
                       class="session-title-input"
                       type="text"
                       maxlength="36"
-                      placeholder="输入会话主题..."
+                      :placeholder="t('ai.sessionTitlePlaceholder')"
                       @click.stop
                       @keydown.enter.stop="saveRename(sess)"
                       @keydown.esc.stop="cancelRename"
@@ -270,11 +272,11 @@
                       :title="sess.title"
                       @dblclick.stop="startRename(sess)"
                     >
-                      {{ sess.title || '新探讨' }}
+                      {{ sess.title || t('ai.defaultTopicTitle') }}
                     </span>
                   </div>
                   <div class="session-meta">
-                    <span class="jump-action-tip">点击一键跳转回该讲</span>
+                    <span class="jump-action-tip">{{ t('ai.jumpToLectureTip') }}</span>
                     <time class="session-time" :datetime="sess.updated_at || sess.created_at">
                       {{ formatTime(sess.updated_at || sess.created_at) }}
                     </time>
@@ -285,8 +287,8 @@
                   <button
                     type="button"
                     class="session-action-btn"
-                    title="重命名（双击标题亦可修改）"
-                    aria-label="重命名会话"
+                    :title="t('ai.renameHintTitle')"
+                    :aria-label="t('ai.renameAria')"
                     @click.stop="startRename(sess)"
                   >
                     <span class="btn-icon" v-html="ICONS.edit"></span>
@@ -294,8 +296,8 @@
                   <button
                     type="button"
                     class="session-action-btn delete-btn"
-                    title="删除该会话"
-                    aria-label="删除该会话"
+                    :title="t('ai.deleteSessionTitle')"
+                    :aria-label="t('ai.deleteSessionAria')"
                     @click.stop="handleDeleteSingle(sess.id)"
                   >
                     <span class="btn-icon" v-html="ICONS.trash"></span>
@@ -309,20 +311,93 @@
 
       <!-- 抽屉底栏统计 -->
       <footer class="drawer-footer">
-        <span class="footer-count">全站共 {{ allSessions.length }} 个会话</span>
-        <span class="footer-hint">分层对齐索引</span>
+        <span class="footer-count">{{ t('ai.sessionIndexedCount', { count: allSessions.length }) }}</span>
+        <span class="footer-hint">{{ t('ai.sessionIndexedHint') }}</span>
       </footer>
     </div>
   </Transition>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, onMounted } from 'vue'
-import { useRouter } from 'vitepress'
+import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
+import { useData, useRouter } from 'vitepress'
+import { useT } from '../../../i18n/useT.ts'
 import { ICONS } from './icons'
-import { aiState } from './aiState'
-import { neonRepository, getAllSessions, purgeEmptySessions, type AiSession } from './neonRepository'
+import { companionSessionStore } from './sessionStore'
+import { neonRepository, getAllSessions, type AiSession } from './neonRepository'
 import { useLectureContext } from './useLectureContext'
+import { showMessageToast } from './toast'
+
+const { t } = useT()
+const { theme } = useData()
+const drawerRef = ref<HTMLElement | null>(null)
+const closeBtnRef = ref<HTMLButtonElement | null>(null)
+let lastFocusedBeforeDrawer: HTMLElement | null = null
+let focusDrawerTimer: number | null = null
+let windowKeydownAttached = false
+
+function attachDrawerKeydown(): void {
+  if (typeof window === 'undefined' || windowKeydownAttached) return
+  window.addEventListener('keydown', handleDrawerKeydown, true)
+  windowKeydownAttached = true
+}
+
+function detachDrawerKeydown(): void {
+  if (typeof window === 'undefined' || !windowKeydownAttached) return
+  window.removeEventListener('keydown', handleDrawerKeydown, true)
+  windowKeydownAttached = false
+}
+
+function clearDrawerFocusTimer(): void {
+  if (typeof window !== 'undefined' && focusDrawerTimer !== null) {
+    window.clearTimeout(focusDrawerTimer)
+    focusDrawerTimer = null
+  }
+}
+
+function scheduleFocusCloseButton(): void {
+  clearDrawerFocusTimer()
+  void nextTick(() => closeBtnRef.value?.focus())
+  if (typeof window !== 'undefined') {
+    focusDrawerTimer = window.setTimeout(() => {
+      focusDrawerTimer = null
+      if (props.isOpen && drawerRef.value && !drawerRef.value.contains(document.activeElement)) {
+        closeBtnRef.value?.focus()
+      }
+    }, 40)
+  }
+}
+
+function handleDrawerKeydown(e: KeyboardEvent): void {
+  if (!props.isOpen) return
+  if (e.key === 'Escape') {
+    if (editingSessionId.value !== null) return
+    e.preventDefault()
+    e.stopPropagation()
+    handleClose()
+    return
+  }
+  if (e.key !== 'Tab' || !drawerRef.value) return
+  const focusables = Array.from(
+    drawerRef.value.querySelectorAll<HTMLElement>(
+      'button:not(:disabled), [href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])'
+    )
+  ).filter((el) => el.offsetParent !== null || el === document.activeElement)
+  if (focusables.length === 0) return
+  const first = focusables[0]!
+  const last = focusables[focusables.length - 1]!
+  const active = document.activeElement as HTMLElement | null
+  const inside = Boolean(active && drawerRef.value.contains(active))
+  if (!inside || (!e.shiftKey && active === last)) {
+    e.preventDefault()
+    e.stopPropagation()
+    ;(e.shiftKey && !inside ? last : first).focus()
+  } else if (e.shiftKey && active === first) {
+    e.preventDefault()
+    e.stopPropagation()
+    last.focus()
+  }
+}
 
 interface Props {
   isOpen: boolean
@@ -363,9 +438,9 @@ const currentGroupId = computed<string>(() => {
   return props.groupId || lectureInfo.value.groupId || ''
 })
 
-// 当前激活的会话 ID
+// 当前激活的会话 ID（统一来自 companionSessionStore 单一真源，FE-012）
 const activeSessionId = computed<string | null>(() => {
-  return props.currentSessionId || aiState.currentSessionId
+  return props.currentSessionId || companionSessionStore.activeSessionId.value || null
 })
 
 // 讲次标签徽章
@@ -440,19 +515,24 @@ async function saveRename(sess: AiSession): Promise<void> {
   const newTitle = editingTitle.value.trim()
   editingSessionId.value = null
   if (newTitle && newTitle !== sess.title) {
-    sess.title = newTitle
-    await neonRepository.updateSessionTitle(sess.id, newTitle, sess.lecture_id)
+    try {
+      await neonRepository.updateSessionTitle(sess.id, newTitle, sess.lecture_id)
+      sess.title = newTitle
+    } catch (err: unknown) {
+      const detail = err instanceof Error ? err.message : t('ai.networkError')
+      showMessageToast(t('ai.errPersistFailed', { detail }))
+    }
   }
 }
 
-/** 判定标题是否为无意义的默认占位名（如“会话 1”, “会话 2”, “新会话”等） */
+/** Determine whether title is an auto placeholder title. */
 function isGenericTitle(title?: string): boolean {
   if (!title || !title.trim()) return true
-  const t = title.trim()
-  return /^(会话\s*\d*|新会话|新探讨|全站探讨\s*\d*|探讨:\s*全站导读)$/i.test(t)
+  const raw = title.trim()
+  return /^(\u4f1a\u8bdd\s*\d*|\u65b0\u4f1a\u8bdd|\u65b0\u63a2\u8ba8|\u5168\u7ad9\u63a2\u8ba8\s*\d*|\u63a2\u8ba8:\s*\u5168\u7ad9\u5bfc\u8bfb|session\s*\d*|new session|new topic|site topic\s*\d*)$/i.test(raw)
 }
 
-/** 自动为缺乏语义的老会话提炼首问并回写自愈（彻底终结“会话 1”占位符） */
+/** Auto-heal placeholder session titles from the first user prompt. */
 async function healGenericSessionTitles(sessionList: AiSession[]): Promise<void> {
   const genericSessions = sessionList.filter((s) => isGenericTitle(s.title))
   if (genericSessions.length === 0) return
@@ -464,44 +544,37 @@ async function healGenericSessionTitles(sessionList: AiSession[]): Promise<void>
         (m) => m.role === 'user' && m.content && m.content.trim().length > 0
       )
       if (firstUserMsg) {
-        // 清理系统注入上下文前缀，提取纯粹的用户提问
         const cleanContent = firstUserMsg.content
-          .replace(/^\[系统注入上下文.*?\]\s*/s, '')
+          .replace(/^\[(?:\u7cfb\u7edf\u6ce8\u5165\u4e0a\u4e0b\u6587|System Context).*?\]\s*/s, '')
           .replace(/[\r\n]+/g, ' ')
           .trim()
         const refinedTitle = cleanContent.slice(0, 22).trim()
         if (refinedTitle && refinedTitle !== s.title) {
-          s.title = refinedTitle
           await neonRepository.updateSessionTitle(s.id, refinedTitle, s.lecture_id)
+          s.title = refinedTitle
         }
       }
     } catch {
-      // 忽略单项自愈异常
+      // Ignore single-item auto-heal errors so drawer listing remains smooth
     }
   }
 }
 
-// 加载全站与当前讲的历史会话列表
+// 加载全站与当前讲的历史会话列表（不在打开抽屉时无条件清理新建会话，FE-009）
 async function loadSessions(): Promise<void> {
   isLoading.value = true
   try {
-    // 自动清洗历史累积的无消息幽灵会话
-    purgeEmptySessions()
-
     const list = await getAllSessions()
-    allSessions.value = Array.isArray(list) ? list : []
+    const draft = companionSessionStore.draftSession.value
+    const merged = draft && !list.some((s) => s.id === draft.id) ? [draft, ...list] : list
+    allSessions.value = Array.isArray(merged) ? merged : []
     const curr = allSessions.value.filter(
       (s) => s.lecture_id?.toLowerCase() === currentLectureId.value?.toLowerCase()
     )
     sessions.value = curr
 
-    // 若当前无激活会话，且存在已有会话，默认对齐第一个
-    if (!aiState.currentSessionId && curr.length > 0) {
-      aiState.currentSessionId = curr[0].id
-    }
-
     // 后台静默自愈默认无意义的占位标题（提取首问）
-    void healGenericSessionTitles(allSessions.value)
+    void healGenericSessionTitles(list)
   } catch {
     allSessions.value = []
     sessions.value = []
@@ -518,23 +591,28 @@ async function handleSelectSession(sess: AiSession): Promise<void> {
   const isCurrent = sess.lecture_id?.toLowerCase() === currentLectureId.value?.toLowerCase()
 
   if (isCurrent) {
-    aiState.currentSessionId = sess.id
+    companionSessionStore.markExplicitSelection(sess)
     emit('select-session', sess.id)
     emit('update:isOpen', false)
     return
   }
 
-  // 跨讲精准跳转逻辑 (议题 5)
-  const grp = (sess.group_id || 'g01').toLowerCase()
-  const lecMatch = sess.lecture_id.match(/L\d+/i)
-  const lecNum = lecMatch ? lecMatch[0] : 'L01'
-  const targetRoute = `/${grp}/${lecNum}`
+  // 跨讲精准跳转逻辑（从 theme.groups 解析真实 group.dir，兼容 nested 路径 FE-035）
+  const groups = ((theme.value as { groups?: Array<{ id?: string; dir?: string }> })?.groups || [])
+  const rawGrp = (sess.group_id || 'g01').toLowerCase()
+  const matchedGrp = groups.find(
+    (g) => g.dir?.toLowerCase() === rawGrp || g.id?.toLowerCase() === rawGrp || g.dir?.toLowerCase().endsWith(`/${rawGrp}`)
+  )
+  const grpDir = (matchedGrp?.dir || rawGrp).replace(/^\/+|\/+$/g, '')
+  const lecMatch = sess.lecture_id.match(/L(\d+)/i)
+  const lecNum = lecMatch ? `L${lecMatch[1].padStart(2, '0')}` : 'L01'
+  const targetRoute = `/${grpDir}/${lecNum}`
 
   let selectedTextToScroll = ''
   try {
     const msgs = await neonRepository.getMessages(sess.id)
     const quoteMsg = msgs.find(
-      (m) => m.selected_context && m.selected_context !== '无' && m.selected_context.trim().length > 0
+      (m) => m.selected_context && m.selected_context !== '\u65e0' && m.selected_context !== 'None' && m.selected_context.trim().length > 0
     )
     if (quoteMsg?.selected_context) {
       selectedTextToScroll = quoteMsg.selected_context.trim()
@@ -543,7 +621,8 @@ async function handleSelectSession(sess: AiSession): Promise<void> {
     // ignore
   }
 
-  aiState.currentSessionId = sess.id
+  // 保留跨讲显式选择的会话（路由 watcher 不再被 sessions[0] 覆盖，FE-008）
+  companionSessionStore.markExplicitSelection(sess)
   emit('select-session', sess.id)
   emit('update:isOpen', false)
 
@@ -576,39 +655,34 @@ async function handleSelectSession(sess: AiSession): Promise<void> {
   }
 }
 
-// 新建会话
+// 新建会话（仅建立本地惰性草稿，首问成功后再落库，FE-009）
 async function handleCreateSession(): Promise<void> {
   const isHome = !currentLectureId.value
   const lecId = currentLectureId.value || 'global'
   const grpId = currentGroupId.value || 'general'
 
-  isLoading.value = true
-  try {
-    // 智能排重：扫描已有全部会话中的序号，取最大值 + 1，杜绝重复出现“会话 1”
-    const existingNums = allSessions.value
-      .map((s) => {
-        const m = s.title?.match(/会话\s*(\d+)/) || s.title?.match(/全站探讨\s*(\d+)/)
-        return m ? parseInt(m[1], 10) : 0
-      })
-      .filter((n) => !isNaN(n))
-    const maxNum = existingNums.length > 0 ? Math.max(...existingNums) : allSessions.value.length
-    const nextIndex = maxNum + 1
+  const existingNums = allSessions.value
+    .map((s) => {
+      const m =
+        s.title?.match(/\u4f1a\u8bdd\s*(\d+)/) ||
+        s.title?.match(/\u5168\u7ad9\u63a2\u8ba8\s*(\d+)/) ||
+        s.title?.match(/(?:Session|Site topic)\s*(\d+)/i)
+      return m ? parseInt(m[1], 10) : 0
+    })
+    .filter((n) => !isNaN(n))
+  const maxNum = existingNums.length > 0 ? Math.max(...existingNums) : allSessions.value.length
+  const nextIndex = maxNum + 1
 
-    const title = isHome ? `全站探讨 ${nextIndex}` : `会话 ${nextIndex}`
-    const newSession = await neonRepository.createSession(lecId, grpId, title)
-    allSessions.value.unshift(newSession)
-    if (!isHome) {
-      sessions.value.unshift(newSession)
-    }
-    aiState.currentSessionId = newSession.id
-    emit('create-session', newSession)
-    emit('select-session', newSession.id)
-    emit('update:isOpen', false)
-  } catch {
-    // 错误处理已由仓储兜底
-  } finally {
-    isLoading.value = false
+  const title = isHome
+    ? t('ai.siteTopicIndexed', { n: nextIndex })
+    : t('ai.lectureSessionIndexed', { n: nextIndex })
+  const draftSession = companionSessionStore.startNewDraft(lecId, grpId, title)
+  allSessions.value.unshift(draftSession)
+  if (!isHome) {
+    sessions.value.unshift(draftSession)
   }
+  emit('create-session', draftSession)
+  emit('update:isOpen', false)
 }
 
 // 删除单个会话
@@ -620,50 +694,48 @@ async function handleDeleteSingle(sessionId: string): Promise<void> {
     emit('delete-session', sessionId)
 
     // 若删除的是当前正在对话的会话，自动切换到剩余第一项或清空
-    if (aiState.currentSessionId === sessionId) {
+    if (companionSessionStore.activeSessionId.value === sessionId) {
       const remaining = currentLectureId.value ? sessions.value : allSessions.value
-      if (remaining.length > 0) {
-        aiState.currentSessionId = remaining[0].id
+      if (remaining.length > 0 && remaining[0]) {
+        companionSessionStore.activeSessionId.value = remaining[0].id
         emit('select-session', remaining[0].id)
       } else {
-        aiState.currentSessionId = null
+        companionSessionStore.activeSessionId.value = ''
       }
     }
-  } catch {
-    // 忽略异常
+  } catch (err: unknown) {
+    const detail = err instanceof Error ? err.message : t('ai.networkError')
+    showMessageToast(t('ai.errPersistFailed', { detail }))
   }
 }
 
-// 点击清空按钮（触发展开二次确认）
 function handleClearClick(): void {
   isConfirmingClear.value = !isConfirmingClear.value
 }
 
-// 确认清空当前讲或全站所有会话
 async function confirmClearAll(): Promise<void> {
   const lecId = currentLectureId.value
   isLoading.value = true
   isConfirmingClear.value = false
   try {
     if (!lecId) {
-      // 首页清空全站会话
       for (const s of allSessions.value) {
         await neonRepository.deleteSession(s.id, s.lecture_id)
       }
       allSessions.value = []
       sessions.value = []
     } else {
-      // 单讲清空
       await neonRepository.clearSessions(lecId)
       sessions.value = []
       allSessions.value = allSessions.value.filter(
         (s) => s.lecture_id?.toLowerCase() !== lecId.toLowerCase()
       )
     }
-    aiState.currentSessionId = null
+    companionSessionStore.activeSessionId.value = ''
     emit('clear-sessions')
-  } catch {
-    // 忽略异常
+  } catch (err: unknown) {
+    const detail = err instanceof Error ? err.message : t('ai.networkError')
+    showMessageToast(t('ai.errPersistFailed', { detail }))
   } finally {
     isLoading.value = false
   }
@@ -682,6 +754,25 @@ watch(
     if (open) {
       isConfirmingClear.value = false
       loadSessions()
+      if (typeof document !== 'undefined') {
+        lastFocusedBeforeDrawer = document.activeElement as HTMLElement | null
+        attachDrawerKeydown()
+        scheduleFocusCloseButton()
+      }
+    } else {
+      clearDrawerFocusTimer()
+      detachDrawerKeydown()
+      if (
+        typeof document !== 'undefined' &&
+        lastFocusedBeforeDrawer &&
+        lastFocusedBeforeDrawer.isConnected
+      ) {
+        const target = lastFocusedBeforeDrawer
+        lastFocusedBeforeDrawer = null
+        void nextTick(() => target.focus())
+      } else {
+        lastFocusedBeforeDrawer = null
+      }
     }
   }
 )
@@ -699,7 +790,14 @@ watch(
 onMounted(() => {
   if (props.isOpen) {
     loadSessions()
+    attachDrawerKeydown()
+    scheduleFocusCloseButton()
   }
+})
+
+onUnmounted(() => {
+  clearDrawerFocusTimer()
+  detachDrawerKeydown()
 })
 
 defineExpose({
@@ -716,15 +814,13 @@ defineExpose({
   z-index: 30;
   display: flex;
   flex-direction: column;
-  background-color: var(--vp-c-bg, #ffffff);
-  border-left: 1px solid var(--vp-c-border, #e2e8f0);
-  box-shadow: -4px 0 20px rgba(0, 0, 0, 0.08);
+  background-color: var(--lec-bg);
+  border-left: 1px solid var(--lec-border);
   font-size: 13px;
-  color: var(--vp-c-text-1, #1a202c);
+  color: var(--lec-text);
   overflow: hidden;
 }
 
-/* 抽屉平滑滑出过渡 */
 .drawer-slide-enter-active,
 .drawer-slide-leave-active {
   transition: transform 0.22s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.2s ease;
@@ -736,14 +832,13 @@ defineExpose({
   opacity: 0;
 }
 
-/* 顶栏 */
 .drawer-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
   padding: 12px 14px;
-  border-bottom: 1px solid var(--vp-c-border, #e2e8f0);
-  background-color: var(--vp-c-bg-soft, #f8fafc);
+  border-bottom: 1px solid var(--lec-border);
+  background-color: var(--lec-surface);
 }
 
 .header-left {
@@ -757,14 +852,14 @@ defineExpose({
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  color: var(--vp-c-brand-1, #3b82f6);
+  color: var(--lec-accent);
 }
 
 .header-title {
   margin: 0;
   font-size: 14px;
   font-weight: 600;
-  color: var(--vp-c-text-1, #1a202c);
+  color: var(--lec-text);
 }
 
 .lecture-badge {
@@ -772,11 +867,11 @@ defineExpose({
   align-items: center;
   padding: 1px 6px;
   font-size: 11px;
-  font-family: var(--vp-font-family-mono, monospace);
+  font-family: var(--lec-font-mono);
   font-weight: 500;
-  color: var(--vp-c-brand-1, #3b82f6);
-  background-color: var(--vp-c-brand-soft, rgba(59, 130, 246, 0.1));
-  border-radius: 4px;
+  color: var(--lec-accent);
+  background-color: var(--lec-accent-tint);
+  border-radius: var(--lec-radius-1);
 }
 
 .header-close-btn {
@@ -788,24 +883,23 @@ defineExpose({
   padding: 0;
   border: none;
   background: transparent;
-  color: var(--vp-c-text-2, #64748b);
-  border-radius: 4px;
+  color: var(--lec-text-muted);
+  border-radius: var(--lec-radius-1);
   cursor: pointer;
   transition: background-color 0.15s ease, color 0.15s ease;
 }
 
 .header-close-btn:hover {
-  background-color: var(--vp-c-bg-alt, #f1f5f9);
-  color: var(--vp-c-text-1, #0f172a);
+  background-color: var(--lec-bg);
+  color: var(--lec-text);
 }
 
-/* 操作按钮组 */
 .drawer-actions {
   display: flex;
   gap: 8px;
   padding: 10px 14px;
-  border-bottom: 1px solid var(--vp-c-border, #e2e8f0);
-  background-color: var(--vp-c-bg, #ffffff);
+  border-bottom: 1px solid var(--lec-border);
+  background-color: var(--lec-bg);
 }
 
 .action-btn {
@@ -815,7 +909,7 @@ defineExpose({
   gap: 6px;
   height: 32px;
   padding: 0 10px;
-  border-radius: 6px;
+  border-radius: var(--lec-radius-1);
   font-size: 12px;
   font-weight: 500;
   cursor: pointer;
@@ -830,9 +924,9 @@ defineExpose({
 
 .action-create {
   flex: 1;
-  background-color: var(--vp-c-brand-1, #3b82f6);
-  color: #ffffff;
-  border-color: var(--vp-c-brand-1, #3b82f6);
+  background-color: var(--lec-accent);
+  color: var(--lec-on-accent);
+  border-color: var(--lec-accent);
 }
 
 .action-create:hover:not(:disabled) {
@@ -841,21 +935,21 @@ defineExpose({
 
 .action-clear {
   flex: 1;
-  background-color: var(--vp-c-bg-alt, #f1f5f9);
-  color: var(--vp-c-text-2, #64748b);
-  border-color: var(--vp-c-border, #e2e8f0);
+  background-color: var(--lec-surface);
+  color: var(--lec-text-muted);
+  border-color: var(--lec-border);
 }
 
 .action-clear:hover:not(:disabled) {
-  background-color: var(--vp-c-danger-soft, rgba(239, 68, 68, 0.1));
-  color: var(--vp-c-danger-1, #ef4444);
-  border-color: var(--vp-c-danger-1, #ef4444);
+  background-color: var(--lec-danger-tint);
+  color: var(--lec-danger);
+  border-color: var(--lec-danger);
 }
 
 .action-clear.is-confirming {
-  background-color: var(--vp-c-danger-soft, rgba(239, 68, 68, 0.1));
-  color: var(--vp-c-danger-1, #ef4444);
-  border-color: var(--vp-c-danger-1, #ef4444);
+  background-color: var(--lec-danger-tint);
+  color: var(--lec-danger);
+  border-color: var(--lec-danger);
 }
 
 .btn-icon {
@@ -864,17 +958,16 @@ defineExpose({
   justify-content: center;
 }
 
-/* 清空确认弹条 */
 .clear-confirm-bar {
   padding: 10px 14px;
-  background-color: var(--vp-c-danger-soft, rgba(239, 68, 68, 0.08));
-  border-bottom: 1px solid var(--vp-c-danger-1, #ef4444);
+  background-color: var(--lec-danger-tint);
+  border-bottom: 1px solid var(--lec-danger);
 }
 
 .confirm-message {
   margin: 0 0 8px 0;
   font-size: 12px;
-  color: var(--vp-c-danger-1, #ef4444);
+  color: var(--lec-danger);
   line-height: 1.4;
 }
 
@@ -887,23 +980,22 @@ defineExpose({
   padding: 4px 10px;
   font-size: 11px;
   font-weight: 500;
-  border-radius: 4px;
+  border-radius: var(--lec-radius-1);
   cursor: pointer;
   border: 1px solid transparent;
 }
 
 .confirm-btn.danger {
-  background-color: var(--vp-c-danger-1, #ef4444);
-  color: #ffffff;
+  background-color: var(--lec-danger);
+  color: var(--lec-on-accent);
 }
 
 .confirm-btn.cancel {
-  background-color: var(--vp-c-bg, #ffffff);
-  color: var(--vp-c-text-2, #64748b);
-  border-color: var(--vp-c-border, #e2e8f0);
+  background-color: var(--lec-bg);
+  color: var(--lec-text-muted);
+  border-color: var(--lec-border);
 }
 
-/* 列表区 */
 .drawer-content {
   flex: 1;
   overflow-y: auto;
@@ -919,14 +1011,14 @@ defineExpose({
   min-height: 200px;
   text-align: center;
   padding: 24px 16px;
-  color: var(--vp-c-text-3, #94a3b8);
+  color: var(--lec-text-muted);
 }
 
 .empty-icon {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  color: var(--vp-c-text-3, #94a3b8);
+  color: var(--lec-text-muted);
   margin-bottom: 12px;
 }
 
@@ -934,20 +1026,20 @@ defineExpose({
   margin: 0 0 6px 0;
   font-size: 13px;
   font-weight: 600;
-  color: var(--vp-c-text-2, #64748b);
+  color: var(--lec-text-muted);
 }
 
 .empty-subtitle {
   margin: 0;
   font-size: 12px;
   line-height: 1.5;
-  color: var(--vp-c-text-3, #94a3b8);
+  color: var(--lec-text-muted);
 }
 
 .pulse-line {
   width: 32px;
   height: 2px;
-  background-color: var(--vp-c-brand-1, #3b82f6);
+  background-color: var(--lec-accent);
   border-radius: 1px;
   margin-bottom: 10px;
   animation: pulse-width 1.2s infinite ease-in-out;
@@ -962,7 +1054,6 @@ defineExpose({
   font-size: 12px;
 }
 
-/* 列表项 */
 .session-list {
   list-style: none;
   margin: 0;
@@ -977,21 +1068,21 @@ defineExpose({
   align-items: center;
   justify-content: space-between;
   padding: 8px 10px;
-  border-radius: 6px;
-  border: 1px solid var(--vp-c-border, #e2e8f0);
-  background-color: var(--vp-c-bg, #ffffff);
+  border-radius: var(--lec-radius-1);
+  border: 1px solid var(--lec-border);
+  background-color: var(--lec-bg);
   cursor: pointer;
   transition: all 0.15s ease;
 }
 
 .session-item:hover {
-  background-color: var(--vp-c-bg-soft, #f8fafc);
-  border-color: var(--vp-c-brand-soft, #cbd5e1);
+  background-color: var(--lec-surface);
+  border-color: var(--lec-accent);
 }
 
 .session-item.is-active {
-  background-color: var(--vp-c-brand-soft, rgba(59, 130, 246, 0.08));
-  border-color: var(--vp-c-brand-1, #3b82f6);
+  background-color: var(--lec-accent-tint);
+  border-color: var(--lec-accent);
 }
 
 .session-main {
@@ -1012,7 +1103,7 @@ defineExpose({
 .session-title {
   font-size: 13px;
   font-weight: 500;
-  color: var(--vp-c-text-1, #1a202c);
+  color: var(--lec-text);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1022,9 +1113,9 @@ defineExpose({
   flex-shrink: 0;
   padding: 0 4px;
   font-size: 10px;
-  border-radius: 3px;
-  background-color: var(--vp-c-brand-1, #3b82f6);
-  color: #ffffff;
+  border-radius: var(--lec-radius-1);
+  background-color: var(--lec-accent);
+  color: var(--lec-on-accent);
 }
 
 .session-meta {
@@ -1035,8 +1126,8 @@ defineExpose({
 
 .session-time {
   font-size: 11px;
-  font-family: var(--vp-font-family-mono, monospace);
-  color: var(--vp-c-text-3, #94a3b8);
+  font-family: var(--lec-font-mono);
+  color: var(--lec-text-muted);
 }
 
 .session-actions {
@@ -1057,8 +1148,8 @@ defineExpose({
   padding: 0;
   border: none;
   background: transparent;
-  color: var(--vp-c-text-3, #94a3b8);
-  border-radius: 4px;
+  color: var(--lec-text-muted);
+  border-radius: var(--lec-radius-1);
   cursor: pointer;
   transition: opacity 0.15s ease, color 0.15s ease, background-color 0.15s ease;
 }
@@ -1069,45 +1160,42 @@ defineExpose({
 }
 
 .session-action-btn:hover {
-  background-color: var(--vp-c-bg-alt, #f1f5f9);
-  color: var(--vp-c-brand-1, #3b82f6);
+  background-color: var(--lec-surface);
+  color: var(--lec-accent);
 }
 
 .session-action-btn.delete-btn:hover {
-  background-color: var(--vp-c-danger-soft, rgba(239, 68, 68, 0.1));
-  color: var(--vp-c-danger-1, #ef4444);
+  background-color: var(--lec-danger-tint);
+  color: var(--lec-danger);
 }
 
 .session-title-input {
   width: 100%;
   font-size: 13px;
   font-weight: 500;
-  color: var(--vp-c-text-1, #1a202c);
-  background-color: var(--vp-c-bg, #ffffff);
-  border: 1px solid var(--vp-c-brand-1, #3b82f6);
-  border-radius: 4px;
+  color: var(--lec-text);
+  background-color: var(--lec-bg);
+  border: 1px solid var(--lec-accent);
+  border-radius: var(--lec-radius-1);
   padding: 1px 6px;
-  outline: none;
-  box-shadow: 0 0 0 2px var(--vp-c-brand-soft, rgba(59, 130, 246, 0.2));
+  outline: 2px solid var(--lec-accent-tint);
 }
 
-/* 底栏 */
 .drawer-footer {
   display: flex;
   align-items: center;
   justify-content: space-between;
   padding: 8px 14px;
-  border-top: 1px solid var(--vp-c-border, #e2e8f0);
-  background-color: var(--vp-c-bg-soft, #f8fafc);
+  border-top: 1px solid var(--lec-border);
+  background-color: var(--lec-surface);
   font-size: 11px;
-  color: var(--vp-c-text-3, #94a3b8);
+  color: var(--lec-text-muted);
 }
 
 .footer-count {
-  font-family: var(--vp-font-family-mono, monospace);
+  font-family: var(--lec-font-mono);
 }
 
-/* 历史会话三层分级样式 (议题 5) */
 .history-category-block {
   margin-bottom: 18px;
 }
@@ -1118,31 +1206,31 @@ defineExpose({
   padding: 4px 6px 6px;
   font-size: 11px;
   font-weight: 600;
-  color: var(--vp-c-text-3);
+  color: var(--lec-text-muted);
   letter-spacing: 0.5px;
 }
 .category-count {
   font-size: 10px;
   padding: 1px 6px;
   border-radius: 999px;
-  background: var(--vp-c-bg-soft);
-  color: var(--vp-c-text-3);
-  font-family: var(--vp-font-family-mono, monospace);
+  background: var(--lec-surface);
+  color: var(--lec-text-muted);
+  font-family: var(--lec-font-mono);
 }
 .session-lec-tag {
   font-size: 10px;
   font-weight: 600;
-  font-family: var(--vp-font-family-mono, monospace);
+  font-family: var(--lec-font-mono);
   padding: 1px 5px;
-  border-radius: 4px;
-  background: var(--vp-c-brand-soft, rgba(62, 99, 221, 0.12));
-  color: var(--vp-c-brand-1);
+  border-radius: var(--lec-radius-1);
+  background: var(--lec-accent-tint);
+  color: var(--lec-accent);
   margin-right: 4px;
   flex-shrink: 0;
 }
 .jump-action-tip {
   font-size: 10.5px;
-  color: var(--vp-c-brand-1);
+  color: var(--lec-accent);
 }
 .session-item.is-jumpable:hover .jump-action-tip {
   text-decoration: underline;

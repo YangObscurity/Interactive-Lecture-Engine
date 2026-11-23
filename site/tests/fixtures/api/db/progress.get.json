@@ -1,0 +1,38 @@
+[
+  {
+    "lecture_id": "g01-l01",
+    "group_id": "g01",
+    "notion_node_id": "fixture_node_g01_l01",
+    "notion_page_id": "00000000-0000-4000-8000-000000000101",
+    "status": "已完成",
+    "completed_at": "2026-11-05T12:00:00.000Z",
+    "updated_at": "2026-11-05T12:00:00.000Z"
+  },
+  {
+    "lecture_id": "g01-l02",
+    "group_id": "g01",
+    "notion_node_id": "fixture_node_g01_l02",
+    "notion_page_id": "00000000-0000-4000-8000-000000000102",
+    "status": "学习中",
+    "completed_at": null,
+    "updated_at": "2026-11-12T08:30:00.000Z"
+  },
+  {
+    "lecture_id": "g01-l03",
+    "group_id": "g01",
+    "notion_node_id": null,
+    "notion_page_id": null,
+    "status": "未开始",
+    "completed_at": null,
+    "updated_at": "2026-10-20T00:00:00.000Z"
+  },
+  {
+    "lecture_id": "spi-l01",
+    "group_id": "spi",
+    "notion_node_id": "fixture_node_spi_l01",
+    "notion_page_id": "00000000-0000-4000-8000-000000000201",
+    "status": "学习中",
+    "completed_at": null,
+    "updated_at": "2026-11-14T21:10:00.000Z"
+  }
+]

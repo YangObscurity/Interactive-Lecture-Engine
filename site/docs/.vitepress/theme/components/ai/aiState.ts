@@ -12,13 +12,34 @@ import { reactive } from 'vue'
 
 export type ScopeType = 'lecture' | 'group' | 'all' | 'selection'
 
+export interface PendingQuickAction {
+  actionId: string
+  selectedText?: string
+}
+
+export interface PendingConceptAction {
+  mode: 'create' | 'attach' | 'edit' | 'supplement' | 'delete'
+  selectedText: string
+  targetSlug?: string
+  lecturePath: string
+  sectionHeading: string
+  beforeContext: string
+  afterContext: string
+}
+
 export interface AiGlobalState {
   isOpen: boolean
   activeScope: ScopeType
   quotedText: string
   currentSessionId: string | null
   isStreaming: boolean
+  pendingAction: PendingQuickAction | null
+  conceptAction: PendingConceptAction | null
   openSidebar: (quote?: string) => void
+  dispatchAction: (actionId: string, quote?: string) => void
+  consumePendingAction: () => PendingQuickAction | null
+  openConceptTask: (task: PendingConceptAction) => void
+  clearConceptTask: () => void
   closeSidebar: () => void
   toggleSidebar: () => void
   setQuotedText: (text: string) => void
@@ -26,19 +47,55 @@ export interface AiGlobalState {
   setScope: (scope: ScopeType) => void
 }
 
-export const aiState = reactive<AiGlobalState>({
+export const aiState: AiGlobalState = reactive<AiGlobalState>({
   isOpen: false,
   activeScope: 'lecture',
   quotedText: '',
   currentSessionId: null,
   isStreaming: false,
+  pendingAction: null,
+  conceptAction: null,
 
-  openSidebar(quote?: string) {
+  openSidebar(quote?: string): void {
     aiState.isOpen = true
+    aiState.conceptAction = null
     if (quote && quote.trim()) {
       aiState.quotedText = quote.trim()
       aiState.activeScope = 'selection'
     }
+  },
+
+  dispatchAction(actionId: string, quote?: string): void {
+    const cleanQuote = quote?.trim() || ''
+    aiState.conceptAction = null
+    if (cleanQuote) {
+      aiState.quotedText = cleanQuote
+      aiState.activeScope = 'selection'
+    }
+    aiState.pendingAction = {
+      actionId,
+      ...(cleanQuote ? { selectedText: cleanQuote } : {}),
+    }
+    aiState.isOpen = true
+  },
+
+  openConceptTask(task: PendingConceptAction): void {
+    aiState.conceptAction = task
+    if (task.selectedText.trim()) {
+      aiState.quotedText = task.selectedText.trim()
+      aiState.activeScope = 'selection'
+    }
+    aiState.isOpen = true
+  },
+
+  clearConceptTask(): void {
+    aiState.conceptAction = null
+  },
+
+  consumePendingAction(): PendingQuickAction | null {
+    const next: PendingQuickAction | null = aiState.pendingAction
+    aiState.pendingAction = null
+    return next
   },
 
   closeSidebar() {

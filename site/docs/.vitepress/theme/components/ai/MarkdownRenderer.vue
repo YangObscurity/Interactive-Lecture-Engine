@@ -21,12 +21,14 @@
  *   - 内存与生命周期安全：计时器及时清理，事件采用根容器委托，杜绝内存泄漏。
  */
 
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { Marked } from 'marked'
 import katex from 'katex'
 import DOMPurify from 'dompurify'
 import { createHighlighter, type Highlighter } from 'shiki'
+import { currentLang, translate } from '../../../i18n/index.ts'
 import { ICONS } from './icons'
+import { resolveDomPurifyInstance, sanitizeHtmlFailClosed } from './markdownSanitize'
 
 interface Props {
   /** 待渲染的 Markdown 源码 */
@@ -50,6 +52,43 @@ const emit = defineEmits<{
 const isMounted = ref(false)
 const highlighterReady = ref(false)
 const rootContainerRef = ref<HTMLElement | null>(null)
+const displayedContent = ref(props.content)
+
+const STREAM_RENDER_THROTTLE_MS = 60
+let streamThrottleTimer: ReturnType<typeof setTimeout> | null = null
+let lastStreamRenderAt = 0
+
+function clearStreamThrottleTimer() {
+  if (streamThrottleTimer !== null) {
+    clearTimeout(streamThrottleTimer)
+    streamThrottleTimer = null
+  }
+}
+
+watch(
+  [() => props.content, () => props.isStreaming],
+  ([nextContent, streaming]) => {
+    if (!streaming) {
+      clearStreamThrottleTimer()
+      displayedContent.value = nextContent
+      lastStreamRenderAt = Date.now()
+      return
+    }
+    const now = Date.now()
+    const elapsed = now - lastStreamRenderAt
+    if (elapsed >= STREAM_RENDER_THROTTLE_MS) {
+      clearStreamThrottleTimer()
+      displayedContent.value = nextContent
+      lastStreamRenderAt = now
+    } else if (streamThrottleTimer === null) {
+      streamThrottleTimer = setTimeout(() => {
+        streamThrottleTimer = null
+        displayedContent.value = props.content
+        lastStreamRenderAt = Date.now()
+      }, STREAM_RENDER_THROTTLE_MS - elapsed)
+    }
+  }
+)
 
 /** 活跃的复制反馈计时器集合，组件卸载时统一销毁 */
 const activeTimers = new Set<ReturnType<typeof setTimeout>>()
@@ -172,7 +211,7 @@ function renderLatex(tex: string, displayMode: boolean): string {
     return katex.renderToString(tex, {
       displayMode,
       throwOnError: false,
-      errorColor: '#ef4444',
+      errorColor: 'currentColor',
       strict: false,
       output: 'htmlAndMathml'
     })
@@ -214,15 +253,19 @@ function buildMarkedInstance(): Marked {
     renderer(token: { text: string }) {
       const tex = token.text
       const rendered = renderLatex(tex, true)
+      const lang = currentLang()
+      const copyTitle = escapeAttr(translate(lang, 'ai.copyLatexBtnTitle'))
+      const copyLabel = escapeHtml(translate(lang, 'ai.copy'))
+      const clickTitle = escapeAttr(translate(lang, 'ai.clickCopyLatexTitle'))
       return `<div class="ai-math-block-container">\n` +
         `  <div class="ai-math-toolbar">\n` +
         `    <span class="ai-math-tag">LaTeX</span>\n` +
-        `    <button type="button" class="ai-math-copy-btn" data-tex="${escapeAttr(tex)}" title="复制 LaTeX 源码">\n` +
+        `    <button type="button" class="ai-math-copy-btn" data-tex="${escapeAttr(tex)}" title="${copyTitle}">\n` +
         `      <span class="btn-icon">${ICONS.copy}</span>\n` +
-        `      <span class="btn-text">复制</span>\n` +
+        `      <span class="btn-text">${copyLabel}</span>\n` +
         `    </button>\n` +
         `  </div>\n` +
-        `  <div class="math-node math-block" data-tex="${escapeAttr(tex)}" title="点击复制 LaTeX">${rendered}</div>\n` +
+        `  <div class="math-node math-block" data-tex="${escapeAttr(tex)}" title="${clickTitle}">${rendered}</div>\n` +
         `</div>\n`
     }
   }
@@ -261,7 +304,8 @@ function buildMarkedInstance(): Marked {
     renderer(token: { text: string }) {
       const tex = token.text
       const rendered = renderLatex(tex, false)
-      return `<span class="math-node math-inline" data-tex="${escapeAttr(tex)}" title="点击复制 LaTeX">${rendered}</span>`
+      const clickTitle = escapeAttr(translate(currentLang(), 'ai.clickCopyLatexTitle'))
+      return `<span class="math-node math-inline" data-tex="${escapeAttr(tex)}" title="${clickTitle}">${rendered}</span>`
     }
   }
 
@@ -274,13 +318,16 @@ function buildMarkedInstance(): Marked {
         const lang = (rawLang || '').trim().split(/\s+/)[0].toLowerCase() || 'text'
         const badgeText = (rawLang || 'TEXT').trim().split(/\s+/)[0].toUpperCase()
         const highlighted = renderCodeHighlight(text, lang)
+        const locale = currentLang()
+        const copyTitle = escapeAttr(translate(locale, 'ai.copyCodeTitle'))
+        const copyLabel = escapeHtml(translate(locale, 'ai.copy'))
 
         return `<div class="ai-code-block language-${escapeAttr(lang)}">\n` +
           `  <div class="ai-code-header">\n` +
           `    <span class="ai-code-lang">${escapeHtml(badgeText)}</span>\n` +
-          `    <button type="button" class="ai-code-copy-btn" data-code="${escapeAttr(text)}" title="复制代码">\n` +
+          `    <button type="button" class="ai-code-copy-btn" data-code="${escapeAttr(text)}" title="${copyTitle}">\n` +
           `      <span class="btn-icon">${ICONS.copy}</span>\n` +
-          `      <span class="btn-text">复制</span>\n` +
+          `      <span class="btn-text">${copyLabel}</span>\n` +
           `    </button>\n` +
           `  </div>\n` +
           `  <div class="ai-code-body">${highlighted}</div>\n` +
@@ -295,73 +342,32 @@ function buildMarkedInstance(): Marked {
 const parser = buildMarkedInstance()
 
 /**
- * XSS 安全清洗过滤
+ * XSS 安全清洗过滤（fail-closed，禁止 style 属性注入、禁止 img、强制 rel="noopener noreferrer"）
  */
 function sanitizeHtmlSafe(rawHtml: string): string {
-  if (typeof window === 'undefined') {
-    return rawHtml
-  }
-
-  try {
-    interface SanitizeOptions {
-      USE_PROFILES?: Record<string, boolean>
-      ADD_TAGS?: string[]
-      ADD_ATTR?: string[]
-    }
-    type PurifyFn = (html: string, options?: SanitizeOptions) => string
-    const purifyLib = DOMPurify as unknown as { sanitize?: PurifyFn; default?: (w: Window) => { sanitize: PurifyFn } } | ((w: Window) => { sanitize: PurifyFn })
-    const sanitizeFn: PurifyFn | undefined =
-      typeof purifyLib === 'function'
-        ? purifyLib(window).sanitize
-        : typeof purifyLib?.sanitize === 'function'
-          ? purifyLib.sanitize
-          : typeof purifyLib?.default === 'function'
-            ? purifyLib.default(window).sanitize
-            : undefined
-
-    if (!sanitizeFn) {
-      return rawHtml
-    }
-
-    return sanitizeFn(rawHtml, {
-      USE_PROFILES: { html: true, mathMl: true, svg: true },
-      ADD_TAGS: [
-        'semantics', 'annotation', 'mstyle', 'mspace', 'mpadded',
-        'mphantom', 'mfrac', 'msqrt', 'mroot', 'munder', 'mover',
-        'munderover', 'msup', 'msub', 'msubsup', 'mtable', 'mtr',
-        'mtd', 'mlabeledtr', 'mrow', 'mi', 'mo', 'mn', 'ms', 'mtext'
-      ],
-      ADD_ATTR: [
-        'display', 'style', 'aria-hidden', 'data-tex', 'data-code',
-        'data-lang', 'target', 'tabindex', 'xmlns', 'viewBox', 'width',
-        'height', 'fill', 'stroke', 'stroke-width', 'stroke-linecap',
-        'stroke-linejoin', 'd', 'points', 'x', 'y', 'x1', 'y1', 'x2', 'y2',
-        'rx', 'ry', 'r', 'cx', 'cy'
-      ]
-    })
-  } catch {
-    return rawHtml
-  }
+  const win = typeof window !== 'undefined' ? window : null
+  return sanitizeHtmlFailClosed(rawHtml, resolveDomPurifyInstance(DOMPurify, win))
 }
 
 /**
  * 响应式计算最终渲染 HTML
  */
 const renderedHtml = computed(() => {
-  // 依赖 highlighterReady 确保高亮器初始化后自动重算
+  // 依赖 isMounted 与 highlighterReady 确保客户端挂载和高亮器就绪后自动重算
+  void isMounted.value
   void highlighterReady.value
 
-  let raw = props.content
+  let raw = displayedContent.value
   if (!raw || !raw.trim()) {
     return ''
   }
 
-  // 终极自愈保护：将任何未解包的 {{current_lecture}}、{{group}}、{{outline}}、{{selection}} 模板占位符净化替换
+  const locale = currentLang()
   raw = raw
-    .replace(/\{\{\s*current_lecture\s*\}\}/gi, '全站讲义知识库')
-    .replace(/\{\{\s*group\s*\}\}/gi, '全部课程组')
-    .replace(/\{\{\s*outline\s*\}\}/gi, '全篇导览')
-    .replace(/\{\{\s*selection\s*\}\}/gi, '无')
+    .replace(/\{\{\s*current_lecture\s*\}\}/gi, translate(locale, 'ai.globalContextName'))
+    .replace(/\{\{\s*group\s*\}\}/gi, translate(locale, 'ai.globalGroupName'))
+    .replace(/\{\{\s*outline\s*\}\}/gi, translate(locale, 'ai.globalOutlineName'))
+    .replace(/\{\{\s*selection\s*\}\}/gi, translate(locale, 'ai.noSelection'))
 
   try {
     const rawParsed = parser.parse(raw) as string
@@ -441,7 +447,8 @@ const handleContainerClick = async (event: MouseEvent) => {
     if (code) {
       const ok = await copyToClipboard(code)
       if (ok) {
-        triggerButtonFeedback(codeBtn, '已复制', '复制')
+        const locale = currentLang()
+        triggerButtonFeedback(codeBtn, translate(locale, 'ai.copied'), translate(locale, 'ai.copy'))
         emit('copied', { type: 'code', text: code })
       }
     }
@@ -457,7 +464,8 @@ const handleContainerClick = async (event: MouseEvent) => {
     if (tex) {
       const ok = await copyToClipboard(tex)
       if (ok) {
-        triggerButtonFeedback(mathBtn, '已复制', '复制')
+        const locale = currentLang()
+        triggerButtonFeedback(mathBtn, translate(locale, 'ai.copied'), translate(locale, 'ai.copy'))
         emit('copied', { type: 'tex', text: tex })
       }
     }
@@ -493,6 +501,7 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
+  clearStreamThrottleTimer()
   activeTimers.forEach((timer) => clearTimeout(timer))
   activeTimers.clear()
 })
@@ -511,10 +520,10 @@ onUnmounted(() => {
 <style scoped>
 /* ================= 全局容器与排版基准 (随侧边栏无极拉伸动态缩放) ================= */
 .ai-markdown-content {
-  font-family: var(--vp-font-family-base, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif);
+  font-family: var(--lec-font-body);
   font-size: var(--ai-chat-font-size, 14px) !important;
   line-height: var(--ai-chat-line-height, 1.65) !important;
-  color: var(--vp-c-text-1);
+  color: var(--lec-text);
   word-break: break-word;
   transition: font-size 0.28s ease, line-height 0.28s ease;
 }
@@ -544,10 +553,10 @@ onUnmounted(() => {
   margin: 1em 0 0.4em;
   font-weight: 600;
   line-height: 1.35;
-  color: var(--vp-c-text-1);
+  color: var(--lec-text);
 }
 
-.ai-markdown-content :deep(h1) { font-size: 1.25em; border-bottom: 1px solid var(--vp-c-divider); padding-bottom: 0.3em; }
+.ai-markdown-content :deep(h1) { font-size: 1.25em; border-bottom: 1px solid var(--lec-border); padding-bottom: 0.3em; }
 .ai-markdown-content :deep(h2) { font-size: 1.15em; }
 .ai-markdown-content :deep(h3) { font-size: 1.05em; }
 .ai-markdown-content :deep(h4) { font-size: 1em; }
@@ -565,20 +574,20 @@ onUnmounted(() => {
 .ai-markdown-content :deep(blockquote) {
   margin: 0.8em 0;
   padding: 0.5em 0.8em;
-  border-left: 3px solid var(--vp-c-brand-1, #3eaf7c);
-  background: var(--vp-c-bg-soft, rgba(0, 0, 0, 0.03));
-  color: var(--vp-c-text-2);
-  border-radius: 0 4px 4px 0;
+  border-left: 3px solid var(--lec-accent);
+  background: var(--lec-surface);
+  color: var(--lec-text-muted);
+  border-radius: 0 var(--lec-radius-1) var(--lec-radius-1) 0;
 }
 
 .ai-markdown-content :deep(hr) {
   margin: 1em 0;
   border: none;
-  border-top: 1px solid var(--vp-c-divider);
+  border-top: 1px solid var(--lec-border);
 }
 
 .ai-markdown-content :deep(a) {
-  color: var(--vp-c-brand-1, #3eaf7c);
+  color: var(--lec-accent);
   text-decoration: none;
   font-weight: 500;
 }
@@ -589,13 +598,13 @@ onUnmounted(() => {
 
 /* 行内代码 */
 .ai-markdown-content :deep(:not(pre) > code) {
-  font-family: var(--vp-font-family-mono, monospace);
+  font-family: var(--lec-font-mono);
   font-size: 0.88em;
   padding: 0.15em 0.4em;
-  border-radius: 4px;
-  background: var(--vp-code-bg, var(--vp-c-bg-alt));
-  color: var(--vp-c-text-1);
-  border: 1px solid var(--vp-c-divider);
+  border-radius: var(--lec-radius-1);
+  background: var(--lec-surface);
+  color: var(--lec-text);
+  border: 1px solid var(--lec-border);
 }
 
 /* 表格布局 */
@@ -610,29 +619,29 @@ onUnmounted(() => {
 
 .ai-markdown-content :deep(th),
 .ai-markdown-content :deep(td) {
-  border: 1px solid var(--vp-c-divider);
+  border: 1px solid var(--lec-border);
   padding: 6px 10px;
   text-align: left;
 }
 
 .ai-markdown-content :deep(th) {
-  background: var(--vp-c-bg-soft);
+  background: var(--lec-surface);
   font-weight: 600;
 }
 
 /* ================= 数学公式渲染样式 ================= */
 .ai-markdown-content :deep(.math-node) {
   cursor: copy;
-  border-radius: 3px;
+  border-radius: var(--lec-radius-1);
   transition: background-color 0.15s ease;
 }
 
 .ai-markdown-content :deep(.math-node:hover) {
-  background-color: color-mix(in srgb, var(--vp-c-brand-1, #3eaf7c) 12%, transparent);
+  background-color: var(--lec-accent-tint);
 }
 
 .ai-markdown-content :deep(.math-node.copied) {
-  background-color: color-mix(in srgb, var(--vp-c-brand-1, #3eaf7c) 25%, transparent);
+  background-color: var(--lec-accent-tint);
 }
 
 /* 行内公式 */
@@ -646,9 +655,9 @@ onUnmounted(() => {
 /* 行间公式独立容器 */
 .ai-markdown-content :deep(.ai-math-block-container) {
   margin: 0.8em 0;
-  border: 1px solid var(--vp-c-divider);
-  border-radius: 6px;
-  background: var(--vp-c-bg-soft);
+  border: 1px solid var(--lec-border);
+  border-radius: var(--lec-radius-1);
+  background: var(--lec-surface);
   overflow: hidden;
 }
 
@@ -657,15 +666,15 @@ onUnmounted(() => {
   align-items: center;
   justify-content: space-between;
   padding: 3px 8px;
-  background: color-mix(in srgb, var(--vp-c-bg-alt) 80%, transparent);
-  border-bottom: 1px solid var(--vp-c-divider);
+  background: var(--lec-bg);
+  border-bottom: 1px solid var(--lec-border);
   font-size: 11px;
 }
 
 .ai-markdown-content :deep(.ai-math-tag) {
-  font-family: var(--vp-font-family-mono, monospace);
+  font-family: var(--lec-font-mono);
   font-weight: 600;
-  color: var(--vp-c-text-3);
+  color: var(--lec-text-muted);
   letter-spacing: 0.5px;
 }
 
@@ -675,28 +684,28 @@ onUnmounted(() => {
   align-items: center;
   gap: 4px;
   padding: 2px 6px;
-  border: 1px solid var(--vp-c-divider);
-  border-radius: 4px;
-  background: var(--vp-c-bg);
-  color: var(--vp-c-text-2);
+  border: 1px solid var(--lec-border);
+  border-radius: var(--lec-radius-1);
+  background: var(--lec-bg);
+  color: var(--lec-text-muted);
   font-size: 11px;
-  font-family: var(--vp-font-family-mono, monospace);
+  font-family: var(--lec-font-mono);
   cursor: pointer;
   transition: all 0.15s ease;
 }
 
 .ai-markdown-content :deep(.ai-math-copy-btn:hover),
 .ai-markdown-content :deep(.ai-code-copy-btn:hover) {
-  background: var(--vp-c-bg-soft);
-  color: var(--vp-c-brand-1);
-  border-color: var(--vp-c-brand-1);
+  background: var(--lec-surface);
+  color: var(--lec-accent);
+  border-color: var(--lec-accent);
 }
 
 .ai-markdown-content :deep(.ai-math-copy-btn.copied),
 .ai-markdown-content :deep(.ai-code-copy-btn.copied) {
-  background: color-mix(in srgb, var(--vp-c-brand-1, #3eaf7c) 15%, transparent);
-  color: var(--vp-c-brand-1);
-  border-color: var(--vp-c-brand-1);
+  background: var(--lec-accent-tint);
+  color: var(--lec-accent);
+  border-color: var(--lec-accent);
 }
 
 .ai-markdown-content :deep(.btn-icon) {
@@ -715,9 +724,9 @@ onUnmounted(() => {
 /* ================= 代码块与 Shiki 高亮 ================= */
 .ai-markdown-content :deep(.ai-code-block) {
   margin: 0.8em 0;
-  border: 1px solid var(--vp-c-divider);
-  border-radius: 6px;
-  background: var(--vp-code-block-bg, var(--vp-c-bg-alt));
+  border: 1px solid var(--lec-border);
+  border-radius: var(--lec-radius-1);
+  background: var(--lec-surface);
   overflow: hidden;
 }
 
@@ -726,16 +735,16 @@ onUnmounted(() => {
   align-items: center;
   justify-content: space-between;
   padding: 4px 10px;
-  background: color-mix(in srgb, var(--vp-c-bg-soft) 85%, transparent);
-  border-bottom: 1px solid var(--vp-c-divider);
+  background: var(--lec-bg);
+  border-bottom: 1px solid var(--lec-border);
 }
 
 .ai-markdown-content :deep(.ai-code-lang) {
-  font-family: var(--vp-font-family-mono, monospace);
+  font-family: var(--lec-font-mono);
   font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.5px;
-  color: var(--vp-c-text-2);
+  color: var(--lec-text-muted);
 }
 
 .ai-markdown-content :deep(.ai-code-body) {
@@ -746,7 +755,7 @@ onUnmounted(() => {
 .ai-markdown-content :deep(.ai-code-body pre) {
   margin: 0;
   padding: 10px 14px;
-  font-family: var(--vp-font-family-mono, monospace);
+  font-family: var(--lec-font-mono);
   font-size: 12.5px;
   line-height: 1.55;
   background-color: transparent !important;
@@ -779,7 +788,7 @@ html:not(.dark) .ai-markdown-content :deep(.shiki span) {
   display: inline-block;
   margin-left: 2px;
   vertical-align: baseline;
-  color: var(--vp-c-brand-1, #3eaf7c);
+  color: var(--lec-accent);
   animation: pulse-caret 1s infinite;
 }
 

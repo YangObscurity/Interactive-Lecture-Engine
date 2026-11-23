@@ -1,28 +1,73 @@
 {
+  // V2 strict typecheck. Only new V2 folders are included; legacy code is
+  // covered by tsconfig.legacy.json + scripts/ts_baseline.mjs (no-regression gate).
+  // NOTE: .mts modules must be imported WITH the extension, e.g.
+  //   import { STORAGE_KEYS } from '../site.config.mts'
   "compilerOptions": {
-    "target": "ESNext",
-    "module": "ESNext",
+    "target": "es2022",
+    "module": "esnext",
     "moduleResolution": "bundler",
-    "strict": true,
+    "lib": ["es2022", "dom", "dom.iterable"],
     "jsx": "preserve",
-    "resolveJsonModule": true,
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+    "useDefineForClassFields": true,
     "isolatedModules": true,
+    "verbatimModuleSyntax": false,
     "esModuleInterop": true,
-    "lib": ["ESNext", "DOM", "DOM.Iterable"],
+    "resolveJsonModule": true,
     "skipLibCheck": true,
-    "baseUrl": ".",
-    "paths": {
-      "@/*": ["docs/.vitepress/*"]
-    }
+    "allowImportingTsExtensions": true,
+    "noEmit": true,
+    "types": ["node"]
   },
   "include": [
-    "docs/.vitepress/**/*.ts",
-    "docs/.vitepress/**/*.mts",
-    "docs/.vitepress/**/*.vue"
+    "env.d.ts",
+    "docs/.vitepress/site.config.mts",
+    "docs/.vitepress/theme/core/**/*",
+    "docs/.vitepress/theme/api/**/*",
+    "docs/.vitepress/theme/progress/**/*",
+    "docs/.vitepress/theme/auth/**/*",
+    "docs/.vitepress/theme/access/**/*",
+    "docs/.vitepress/theme/charts/**/*",
+    "docs/.vitepress/theme/reading/**/*",
+    "docs/.vitepress/theme/pinout/**/*",
+    "docs/.vitepress/theme/home/**/*",
+    "docs/.vitepress/theme/group/**/*",
+    "docs/.vitepress/theme/ai2/**/*",
+    "docs/.vitepress/theme/debug/**/*",
+    "docs/.vitepress/theme/tokens/**/*",
+    "docs/.vitepress/theme/slots/**/*",
+    "docs/.vitepress/theme/curriculum/**/*",
+    "docs/.vitepress/theme/map/**/*",
+    "docs/.vitepress/theme/search/**/*",
+    "docs/.vitepress/curriculum/**/*",
+    "docs/.vitepress/search/**/*",
+    "docs/.vitepress/lecture-config.mts",
+    "docs/.vitepress/content/**/*",
+    "docs/.vitepress/i18n/**/*",
+    "docs/.vitepress/access/**/*",
+    "docs/.vitepress/prompts/**/*",
+    "docs/.vitepress/concepts/**/*",
+    "docs/.vitepress/plugins/conceptLinkPlugin.mts",
+    "docs/.vitepress/plugins/conceptsPlugin.mts",
+    "docs/.vitepress/plugins/dashboardDevPlugin.mts",
+    "docs/.vitepress/plugins/contentWatchPlugin.mts",
+    "config/**/*",
+    "scripts/config/**/*",
+    "scripts/content/**/*",
+    "docs/.vitepress/config.v2.mts",
+    "docs/.vitepress/plugins/lectureThemePlugin.mts",
+    "docs/.vitepress/plugins/companionPromptsPlugin.mts",
+    "docs/.vitepress/plugins/figuresDevPlugin.mts",
+    "docs/.vitepress/figures/**/*",
+    "docs/.vitepress/theme/figures/**/*",
+    "docs/.vitepress/theme/dashboard/DashboardGalleryPanel.vue",
+    "lecture.config.ts",
+    "tests/**/*",
+    "vitest.config.mts"
   ],
-  "exclude": [
-    "node_modules",
-    "docs/.vitepress/dist",
-    "docs/.vitepress/cache"
-  ]
+  "exclude": ["node_modules", "docs/.vitepress/cache", "docs/.vitepress/dist", "tests/.cache"]
 }

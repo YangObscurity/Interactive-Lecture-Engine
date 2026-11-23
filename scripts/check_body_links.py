@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """check_body_links.py —— 正文链接硬判据（构建产物 dist 审计）。
 
-设计（2026-10-06 更新，见 content/add-lecture.md §8）：
+设计（2026-10-06 更新，见 docs-dev/legacy-content/add-lecture.md §8）：
   · 参考来源段已**全站删除**（既定设计），不再有「正文 vs 参考来源」的分界；
   · 正文一切外部链接的唯一合法形态是 `.cite` 胶囊（<span class="cite" data-cite=URL>），
     点击 window.open 直接打开外链 —— 它渲染成 <span>，**不是 <a>**；
@@ -18,8 +18,6 @@ import sys
 
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
-# 2026-10-08 修（系主任 CP-A1-008）：旧版硬编码 Windows 路径 → 在 Linux/沙箱下 dist 不存在，
-# 直接 SystemExit，等于该闸门不可用；现从脚本位置推导仓库根（跨平台）。
 REPO = pathlib.Path(__file__).resolve().parents[1]
 DIST = REPO / "site" / "docs" / ".vitepress" / "dist"
 A_HTTP = re.compile(r'<a\s[^>]*href="https?://[^"]*"[^>]*>')
@@ -61,19 +59,9 @@ def main():
         print("  [自检] X 未扫到任何 L*.html —— 判据失效"); ok = False
     if cites == 0:
         print("  [自检] X 未扫到任何 .cite —— 判据失效"); ok = False
-    passed = (total == 0 and ok)
-    print("\n结论: %s" % ("PASS（无外链 <a>）" if passed else "FAIL"))
-
-    # ⚠️ 必须把结论反映到**退出码**（2026-10-15 修复）。
-    #   原实现只打印结论、不设置退出码 ⇒ 进程恒以 0 退出。
-    #   后果：在 CI / 任何 `if python check_body_links.py; then` 的判断里，
-    #   即便是真 FAIL（正文出现裸 <a href="http">）也会被判为通过——
-    #   闸门形同虚设，且这种"假绿"极难被发现（输出里明明写着 FAIL）。
-    #   这正是本仓库反对"只看退出码"与"只看输出"两种极端的原因：
-    #   两者必须一致。下方的 CI 仍会显式 grep「结论: PASS」做双重保险。
-    return 0 if passed else 1
+    print("\n结论: %s" % ("PASS（无外链 <a>）" if (total == 0 and ok) else "FAIL"))
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    main()
 

@@ -1,0 +1,106 @@
+[Unit]
+Description=Lecture Site Progress, Identity and Health API Service (lecture-api)
+Documentation=https://github.com/your-org/your-repo
+After=network.target network-online.target
+Wants=network-online.target
+
+# 启动速率限制（防频繁崩溃导致服务狂刷重启）
+StartLimitIntervalSec=60s
+StartLimitBurst=5
+
+[Service]
+# 服务类型：Simple 进程
+Type=simple
+
+# 运行身份：非 root 系统服务账号（生产部署请根据实际用户与用户组调整）
+User=lecture-api
+Group=lecture-api
+
+# 工作目录与环境配置文件路径（请根据生产实际部署路径调整，如 /opt/lecture-api/server 或 /var/www/api/server）
+WorkingDirectory=/opt/lecture-api/server
+EnvironmentFile=/opt/lecture-api/server/.env
+
+# 启动命令：Node.js 运行时堆上限 (--max-old-space-size=384) 必须低于下方 MemoryMax (512M)，
+# 为 V8 JIT 编译空间、libuv 事件循环、WASM (pglite) 内存及系统开销预留约 128MB 缓冲，防止进程突发 OOM。
+ExecStart=/usr/bin/node --max-old-space-size=384 /opt/lecture-api/server/dist/index.js
+
+# 重启策略：异常退出或崩溃后自动重启，带退避间隔
+Restart=always
+RestartSec=5s
+# 在 systemd >= 254 的现代发行版（如 Debian 13/Ubuntu 24.04+），可解除注释启用指数退避：
+# RestartSteps=5
+# RestartMaxDelaySec=30s
+
+KillMode=control-group
+TimeoutStopSec=15s
+
+# 资源上限配额 (Resource Constraints)
+# 根据目标主机规格调整（例如 1GB 内存小主机可设 512M，2GB 内存主机可设 768M 或 1G）
+MemoryMax=512M
+TasksMax=64
+
+# 日志输出重定向到 systemd-journald
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=lecture-api
+
+# -----------------------------------------------------------------------------
+# Systemd 安全沙箱与安全加固指令 (Security Hardening)
+# -----------------------------------------------------------------------------
+# 禁止子进程通过 setuid/setgid 获取新权限
+NoNewPrivileges=true
+
+# 文件系统只读保护：将 /usr, /boot, /etc 挂载为严格只读
+ProtectSystem=strict
+
+# 家目录保护：使 /root, /home, /run/user 完全不可见
+ProtectHome=true
+
+# 隔离独立的私有 /tmp 与 /var/tmp 目录空间
+PrivateTmp=true
+
+# 隔离独立的私有 /dev 设备节点，禁止直接访问底层硬件设备
+PrivateDevices=true
+
+# 内核参数保护：禁止修改 /proc/sys, /sys 等内核调节参数
+ProtectKernelTunables=true
+
+# 控制组保护：使 /sys/fs/cgroup 为只读
+ProtectControlGroups=true
+
+# 内核模块保护：禁止加载与卸载 Linux 内核模块
+ProtectKernelModules=true
+
+# 命名空间隔离：禁止创建新的用户命名空间或 IPC/UTS 命名空间
+RestrictNamespaces=true
+
+# 禁用实时调度优先级
+RestrictRealtime=true
+
+# 禁止创建 SUID/SGID 文件
+RestrictSUIDSGID=true
+
+# 锁定进程架构 Personality，防止执行域切换
+LockPersonality=true
+
+# 清空所有 Linux 特权能力（Node.js 服务绑定大于 1024 端口不需要 root 权能）
+CapabilityBoundingSet=
+
+# -----------------------------------------------------------------------------
+# 读写放行路径 (ReadWritePaths)
+# -----------------------------------------------------------------------------
+# 在 ProtectSystem=strict 模式下，整机除 /dev, /proc, /sys 外皆为只读。
+# 若使用本地持久化 PGlite 数据库，必须在此放行数据目录（目录必须事先存在，否则 systemd 报 status=226/NAMESPACE）。
+# 备份目录只由 lecture-api-backup.service 写入，这里不放行。
+# 请确保与 .env 中的 DATABASE_URL（例如 pglite:./data/pglite-db）实际物理路径完全一致：
+ReadWritePaths=/opt/lecture-api/server/data
+# 若使用外部 PostgreSQL（例如 Neon 或自建 PG），本地无需 PGlite 读写目录，可将 ReadWritePaths 注释或设为空。
+
+# 【Node.js V8 JIT 重要说明】：
+# Node.js 的 V8 引擎采用即时编译器 (JIT)，在执行代码时需动态创建和修改具有执行权限的内存页 (W^X)。
+# 在部分 Linux 内核及标准 Node.js 构建中，开启 MemoryDenyWriteExecute=true 会导致 Node 启动时崩溃 (SIGSEGV)。
+# 因此此处保持关闭（或注释），确保 Node.js JIT 引擎平稳运行：
+# MemoryDenyWriteExecute=false
+
+[Install]
+WantedBy=multi-user.target

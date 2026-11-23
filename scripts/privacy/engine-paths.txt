@@ -1,0 +1,40 @@
+# Paths the open-source engine repository may contain (scripts/privacy/scan.mjs, S3).
+# `dir/` allows a folder, a bare name allows one file, `!` excludes again; the last matching line wins.
+# Anything under content/ is always refused (that is the site owner's private content repository).
+
+.gitignore
+.gitattributes
+.env.example
+.github/
+AGENTS.md
+README.md
+LICENSE
+docs/
+docs-dev/
+templates/
+site/
+server/
+# engine scripts, by name: the other files in scripts/ are the site owner's one-off audit, deploy and Notion tools
+scripts/privacy/
+scripts/importers/
+scripts/figures/
+scripts/check_body_links.py
+scripts/check_figs2.py
+scripts/check_header_spoof.mjs
+scripts/check_lecture_contracts.py
+scripts/config.py
+scripts/content_paths.py
+scripts/deploy_config.py
+scripts/deploy_dist.py
+scripts/deploy_dist_cli.py
+
+# generated or site-specific output inside engine folders
+!site/docs/public/exports/
+!site/docs/public/showcase/
+!site/docs/.content-mount.json
+# the site owner's V1 lecture workflow (personal paths and tools)
+!docs-dev/legacy-content/
+# Playwright screenshot baselines are pictures of the owner's site (lectures, progress): generated per site, never shipped
+!site/tests/e2e/__screenshots__/
+# CI of the V1 lecture scripts, which stay private
+!.github/workflows/legacy-content.yml

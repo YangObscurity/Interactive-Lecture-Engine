@@ -1,310 +1,165 @@
-import { defineConfig } from 'vitepress'
+import { defineConfig, type DefaultTheme, type UserConfig } from 'vitepress'
 import fs from 'node:fs'
 import path from 'node:path'
-import { fileURLToPath, pathToFileURL } from 'node:url'
 import { KCONFIG, MATH, IOS, LD } from './grammars.mts'
 import { mathPlugin } from './math.mts'
 // 讲义导出插件：dev server 下的「按需导出」中间件（长卷 PDF / 全景长图 / A4 PDF）。
 // ⚠️ 它只在 **dev** 生效；生产构建时其 apply='serve' 自会跳过，不影响静态产物。
 import { lectureExportPlugin } from './plugins/lectureExportPlugin.mjs'
+import { apiModePlugin } from './plugins/apiModePlugin.mjs'
+import { v2ChromeStrings, v2Head, v2Home, v2Modules, v2IgnoreDeadLinks, v2Lang, v2LectureFallback, v2LocaleConfig, v2LocaleLinks, v2NavLabels, v2LocaleKeys, v2OtherLangs, v2ReadingModeHead, v2HomeMapHead, v2Search, v2SearchPlugin, v2ViteAlias, v2VitePlugins, v2WriteSearchDist, emitCompanionPromptsDist, withCategorySlots } from './config.v2.mts'
+import { FALLBACK_SITE_META, resolveGroups } from './groups-source.mts'
+import { assertSiteTexts, fillLecturesToken, listEmptyFields, loadSiteTexts, siteTextsProblems } from './site-texts.mts'
+import { readTitle } from './i18n/scan.mts'
+import { resolveContent } from './content/paths.mts'
+import { loadLectureConfig } from './content/config.mts'
+// P3b access tiers: which groups are built and who may read them (access/build.mts); applied to the finished config below
+import { applyAccess, resolveBuildAccess } from './access/build.mts'
+import { ownerOfPath } from './access/tiers.ts'
+import { createFiguresMarkdownPlugin } from './figures/markdown.ts'
+import { emitFiguresDistArtifacts } from './figures/gallery.ts'
+// P4a: the curriculum (groups, prerequisite edges, phases) of every language; written per restricted tier by access/build.mts
+import { buildCurriculumFromDisk } from './curriculum/node.mts'
+import type { CurriculumBuild } from './curriculum/data.ts'
+import { conceptLinkPlugin } from './plugins/conceptLinkPlugin.mts'
+import { conceptsVitePlugin, writeConceptDistAssets, writeConceptToolsDist } from './plugins/conceptsPlugin.mts'
+import {
+  buildBacklinkPayloadsByTier,
+  buildGraphFromRecords,
+  computeConceptBacklinks,
+  filteredOutSlugs,
+  loadConceptRecords,
+  rootLocaleLectures,
+  runConceptChecks,
+  scanLectureFiles,
+  tierOfPagePath,
+} from './concepts/node.mts'
+import { conceptPanelsOf, type ConceptGraph } from './concepts/graph.ts'
+import { countConceptSources, hasUnverifiedMarkers, parseConceptMarkdown } from './concepts/frontmatter.ts'
+import { resolveConceptTier } from './concepts/access.ts'
+import { tierBasePath } from './access/tiers.ts'
 
-const here = path.dirname(fileURLToPath(import.meta.url))
-const docsRoot = path.resolve(here, '..')
-const chartsRoot = path.join(docsRoot, 'public', 'charts')
-
-/**
- * ──────────────────────────────────────────────────────────────────────────
- * 课程组元信息的优先级解析（多内容源接入策略）
- * ──────────────────────────────────────────────────────────────────────────
- * 设计目标：引擎与业务内容元信息物理彻底解耦，支持通用示例、自定义本地与插拔式挂载三种形态。
- *
- * 候选来源按优先级排序，取第一个存在的来源加载：
- *   1. `content-groups.mts` —— 由 `scripts/mount_content.py` 挂载外部内容源时生成。
- *      优先级最高：显式挂载的内容源优先于本地配置文件。
- *   2. `groups.mts`         —— 本地定制化课程组定义（被 .gitignore 排除，不提交至版本库）。
- *   3. `groups.example.mts` —— 引擎内置的结构示例与通用占位课件，作为开箱即用的默认兜底配置。
- *
- * 为什么用「existsSync + 动态 import()」而不是静态 import：
- *   静态 import 的路径在解析期就写死了，文件不存在 → 模块解析失败 → 构建直接挂。
- *   动态 import 的路径是**运行期表达式**，可以先用 existsSync 探测再决定加载谁。
- *
- * 为什么不用「顶层 await + 静态 import」：
- *   `import()` 是动态的，本来就必须 await；而本文件的 await 只在
- *   `resolveGroups()` 这个 async 函数内部，模块顶层并没有 await，
- *   所以不存在「顶层 await 在 esbuild 打包成临时 .mjs 后语义变化」的风险。
- *
- * ⚠️ 为什么**不能**依赖「静态 import 放在 try/catch 里」做回退：
- *   `import ... from` 是静态声明，**必须**出现在模块顶层，放不进 try 块（语法错误）；
- *   而 `import()` 失败（文件缺失时抛 ERR_MODULE_NOT_FOUND）虽然可以 catch，
- *   但路径仍须是运行期表达式才能探测存在性 —— 于是「existsSync 先探、import() 后取」
- *   是最直白也最可读的形态，且失败路径完全不依赖异常。
- */
-
-/**
- * `defineConfig` 支持三种导出形态：对象、同步函数、**async 函数**。
- *
- * 这里必须用 async 函数，因为 `resolveGroups()` 内部要对候选文件做 `await import()`。
- * 已查证 VitePress **1.6.4** 的实际实现（不是猜的）：
- *   · `vitepress/dist/node/chunk-D3CUZ4fa.js` 的 `resolveUserConfig()` 返回
- *       `[await resolveConfigExtends(userConfig), ...]`；
- *   · `resolveConfigExtends(config)` 第一行即
- *       `const resolved = await (typeof config === "function" ? config() : config)`
- *     —— 默认导出只要是**函数**就会被 await 调用，返回 Promise 完全合法。
- *   · Vite 侧同构：`loadConfigFromFile()` 里
- *       `const config = await (typeof userConfig === "function" ? userConfig(configEnv) : userConfig)`
- *   于是 `export default async () => defineConfig({...})` 是受支持的官方形态，
- *   而不是「碰巧能跑」。`defineConfig()` 本身是恒等函数（签名放行对象与函数），
- *   包一层不改变类型，只是把返回类型放宽为 Promise。
- */
-type GroupsModule = {
-  GROUPS?: unknown
-  GROUP_META?: unknown
-  SITE_META?: unknown
-  SITE_FEATURES?: unknown
-}
-
-/** 引擎兜底文案：即使 `groups.example.mts` 也被删掉，站点仍要立得起来。 */
-const FALLBACK_SITE_META = {
-  name: '可交互工程讲义',
-  text: '可交互工程讲义库',
-  tagline: '引擎已就绪 —— 但没有找到任何课程组定义',
-} as const
-
-/**
- * 讲义源存在性检测与示例互斥隔离 (Dynamic Content Detection & Exclusive Isolation)
- * ──────────────────────────────────────────────────────────────────────────
- * 运行机制：
- *   1. 【未接入自定义讲义时（开箱即用/默认状态）】：
- *      引擎加载 examples/ 演示体系（G01~G06），作为开箱即用的结构样板与功能展示；
- *   2. 【已接入自定义讲义时（通过 mount 挂载或配置 groups.mts）】：
- *      - 引擎自动切换为自定义讲义模式，不加载 examples 演示体系；
- *      - 启用 `srcExclude: ['examples/**']`，使得 examples 目录下的 Markdown
- *        完全不参与编译构建、不生成 HTML 静态页、不注入本地搜索索引；
- *      - 顶栏下拉导航（nav）、左侧大纲侧边栏（sidebar）、全站知识脑图（themeConfig.groups）
- *        100% 呈现用户自定义的课程体系，实现内容完全隔离。
- *
- * 判定依据（满足以下任一条件，即视为自定义讲义已接入）：
- *   · 存在外部挂载课程组定义：`content-groups.mts`（由 mount_content.py 产生）
- *   · 存在本地自定义课程组定义：`groups.mts`
- *   · 存在挂载状态记录文件：`docs/.content-mount.json`
- *   · `docs/` 目录下存在除保留系统目录外、包含实际讲义的课程目录（包含 `L*.md` 或 `index.md`）
- */
-function inspectContentState() {
-  const hasContentGroups = fs.existsSync(path.join(here, 'content-groups.mts'))
-  const hasLocalGroups = fs.existsSync(path.join(here, 'groups.mts'))
-  const hasMountJson = fs.existsSync(path.join(docsRoot, '.content-mount.json'))
-
-  // 扫描 docsRoot 下除保留系统目录外的业务课程子目录
-  const reservedDirs = new Set(['examples', 'public', '.vitepress', 'node_modules', 'dist', 'cache', '.temp'])
-  const detectedDirs: string[] = []
-
-  if (fs.existsSync(docsRoot)) {
-    for (const ent of fs.readdirSync(docsRoot, { withFileTypes: true })) {
-      if (ent.name.startsWith('.')) continue
-      if (reservedDirs.has(ent.name)) continue
-      const subDir = path.join(docsRoot, ent.name)
-      try {
-        const stat = fs.statSync(subDir)
-        if (!stat.isDirectory()) continue
-        const files = fs.readdirSync(subDir)
-        if (files.some((f) => /^L\d+\.md$/.test(f) || f === 'index.md')) {
-          detectedDirs.push(ent.name)
-        }
-      } catch {
-        // 忽略异常目录
-      }
-    }
-  }
-
-  const hasCustomLectures = hasContentGroups || hasLocalGroups || hasMountJson || detectedDirs.length > 0
-  return {
-    hasCustomLectures,
-    hasContentGroups,
-    hasLocalGroups,
-    hasMountJson,
-    detectedDirs,
-  }
-}
-
-async function resolveGroups() {
-  const state = inspectContentState()
-  const tried: string[] = []
-
-  // 场景 A: 检测到自定义讲义已存在，进入「自定义讲义独占模式」（examples 绝不加载）
-  if (state.hasCustomLectures) {
-    const personalCandidates = [
-      { file: 'content-groups.mts', desc: '挂载的内容源（scripts/mount_content.py 产生）' },
-      { file: 'groups.mts', desc: '本地自定义课程组定义' },
-    ] as const
-
-    for (const cand of personalCandidates) {
-      const abs = path.join(here, cand.file)
-      if (!fs.existsSync(abs)) {
-        tried.push(`${cand.file}（不存在）`)
-        continue
-      }
-      const mod = (await loadTsModule(abs)) as GroupsModule
-      const groups = (mod.GROUPS ?? mod.GROUP_META) as GroupMetaLike[] | undefined
-      if (!Array.isArray(groups)) {
-        tried.push(`${cand.file}（存在但未导出 GROUPS / GROUP_META 数组）`)
-        continue
-      }
-      console.log(`[groups] 🎯 检测到自定义讲义已载入：来源 = ${cand.file} —— ${cand.desc}（${groups.length} 组）。内置示例（examples）已自动禁用。`)
-      return {
-        hasCustomLectures: true,
-        GROUPS: groups,
-        SITE_META: (mod.SITE_META as typeof FALLBACK_SITE_META) ?? FALLBACK_SITE_META,
-        SITE_FEATURES: (mod.SITE_FEATURES as { title: string; details: string }[]) ?? [],
-      }
-    }
-
-    // 若存在课程目录但尚未编写 groups.mts / content-groups.mts：自动由目录推导，杜绝回退到 examples
-    if (state.detectedDirs.length > 0) {
-      console.log(`[groups] 🎯 检测到未配置元信息的自定义讲义目录（${state.detectedDirs.join(', ')}），正在自动生成课程组定义... 内置示例（examples）已自动禁用。`)
-      const autoGroups: GroupMetaLike[] = state.detectedDirs.map((dir, idx) => {
-        const id = dir.toUpperCase()
-        const indexPath = path.join(docsRoot, dir, 'index.md')
-        let title = dir
-        if (fs.existsSync(indexPath)) {
-          const t = readTitle(fs.readFileSync(indexPath, 'utf-8'))
-          if (t) title = t
-        }
-        return {
-          id,
-          dir,
-          title,
-          tagline: `课程体系 · ${title}`,
-          summary: `该组包含 ${dir} 系列课程讲义。`,
-          accent: ['#6366F1', '#EC4899', '#10B981', '#F59E0B', '#3B82F6', '#8B5CF6'][idx % 6],
-          tags: [id, '课程体系'],
-        }
-      })
-      return {
-        hasCustomLectures: true,
-        GROUPS: autoGroups,
-        SITE_META: FALLBACK_SITE_META,
-        SITE_FEATURES: [],
-      }
-    }
-
-    console.warn(
-      `[groups] ⚠️ 检测到自定义讲义标记，但未找到有效课程组定义，尝试过：\n  - ${tried.join('\n  - ')}`
-    )
-    return { hasCustomLectures: true, GROUPS: [] as GroupMetaLike[], SITE_META: FALLBACK_SITE_META, SITE_FEATURES: [] }
-  }
-
-  // 场景 B: 未检测到外部自定义讲义，加载引擎内置通用演示示例（examples/g01~g06）
-  const exampleFile = 'groups.example.mts'
-  const exampleAbs = path.join(here, exampleFile)
-  if (fs.existsSync(exampleAbs)) {
-    const mod = (await loadTsModule(exampleAbs)) as GroupsModule
-    const groups = (mod.GROUPS ?? mod.GROUP_META) as GroupMetaLike[] | undefined
-    if (Array.isArray(groups)) {
-      console.log(`[groups] 💡 当前未检测到外部自定义讲义，加载引擎内置通用示例（${exampleFile}，${groups.length} 组）作为结构样板`)
-      return {
-        hasCustomLectures: false,
-        GROUPS: groups,
-        SITE_META: (mod.SITE_META as typeof FALLBACK_SITE_META) ?? FALLBACK_SITE_META,
-        SITE_FEATURES: (mod.SITE_FEATURES as { title: string; details: string }[]) ?? [],
-      }
-    }
-  }
-
-  // 兜底状态：三者全无
-  console.warn(`[groups] ⚠️ 未找到任何课程组来源，回退为空站点（无课程组）`)
-  return { hasCustomLectures: false, GROUPS: [] as GroupMetaLike[], SITE_META: FALLBACK_SITE_META, SITE_FEATURES: [] }
-}
-
-/**
- * 加载一个 TypeScript 模块（`.mts`）并返回其导出，**跨 Node 版本可用**。
- *
- * ──────────────────────────────────────────────────────────────────────────
- * 为什么不能直接 `import()` 一个 `.mts` 文件（2026-10-15 CI 事故的真实教训）
- * ──────────────────────────────────────────────────────────────────────────
- * 早期实现是 `await import(pathToFileURL(abs).href)`。但在部分跨平台环境下，
- * 但在 **Node 20 的 CI 上构建直接失败**：
- *
- *     TypeError [ERR_UNKNOWN_FILE_EXTENSION]: Unknown file extension ".mts"
- *       for /home/runner/work/.../site/docs/.vitepress/groups.example.mts
- *
- * 根因：**Node 是否认识 `.mts` 扩展名取决于版本** ——
- *   · 高版本 Node：原生支持直接 import `.mts`
- *   · Node 20（CI）：不认识 `.mts` → 抛 ERR_UNKNOWN_FILE_EXTENSION
- * 于是形成最坏的一类「假绿」：本地怎么测都没事，推上去 CI 必红。
- *
- * （这与 AGENTS.md §6.4 记载的 `pathToFileURL` 事故是**同一模式**：
- *   用「本机恰好支持」的路径加载方式，把版本/平台差异留到了 CI 才暴露。）
- *
- * ──────────────────────────────────────────────────────────────────────────
- * 修法：先用 esbuild 把 TS 转成 JS，再以 `data:` URL 导入
- * ──────────────────────────────────────────────────────────────────────────
- *  · `esbuild` 是 Vite 的既有依赖（`site/node_modules/esbuild` 必然存在），
- *    **不引入任何新依赖**；
- *  · 转成 JS 后就是普通 ESM，Node 20/22/24/26 都能 import；
- *  · 用 `data:text/javascript;base64,...` 而非临时文件：**不落盘**，
- *    因此不存在「写盘根/写系统临时目录」的污染风险，也没有并发构建时的文件名冲突
- *    （本仓库有两类真实事故：污染 G:\ 盘根、并发构建互踩临时文件）。
- *
- * 为什么不用「把 .mts 改名为 .mjs」这条更省事的路：
- *   这些文件里有**真正的 TypeScript 语法**（`export type GroupMeta = {...}`、
- *   `as const`），改名后 Node 会在解析 `export type` 时直接语法报错。
- *   要改名就必须同时删掉类型 —— 那会削弱内容源契约的表达力，且让已按
- *   旧契约写 `groups.mts` 的第三方失效。故不改扩展名，改加载方式。
- */
-async function loadTsModule(abs: string): Promise<GroupsModule> {
-  const raw = fs.readFileSync(abs, 'utf-8')
-  // 动态 import esbuild：它是 Vite 的传递依赖，但不保证被提升到顶层 node_modules，
-  // 故用容错方式解析路径；真的取不到时给出可执行的修复指引，而不是裸 MODULE_NOT_FOUND。
-  let esbuild: typeof import('esbuild')
-  try {
-    esbuild = (await import('esbuild')) as typeof import('esbuild')
-  } catch {
-    throw new Error(
-      `[groups] 需要 esbuild 来加载 TypeScript 配置（${path.basename(abs)}），但无法解析它。\n` +
-        '  esbuild 是 Vite 的依赖，正常随 npm ci 一起安装。\n' +
-        '  修复：cd site && npm ci'
-    )
-  }
-  const { code } = await esbuild.transform(raw, {
-    loader: 'ts',
-    format: 'esm',
-    target: 'node18', // 覆盖最低 CI 版本（Node 20）也绰绰有余
-    sourcefile: abs,
-  })
-  const b64 = Buffer.from(code, 'utf-8').toString('base64')
-  return (await import(`data:text/javascript;base64,${b64}`)) as GroupsModule
-}
-
-/**
- * 解析结果里 GROUPS 元素的最小形状。
- *
- * 这里刻意**不做运行期字段校验**：契约的权威定义在 `groups.example.mts`
- * 与 `content/CONTENT_SOURCE.md`，config.mts 只负责「取到数组」这一件事。
- * 三个候选来源（示例 / 本地 / 挂载）因此具有完全一致的消费口径。
- */
-type GroupMetaLike = {
-  id: string
-  dir: string
-  title: string
-  tagline: string
-  summary: string
-  accent: string
-  tags: string[]
-  temp?: boolean
-}
+const contentPaths = resolveContent()
+const isProductionBuild = process.argv.some((a) => a === 'build')
+const lectureConfig = loadLectureConfig({ paths: contentPaths })
+const docsRoot = contentPaths.docsRoot
+const chartsRoot = contentPaths.chartsDir
 
 /**
  * 解析结果只做一次模块级解构，后续所有代码的写法与改造前
  * （原本从 './groups.mts' 静态 import）**逐字一致** —— 这样这次改造
  * 对下面 200 行配置逻辑是零侵入的，降低了回归面。
  */
-const { hasCustomLectures, GROUPS, SITE_META, SITE_FEATURES } = await resolveGroups()
+const { GROUPS, SITE_META } = await resolveGroups()
 
-/** frontmatter 的 title 值可能带引号，统一剥掉（否则侧边栏会显示双引号） */
-function readTitle(src: string): string | null {
-  const m = src.match(/^title:\s*(.+)$/m)
-  if (!m) return null
-  return m[1].trim().replace(/^"([\s\S]*)"$/, '$1').replace(/\\"/g, '"')
+// Site texts: `name` is required in both locales. A production build stops with a message naming field and file;
+// `vitepress dev` only warns. Other empty fields are listed once (`doctor` shows the same list).
+const siteTexts = loadSiteTexts()
+if (process.argv.some((a) => a === 'build')) {
+  assertSiteTexts(siteTexts)
+} else {
+  for (const problem of siteTextsProblems(siteTexts)) console.warn(`[site-texts] ${problem}`)
+}
+for (const e of listEmptyFields(siteTexts)) {
+  if (!e.required) console.warn(`[site-texts] ${e.locale}.${e.field} 未填写（按各字段的留空规则处理）`)
+}
+
+/** P3b: tiers of this build (config block + LECTURE_AUDIENCE / LECTURE_BUILD_GROUPS / LECTURE_ACCESS_JSON); both guards run here. */
+const accessPlan = resolveBuildAccess(lectureConfig.access, GROUPS)
+const figureGroupDirs = Array.from(new Set([...GROUPS.map((g) => g.dir), 'examples/g01']))
+const groupIdByDir = new Map(GROUPS.map((g) => [g.dir, g.id]))
+const builtGroupIds = new Set(GROUPS.map((g) => g.id))
+
+function resolveConceptLookupMap() {
+  const recs = loadConceptRecords({
+    content: contentPaths,
+    accessPlan,
+    builtGroupIds,
+    includeDrafts: !isProductionBuild,
+    isDev: !isProductionBuild,
+    localeKeys: v2LocaleKeys,
+  })
+  const bySlug = new Map<string, (typeof recs)[number]>()
+  const filteredOut = filteredOutSlugs(recs)
+  for (const r of recs) {
+    if (r.locale !== 'root' || r.drop) continue
+    // Prefer published unless viewing/linking only draft in dev
+    const existing = bySlug.get(r.slug)
+    if (!existing || (existing.isDraft && !r.isDraft)) {
+      bySlug.set(r.slug, r)
+    }
+  }
+  return { recs, bySlug, filteredOut }
+}
+
+const buildConceptsSnapshot = resolveConceptLookupMap()
+const conceptRewrites: Record<string, string> = {}
+if (isProductionBuild) {
+  for (const rec of buildConceptsSnapshot.recs) {
+    if (rec.isDraft || rec.drop) continue
+    if (rec.tier !== accessPlan.inlineTier) {
+      const prefix = rec.locale === 'root' ? '' : `${rec.locale}/`
+      conceptRewrites[rec.relDocsPath] = `${prefix}${tierBasePath(rec.tier).slice(1)}/concepts/${rec.slug}.md`
+    }
+  }
+}
+
+const initialLecturesScan = scanLectureFiles({
+  content: contentPaths,
+  groups: GROUPS,
+  localeKeys: v2LocaleKeys,
+  accessPlan,
+})
+const inlineBacklinksAtConfig = buildBacklinkPayloadsByTier(
+  computeConceptBacklinks(initialLecturesScan),
+  accessPlan,
+).inlineBySlug
+
+// Concept checks (related, duplicate names, concept links inside concept pages): errors stop a production build and are
+// printed by `vitepress dev`. The warning (a concept named in another concept's prose without a link) is listed by
+// `npm run check:figures`, not here.
+{
+  const conceptCheck = runConceptChecks(buildConceptsSnapshot.recs)
+  if (conceptCheck.errors.length > 0) {
+    const message = `[concepts] ${conceptCheck.errors.length} concept error(s):\n${conceptCheck.errors.map((e) => `  ${e}`).join('\n')}`
+    if (isProductionBuild) throw new Error(message)
+    console.error(message)
+  }
+}
+
+// Partial builds (LECTURE_BUILD_GROUPS / --audience): pages cite lectures of groups that were left out (a concept page lists
+// the lectures of all its groups); those links are dead only because of the filter, so they are not reported.
+// VitePress passes the link only (no source file), so the rule is the link shape: /<removed group dir>/L<n>.
+const removedGroupDirs = accessPlan.removedGroupIds.map((id) => id.toLowerCase())
+const partialBuildDeadLinkRule: NonNullable<UserConfig['ignoreDeadLinks']> =
+  removedGroupDirs.length === 0
+    ? v2IgnoreDeadLinks
+    : [
+        ...v2IgnoreDeadLinks,
+        (url: string) => {
+          const m = /^\/(?:[a-z]{2}(?:-[a-z]{2})?\/)?([a-z0-9]+)\/L\d+/i.exec(url)
+          return Boolean(m && removedGroupDirs.includes((m[1] as string).toLowerCase()))
+        },
+      ]
+
+let conceptGraphAtConfig: ConceptGraph | null = null
+function conceptGraphFor(slug: string, isDraft: boolean): ConceptGraph {
+  if (isProductionBuild) {
+    conceptGraphAtConfig ??= buildGraphFromRecords(
+      buildConceptsSnapshot.recs,
+      rootLocaleLectures(initialLecturesScan, v2LocaleKeys, accessPlan),
+    )
+    return conceptGraphAtConfig
+  }
+  const live = resolveConceptLookupMap()
+  const lectures = rootLocaleLectures(
+    scanLectureFiles({ content: contentPaths, groups: GROUPS, localeKeys: v2LocaleKeys, accessPlan }),
+    v2LocaleKeys,
+    accessPlan,
+  )
+  const draft = isDraft ? live.recs.find((r) => r.slug === slug && r.isDraft && r.locale === 'root') : undefined
+  const published = live.recs.some((r) => r.slug === slug && !r.isDraft && r.locale === 'root')
+  return buildGraphFromRecords(live.recs, lectures, draft && !published ? [draft] : [])
 }
 
 /** 扫描某组目录 → 按讲号**数值**排序（两位数排序对 L100 之类会错，这里统一按数值） */
@@ -317,7 +172,7 @@ function scanLectures(dir: string) {
     .map((f) => {
       const n = Number(f.slice(1, -3))
       const title = readTitle(fs.readFileSync(path.join(d, f), 'utf-8'))
-      return { n, text: title || `第 ${n} 讲`, link: `/${dir}/${f.slice(0, -3)}` }
+      return { n, text: title || v2LectureFallback(v2Lang, n), link: `/${dir}/${f.slice(0, -3)}` }
     })
     .sort((a, b) => a.n - b.n)
 }
@@ -398,7 +253,7 @@ function scanCharts(dir: string) {
   const d = path.join(docsRoot, dir)
   if (!fs.existsSync(d)) return out // 目录不存在（引擎裸奔形态）→ 0，不报错
 
-  const exampleChartsRoot = path.join(docsRoot, 'examples', 'public', 'charts')
+  const exampleChartsRoot = contentPaths.exampleChartsDir
 
   for (const f of fs.readdirSync(d)) {
     if (!/^L\d+\.md$/.test(f)) continue
@@ -414,7 +269,7 @@ function scanCharts(dir: string) {
       const p2 = path.join(exampleChartsRoot, sidecar)
       if (fs.existsSync(p1)) {
         countChartTypes(p1, out)
-      } else if (!hasCustomLectures && fs.existsSync(p2)) {
+      } else if (fs.existsSync(p2)) {
         countChartTypes(p2, out)
       }
     }
@@ -423,7 +278,8 @@ function scanCharts(dir: string) {
 }
 
 /** 首页 / 组内页 / 侧边栏共用的课程组数据（唯一来源是解析出的课程组定义 + 目录扫描） */
-const groups = GROUPS.map((g) => {
+// colour slots are assigned over ALL groups first, so a group keeps its colour when others are left out of the build
+const groups = withCategorySlots(GROUPS).filter((g) => accessPlan.keptGroupIds.includes(g.id)).map((g) => {
   const lectures = scanLectures(g.dir)
   // 传 `dir` 而非 `id`：统计判据已改为「组目录下讲义正文里的 data-lecture」，
   // 与组 id 的命名约定解耦（理由见 scanCharts 上方注释）。
@@ -436,15 +292,106 @@ const totals = groups.reduce(
   { lectures: 0, charts: 0 }
 )
 
+const navLabels = v2NavLabels(v2Lang)
+
+/** Built on first use (the build end and the dev server's /_access/ routes), not at config load. */
+let curriculumBuild: CurriculumBuild | undefined
+const curriculum = (): CurriculumBuild =>
+  (curriculumBuild ??= buildCurriculumFromDisk({
+    docsRoot,
+    graphFile: contentPaths.graphDir.graph,
+    notionFile: contentPaths.graphDir.graphNotion,
+    allGroups: GROUPS,
+    keptGroupIds: accessPlan.keptGroupIds,
+    rootLang: v2Lang,
+    otherLangs: v2OtherLangs,
+  }))
+
+const localeConfigBlock = v2LocaleConfig({
+  groups,
+  totals,
+  siteMeta: SITE_META,
+  includeRootPath: (rootPath) => {
+    const owner = ownerOfPath(rootPath, GROUPS, [])
+    return owner === null || accessPlan.keptGroupIds.includes(owner.groupId)
+  },
+})
+
 export default async () =>
-  defineConfig({
-    lang: 'zh-CN',
-    title: SITE_META.name,
-    description: SITE_META.tagline,
+  applyAccess(defineConfig({
+    lang: v2Lang,
+    title: SITE_META.name || FALLBACK_SITE_META.name,
+    description: fillLecturesToken(SITE_META.description || SITE_META.tagline, totals.lectures),
     cleanUrls: true,
     lastUpdated: true,
-    // 当检测到自定义讲义已载入时，物理排除 examples/ 下的所有讲义页面，保证 100% 独占呈现
-    srcExclude: hasCustomLectures ? ['examples/**'] : [],
+    ignoreDeadLinks: partialBuildDeadLinkRule,
+    // P2d: locales (nav / sidebar / chrome per language), srcExclude for disabled languages, SITE_URL: sitemap + hreflang
+    ...localeConfigBlock,
+    ...(Object.keys(conceptRewrites).length > 0 ? { rewrites: conceptRewrites } : {}),
+    transformPageData: async (pageData, ctx) => {
+      if (localeConfigBlock.transformPageData) {
+        await localeConfigBlock.transformPageData(pageData, ctx)
+      }
+      const rawRel = String(pageData.filePath ?? pageData.relativePath ?? '').replace(/\\/g, '/')
+      const conceptMatch = /^(?:([a-z]{2}(?:-[a-z]{2})?)\/)?concepts\/(?:(_drafts)\/)?([^/]+)\.md$/i.exec(rawRel)
+      if (!conceptMatch) return
+      const isDraft = Boolean(conceptMatch[2])
+      const slug = conceptMatch[3] as string
+      const fm = (pageData.frontmatter ??= {}) as Record<string, unknown>
+      fm.layout = fm.layout ?? 'doc'
+      fm.sidebar = false
+      fm.prev = false
+      fm.next = false
+      fm.aside = fm.aside ?? true
+      fm.conceptSlug = slug
+      fm.conceptIsDraft = isDraft
+
+      const absPath = path.join(docsRoot, rawRel)
+      const fallbackPath = isDraft ? path.join(contentPaths.conceptsDir, '_drafts', `${slug}.md`) : path.join(contentPaths.conceptsDir, `${slug}.md`)
+      const sourcePath = fs.existsSync(absPath) ? absPath : fs.existsSync(fallbackPath) ? fallbackPath : null
+      if (sourcePath) {
+        const rawMd = fs.readFileSync(sourcePath, 'utf8')
+        const parsed = parseConceptMarkdown(rawMd, slug)
+        const tierRes = resolveConceptTier(parsed.meta.groups, accessPlan, builtGroupIds)
+        if (tierRes.tier !== accessPlan.inlineTier && !isDraft) {
+          fm.accessTier = tierRes.tier
+        }
+        fm.conceptPanels = conceptPanelsOf(conceptGraphFor(slug, isDraft), slug, tierRes.tier)
+        fm.conceptMeta = {
+          slug,
+          term: parsed.meta.term,
+          english: parsed.meta.english,
+          aliases: parsed.meta.aliases,
+          field: parsed.meta.field,
+          groups: parsed.meta.groups,
+          summary: parsed.meta.summary,
+          status: isDraft ? 'draft' : parsed.meta.status,
+          generatedBy: parsed.meta.generatedBy,
+          reviewedAt: parsed.meta.reviewedAt,
+          selectionSource: parsed.meta.selectionSource,
+          sourcesCount: countConceptSources(parsed.body),
+          hasUnverified: hasUnverifiedMarkers(rawMd).hasUnverified,
+        }
+      }
+
+      if (!isProductionBuild) {
+        const liveLectures = scanLectureFiles({
+          content: contentPaths,
+          groups: GROUPS,
+          localeKeys: v2LocaleKeys,
+          accessPlan,
+        })
+        const allBl = computeConceptBacklinks(liveLectures).get(slug) ?? []
+        fm.conceptBacklinks = allBl.map((b) => ({
+          lecturePath: b.lecturePath,
+          code: b.code,
+          title: b.title,
+          count: b.count,
+        }))
+      } else {
+        fm.conceptBacklinks = inlineBacklinksAtConfig.get(slug) ?? []
+      }
+    },
     head: [
       // 站点图标（菱形标记）：SVG 为主，PNG/ICO 兜底；
       // 显式声明后浏览器不再盲请求 /favicon.ico（那正是之前 404 的来源）
@@ -456,6 +403,10 @@ export default async () =>
       ['meta', { name: 'theme-color', content: '#3D1755' }],
       ['meta', { name: 'robots', content: 'noindex, nofollow, noarchive, nosnippet, noimageindex' }],
       ['meta', { name: 'referrer', content: 'no-referrer' }],
+      // 沉浸阅读首帧（脚本由 config.v2.mts 按语言前缀生成；键名与首页规则同 theme/reading/readingMode.ts、core/route.ts）
+      v2ReadingModeHead(),
+      v2HomeMapHead(),
+      ...v2Head,
     ],
     /**
      * 语法高亮：VitePress 用 Shiki，**内置 316 种语言且按需动态加载**
@@ -470,43 +421,71 @@ export default async () =>
       /** 第 13 步：构建期 KaTeX。只认 \(…\) / \[…\] / $$…$$，**不接管裸 $…$ 与 ```math 围栏** */
       config: (md) => {
         md.use(mathPlugin)
+        md.use(v2LocaleLinks)
+        md.use(
+          createFiguresMarkdownPlugin({
+            paths: contentPaths,
+            groupDirs: figureGroupDirs,
+            groupIdByDir,
+            localeKeys: v2LocaleKeys,
+            accessPlan,
+            isBuild: isProductionBuild,
+          }),
+        )
+        md.use(conceptLinkPlugin, {
+          isBuild: isProductionBuild,
+          accessPlan,
+          resolveConcept: (slug) => {
+            const snap = isProductionBuild ? buildConceptsSnapshot : resolveConceptLookupMap()
+            const rec = snap.bySlug.get(slug)
+            if (!rec && snap.filteredOut.has(slug)) return { slug, tier: accessPlan.inlineTier, isDraft: false, filteredOut: true }
+            if (!rec) return null
+            return { slug: rec.slug, tier: rec.tier, isDraft: rec.isDraft }
+          },
+          tierOfPage: (relPath) => tierOfPagePath(relPath, GROUPS, v2LocaleKeys, accessPlan),
+        })
+        md.core.ruler.after('block', 'lec-meta-quote', (state) => {
+          const tokens = state.tokens
+          for (let i = 0; i < tokens.length && i <= 12; i++) {
+            const open = tokens[i]
+            if (!open || open.type !== 'blockquote_open') continue
+            let depth = 0
+            let text = ''
+            for (let j = i; j < tokens.length; j++) {
+              const tok = tokens[j]!
+              if (tok.type === 'blockquote_open') depth++
+              else if (tok.type === 'blockquote_close') {
+                depth--
+                if (depth === 0) break
+              } else if (tok.type === 'inline') {
+                text += tok.content || ''
+              }
+            }
+            const trimmed = text.trim()
+            if (/^(?:\*\*)?(?:节点标识|节点|Node)(?=\s|:|\*|$)/.test(trimmed)) {
+              open.attrJoin('class', 'lec-meta-quote')
+            }
+          }
+        })
       },
     },
     themeConfig: {
-      outline: { level: [2, 3], label: '本讲大纲' },
-      sidebarMenuLabel: '讲次',
-      returnToTopLabel: '回到顶部',
-      darkModeSwitchLabel: '主题',
-      lightModeSwitchTitle: '浅色',
-      darkModeSwitchTitle: '深色',
-      docFooter: { prev: '上一讲', next: '下一讲' },
-      lastUpdatedText: '更新于',
-      search: {
-        provider: 'local',
-        options: {
-          translations: {
-            button: { buttonText: '搜索讲义', buttonAriaLabel: '搜索讲义' },
-            modal: {
-              noResultsText: '未找到相关内容',
-              resetButtonTitle: '清除查询',
-              footer: { selectText: '选择', navigateText: '切换', closeText: '关闭' },
-            },
-          },
-        },
-      },
+      ...v2ChromeStrings(v2Lang),
+      search: v2Search(),
       /**
        * 顶栏导航：课程组多起来之后平铺会挤成一行，改成**下拉栏**。
        * 临时挂载的组在文字后加「（临时）」标记，且（见上面的 sort）永远排最后。
        */
       nav: [
-        { text: '总览', link: '/' },
+        { text: navLabels.home, link: '/' },
         {
-          text: '课程组',
+          text: navLabels.groups,
+          component: 'NavCourseMenuHost',
           items: groups.map((g) => ({
-            text: `${g.id} · ${g.title}${g.temp ? '（临时）' : ''}`,
+            text: `${g.id} · ${g.title}${g.temp ? navLabels.temp : ''}`,
             link: `/${g.dir}/`,
           })),
-        },
+        } as DefaultTheme.NavItemWithChildren & { component: string },
       ],
       sidebar: Object.fromEntries(
         groups.map((g) => [
@@ -520,22 +499,112 @@ export default async () =>
           ],
         ])
       ),
+      siteTitle: SITE_META.shortName
+        ? `<span class="site-title-full">${SITE_META.name}</span><span class="site-title-short">${SITE_META.shortName}</span>`
+        : SITE_META.name,
       // 供 HomeBody.vue / GroupIndex.vue 读取（客户端可从 useData().theme 拿到）
       groups,
       totals,
       siteMeta: SITE_META,
-      siteFeatures: SITE_FEATURES,
+      // P3: resolved site-module choices and options (client reads progress / auth settings from here)
+      lectureModules: v2Modules,
+      // P4a: home page settings (default expansion of the overview map)
+      lectureHome: v2Home,
       socialLinks: [],
     },
     vite: {
+      resolve: { alias: v2ViteAlias },
+      optimizeDeps: {
+        // Pre-bundle dynamically imported browser dependencies up front so Vite dev never triggers
+        // mid-interaction dependency re-optimization reloads on /lr/L01, search, charts, or author draft generation.
+        include: [
+          'ajv',
+          'dompurify',
+          'echarts/charts',
+          'echarts/components',
+          'echarts/core',
+          'echarts/renderers',
+          'html-to-image',
+          'katex',
+          'marked',
+          'mermaid',
+          'minisearch',
+          'photoswipe',
+          'shiki',
+          'wavedrom',
+          'wavedrom/skins/dark.js',
+        ],
+      },
+      build: {
+        chunkSizeWarningLimit: 2500,
+        rollupOptions: {
+          onwarn(warning, warn) {
+            // 过滤第三方库 wavedrom 中使用 eval 的无害代码提示
+            if (warning.code === 'EVAL' && warning.id && warning.id.includes('wavedrom')) {
+              return
+            }
+            warn(warning)
+          },
+        },
+      },
       // 讲义导出插件（按需导出中间件）。
       // 之前漏了这一步，导致「点导出按钮 → 即时生成」这条路 404，
       // 只剩预生成产物可用 —— 现补上，与新组件形成闭环。
-      plugins: [lectureExportPlugin()],
+      // apiModePlugin 必须在前：LECTURE_API_MODE=mock|proxy 时接管 /api/**（仅 dev，默认 off）
+      plugins: [
+        apiModePlugin(),
+        lectureExportPlugin(),
+        conceptsVitePlugin({ docsRoot, allGroups: GROUPS, localeKeys: v2LocaleKeys, accessPlan }),
+        v2SearchPlugin({ docsRoot, allGroups: GROUPS, conceptsDir: contentPaths.conceptsDir, accessPlan }),
+        ...v2VitePlugins,
+      ],
       server: {
         watch: {
-          ignored: ['**/.*/**', '**/*.tmp/**', '**/*.tmpdir/**'],
+          ignored: ['**/.git/**', '**/.content-mount.json', '**/*.tmp/**', '**/*.tmpdir/**'],
         },
       },
     },
+    // empty description in both texts fields: VitePress would write an empty tag (or its own "A VitePress site"); write none
+    transformHtml: (code) => code.replace(/<meta name="description" content="(?:A VitePress site)?">\s*/, ''),
+    async buildEnd(siteConfig) {
+      v2WriteSearchDist(siteConfig.outDir, {
+        docsRoot,
+        allGroups: GROUPS,
+        conceptsDir: contentPaths.conceptsDir,
+        accessPlan,
+        base: siteConfig.site.base,
+        cleanUrls: siteConfig.cleanUrls ?? true,
+      })
+      writeConceptDistAssets(
+        siteConfig.outDir,
+        { docsRoot, allGroups: GROUPS, localeKeys: v2LocaleKeys, accessPlan },
+        contentPaths,
+      )
+      const toolSizes = await writeConceptToolsDist(
+        siteConfig.outDir,
+        { docsRoot, allGroups: GROUPS, localeKeys: v2LocaleKeys, accessPlan },
+        contentPaths,
+      )
+      console.log(
+        `[concepts] tool data: ${[...toolSizes].map(([f, n]) => `${f} ${(n / 1024).toFixed(1)} KiB`).join(', ')}`,
+      )
+      emitCompanionPromptsDist(siteConfig.outDir)
+      emitFiguresDistArtifacts(siteConfig.outDir, {
+        paths: contentPaths,
+        groups: GROUPS,
+        localeKeys: v2LocaleKeys,
+        accessPlan,
+      })
+    },
+  }), {
+    plan: accessPlan,
+    allGroups: GROUPS,
+    groups,
+    localeKeys: v2LocaleKeys,
+    docsRoot,
+    chartsDir: contentPaths.chartsDir,
+    figuresDir: contentPaths.figuresDir,
+    notionKnowledgeGraphFile: contentPaths.graphDir.notionKnowledgeGraph,
+    publicDir: contentPaths.publicDir,
+    curriculum,
   })

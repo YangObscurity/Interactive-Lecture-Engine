@@ -1,0 +1,41 @@
+name: privacy
+
+# Third gate of the engine repository (S3, docs/authoring/README.md): build the example site
+# without any content/ and refuse personal data in the tracked files and in the built site.
+# Personal terms come from the LECTURE_PRIVACY_TERMS repository secret (one term per line); they never live in git.
+# The job does nothing in a repository without scripts/privacy/ENGINE_REPO (the private content repository).
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  privacy:
+    runs-on: ubuntu-latest
+    env:
+      LECTURE_PRIVACY_TERMS: ${{ secrets.LECTURE_PRIVACY_TERMS }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: gate
+        run: |
+          if [ -f scripts/privacy/ENGINE_REPO ]; then echo "on=1" >> "$GITHUB_OUTPUT"; else echo "not the engine repository: skipped"; fi
+      - if: steps.gate.outputs.on == '1'
+        name: no content/ in the engine repository
+        run: test ! -e content
+      - if: steps.gate.outputs.on == '1'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: site/package-lock.json
+      - if: steps.gate.outputs.on == '1'
+        name: scan tracked files
+        run: node scripts/privacy/scan.mjs --tracked
+      - if: steps.gate.outputs.on == '1'
+        name: build the example site
+        working-directory: site
+        run: npm ci && npm run build
+      - if: steps.gate.outputs.on == '1'
+        name: scan the built site
+        run: node scripts/privacy/scan.mjs --dir site/docs/.vitepress/dist

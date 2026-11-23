@@ -1,0 +1,58 @@
+{
+  "version": 1,
+  "tier": "public",
+  "generatedAt": "2026-11-22T00:00:00Z",
+  "concepts": [
+    {
+      "slug": "tcp-handshake",
+      "term": "TCP 三次握手",
+      "english": "Three-way Handshake",
+      "aliases": ["SYN/ACK 握手", "三次握手"],
+      "field": "计算机网络",
+      "groups": ["G01"],
+      "summary": "TCP 建立可靠连接时交换 SYN 与 ACK 的三步协商过程。",
+      "url": "/concepts/tcp-handshake",
+      "related": [
+        { "slug": "sliding-window", "rel": "applied-in" },
+        { "slug": "staff-secret-algo", "rel": "contrast" }
+      ],
+      "links": ["sliding-window", "staff-secret-algo"],
+      "backlinks": ["sliding-window", "staff-secret-algo"],
+      "lectures": [
+        { "route": "/g01/L01", "id": "G01-L01", "title": "第1讲 · 传输层连接", "count": 2 },
+        { "route": "/staff/L99", "id": "STF-L99", "title": "第99讲 · 内部评审", "count": 1 }
+      ],
+      "markdown": "# TCP 三次握手\n\n客户端与服务端通过 SYN、SYN+ACK、ACK 三个报文同步初始序列号。"
+    },
+    {
+      "slug": "sliding-window",
+      "term": "滑动窗口",
+      "english": "Sliding Window",
+      "aliases": ["窗口控制"],
+      "field": "计算机网络",
+      "groups": ["G01"],
+      "summary": "通过动态调整发送窗口边界来实现流量控制与流水线传输。",
+      "url": "/concepts/sliding-window",
+      "related": [{ "slug": "tcp-handshake", "rel": "prerequisite" }],
+      "links": ["tcp-handshake"],
+      "backlinks": ["tcp-handshake"],
+      "lectures": [{ "route": "/g01/L02", "id": "G01-L02", "title": "第2讲 · 流量控制", "count": 3 }],
+      "markdown": "# 滑动窗口\n\n发送方维护发送窗口，接收方通过窗口通告字段限制发送速率。"
+    },
+    {
+      "slug": "optimistic-lock",
+      "term": "乐观并发控制",
+      "english": "Optimistic Concurrency Control",
+      "aliases": ["OCC"],
+      "field": "数据库",
+      "groups": ["G02"],
+      "summary": "先无锁执行事务，提交前检验读写冲突决定提交或回滚。",
+      "url": "/concepts/optimistic-lock",
+      "related": [],
+      "links": [],
+      "backlinks": [],
+      "lectures": [{ "route": "/g02/L01", "id": "G02-L01", "title": "第1讲 · 并发事务", "count": 1 }],
+      "markdown": "# 乐观并发控制\n\n假设大多数事务互不冲突，因此省去加锁开销并在验证阶段解决冲突。"
+    }
+  ]
+}

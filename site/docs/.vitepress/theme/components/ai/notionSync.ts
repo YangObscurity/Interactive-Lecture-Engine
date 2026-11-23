@@ -15,19 +15,22 @@
  *      零 any 类型声明，天然兼容 Node.js 预渲染与浏览器客户端环境。
  */
 
-import { API_ENDPOINTS, NOTION_API } from '../../../site.config'
+import { API_ENDPOINTS } from '../../../site.config.mts'
+import { currentLang, translate } from '../../../i18n/index.ts'
+import { toLegacyStatus } from '../../progress/types'
+import { showMessageToast } from './toast'
 
 // ============================================================================
 // 1. 类型定义与严格白名单常量
 // ============================================================================
 
-export type ProgressStatus = '未开始' | '学习中' | '已完成'
+export type ProgressStatus = '\u672a\u5f00\u59cb' | '\u5b66\u4e60\u4e2d' | '\u5df2\u5b8c\u6210'
 
 export const ALLOWED_NOTION_STATUSES: readonly ProgressStatus[] = Object.freeze([
-  '未开始',
-  '学习中',
-  '已完成'
-] as const)
+  toLegacyStatus('not_started') as ProgressStatus,
+  toLegacyStatus('in_progress') as ProgressStatus,
+  toLegacyStatus('completed') as ProgressStatus,
+])
 
 export type SyncState = 'idle' | 'syncing' | 'throttling' | 'retrying' | 'error'
 
@@ -100,8 +103,7 @@ export function isValidProgressStatus(val: unknown): val is ProgressStatus {
 export function buildNotionStatusPayload(status: ProgressStatus): Readonly<NotionPagePatchPayload> {
   if (!isValidProgressStatus(status)) {
     throw new Error(
-      `Security Violation: Prohibited status value "${String(status)}". ` +
-      `Only ['未开始', '学习中', '已完成'] are allowed.`
+      `Security Violation: Prohibited status value "${String(status)}". Expected one of ${ALLOWED_NOTION_STATUSES.join(', ')}.`
     )
   }
 
@@ -172,10 +174,8 @@ export function validateNotionPayloadWhitelist(payload: unknown): payload is Not
 const THROTTLE_INTERVAL_MS = 350
 const MAX_DEFAULT_RETRIES = 3
 const BASE_RETRY_DELAY_MS = 700
-// 同步端点从 site.config.mts 取：主端点用于常规回写，备用端点是主端点 404 时的降级路由
-// （两者都是同源反代，前端永不直连 Notion，也不持有令牌）
-const PRIMARY_SYNC_ENDPOINT = API_ENDPOINTS.notionSyncPrimary
-const FALLBACK_SYNC_ENDPOINT = API_ENDPOINTS.notionSyncFallback
+const PRIMARY_SYNC_ENDPOINT = '/api/progress/notion-sync'
+const FALLBACK_SYNC_ENDPOINT = '/api/notion/sync-status'
 
 const syncQueue: NotionSyncItem[] = []
 const failedQueue: NotionSyncItem[] = []
@@ -306,6 +306,16 @@ async function dispatchSyncRequest(task: NotionSyncItem): Promise<{ ok: boolean;
   }
 }
 
+function isNonRetryableStatus(status: number): boolean {
+  return status === 400 || status === 401 || status === 403 || status === 404 || status === 422
+}
+
+let lastFailureDetail: string | null = null
+
+export function getLastNotionSyncError(): string | null {
+  return lastFailureDetail
+}
+
 /**
  * 队列调度处理器（严格单例循环，消峰限流，自动重试）
  */
@@ -340,14 +350,16 @@ async function processQueue(): Promise<void> {
         lastRequestEndTime = Date.now()
 
         if (result.ok) {
-          // 请求成功
           isSuccess = true
           totalSuccessCount++
           lastSyncTimestamp = Date.now()
+          if (failedQueue.length === 0) lastFailureDetail = null
           break
         } else {
-          // 请求遇到错误（如 429、500 或网络断连）
-          task.lastError = `HTTP ${result.status}`
+          task.lastError = result.status > 0 ? `HTTP ${result.status}` : 'network_error'
+          if (isNonRetryableStatus(result.status)) {
+            break
+          }
           if (task.retryCount < task.maxRetries) {
             task.retryCount++
             totalRetriedCount++
@@ -364,21 +376,36 @@ async function processQueue(): Promise<void> {
 
       if (!isSuccess) {
         totalFailedCount++
+        lastFailureDetail = task.lastError || 'unknown'
         failedQueue.push({ ...task })
         currentSyncState = 'error'
         notifyState()
+        showMessageToast(
+          translate(currentLang(), 'ai.notionSyncFailed', { detail: lastFailureDetail })
+        )
       }
 
       inFlightTask = null
-      currentSyncState = syncQueue.length > 0 ? 'syncing' : 'idle'
+      currentSyncState = syncQueue.length > 0 ? 'syncing' : failedQueue.length > 0 ? 'error' : 'idle'
       notifyState()
     }
   } finally {
     inFlightTask = null
     isProcessing = false
-    currentSyncState = syncQueue.length > 0 ? 'syncing' : 'idle'
+    currentSyncState = syncQueue.length > 0 ? 'syncing' : failedQueue.length > 0 ? 'error' : 'idle'
     notifyState()
   }
+}
+
+export function retryFailedNotionSync(): void {
+  if (!isBrowser() || failedQueue.length === 0) return
+  const pending = failedQueue.splice(0, failedQueue.length)
+  lastFailureDetail = null
+  for (const item of pending) {
+    enqueueItem(item.lectureId, item.status, item.notionNodeId, item.notionPageId)
+  }
+  notifyState()
+  void processQueue()
 }
 
 // ============================================================================
@@ -543,61 +570,4 @@ export function batchSyncStatusToNotion(
 
   notifyState()
   void processQueue()
-}
-
-// ============================================================================
-// 5. 后端 Worker 适配助手（当在服务端环境运行直接直连 Notion 时使用）
-// ============================================================================
-
-export interface DirectNotionUpdateParams {
-  notionPageId: string
-  status: ProgressStatus
-  token: string
-  notionVersion?: string
-}
-
-/**
- * 服务端直接执行 Notion 更新函数：
- * 接收环境变量注入的凭据，执行严格白名单锁定的 PATCH /v1/pages/{page_id}。
- * 客户端严禁传入或调用包含 token 的逻辑。
- */
-export async function executeDirectNotionStatusPatch(
-  params: DirectNotionUpdateParams
-): Promise<{ ok: boolean; status: number; error?: string }> {
-  const { notionPageId, status, token, notionVersion = NOTION_API.version } = params
-
-  if (!token || !notionPageId) {
-    return { ok: false, status: 400, error: 'Missing token or notionPageId' }
-  }
-
-  if (!isValidProgressStatus(status)) {
-    return { ok: false, status: 400, error: 'Prohibited status value' }
-  }
-
-  const payload = buildNotionStatusPayload(status)
-  if (!validateNotionPayloadWhitelist(payload)) {
-    return { ok: false, status: 403, error: 'Whitelist validation failed' }
-  }
-
-  try {
-    const url = `${NOTION_API.baseUrl}/pages/${encodeURIComponent(notionPageId)}`
-    const res = await fetch(url, {
-      method: 'PATCH',
-      headers: {
-        Authorization: `Bearer ${token}`,
-        'Notion-Version': notionVersion,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify(payload)
-    })
-
-    return {
-      ok: res.ok,
-      status: res.status,
-      error: res.ok ? undefined : `Notion API returned status ${res.status}`
-    }
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err)
-    return { ok: false, status: 0, error: msg }
-  }
 }

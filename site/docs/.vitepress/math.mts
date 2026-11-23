@@ -1,15 +1,18 @@
 /**
- * math.mts — 构建期 KaTeX 渲染
+ * math.mts — 构建期 KaTeX 渲染（第 13 步 · M 系列的基础设施）
  *
  * 设计取舍：
- *   1. **构建期渲染**（SSR），不引入客户端重型渲染库：
- *      首屏即渲染公式、零闪烁，且与交互组件分工明确。
- *   2. **保留 TeX 源码**：输出标准 HTML+MathML，并把源码注入 `data-tex` 支持点击复制。
- *   3. **分隔符只认三种转义形态**：
+ *   1. **构建期渲染**（SSR），不引入客户端 MathJax：
+ *      首屏就有公式、零闪烁，且与 charts/cites 的「运行时只做交互」分工一致。
+ *   2. **不用官方 markdown-it-mathjax3**：MathJax 输出 SVG、不保留 TeX 源码，
+ *      而本站需求是「点击复制 LaTeX 源码」→ 必须自己把源码写进 `data-tex`。
+ *   3. **分隔符只认三种（且都是转义形态）**：
  *        行内 `\( … \)`   行间 `\[ … \]`   行间 `$$ … $$`
- *      刻意**不接管裸 `$…$`**：避免散文中的货币符号或协议字段名吞噬排版。
- *   4. ` ```math ` 围栏保持文本语法高亮展示。
- *   5. `throwOnError: false`：构建不中断；公式语法错误由格式审计脚本负责校验拦截。
+ *      刻意**不接管裸 `$…$`**：本站散文里存在美元符号（价格/NMEA/ARP 字段名），
+ *      裸 `$` 配对会把大段文字吞进公式。等散文裸 `$` 清零并观察一段时间后再评估放开。
+ *   4. ` ```math ` 围栏**不接管**（67 处历史 ASCII 公式保持 Shiki 高亮）。
+ *   5. `throwOnError: false`：**内容不许把构建搞挂**；公式错误由
+ *      `tools/math_audit.py`（M5 编译闸门）在流水线里拦——那里用 `throwOnError: true`。
  */
 import katex from 'katex'
 
@@ -19,7 +22,7 @@ const escAttr = (s: string) => String(s).replace(/[&<>"]/g, (c) => ESC[c as keyo
 function render(tex: string, displayMode: boolean): string {
   return katex.renderToString(tex, {
     displayMode,
-    throwOnError: false,          // 构建不中断；由格式审计脚本负责报错
+    throwOnError: false,          // 构建不许挂；由 M5 闸门负责报错
     errorColor: '#ef4444',
     strict: false,
     output: 'htmlAndMathml',      // 带 MathML → 可复制、可被读屏

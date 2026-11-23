@@ -1,0 +1,507 @@
+<script setup lang="ts">
+/**
+ * Engine default implementation of the `SearchPanel` slot (v1, reader skin, spec board §04.2).
+ *
+ * Pure drawing & event forwarding component: all state, index loading, filtering and navigation live in `theme/search/`.
+ */
+import { nextTick, onMounted, ref, watch } from 'vue'
+import type { SearchGroupSectionView, SearchHitView, SearchPanelProps } from '../registry.ts'
+
+const props = defineProps<SearchPanelProps>()
+
+const inputRef = ref<HTMLInputElement | null>(null)
+const optionRefs = ref<Map<number, HTMLElement>>(new Map())
+
+function setOptionRef(index: number, el: unknown): void {
+  if (el instanceof HTMLElement) optionRefs.value.set(index, el)
+  else optionRefs.value.delete(index)
+}
+
+function flatIndex(groups: readonly SearchGroupSectionView[], gi: number, ii: number): number {
+  let offset = 0
+  for (let i = 0; i < gi; i++) offset += groups[i]?.items.length ?? 0
+  return offset + ii
+}
+
+function optionId(index: number): string {
+  return `lec-sp-opt-${index}`
+}
+
+function handleInput(ev: Event): void {
+  props.onQuery((ev.target as HTMLInputElement).value)
+}
+
+function handleOpen(hit: SearchHitView, ev: MouseEvent): void {
+  if (ev.metaKey || ev.ctrlKey || ev.shiftKey || ev.altKey || ev.button !== 0) return
+  ev.preventDefault()
+  props.onOpen(hit)
+}
+
+onMounted(() => {
+  void nextTick(() => {
+    inputRef.value?.focus()
+  })
+})
+
+watch(
+  () => props.activeIndex,
+  (idx) => {
+    if (idx < 0) return
+    const el = optionRefs.value.get(idx)
+    el?.scrollIntoView({ block: 'nearest' })
+  },
+)
+</script>
+
+<template>
+  <div
+    class="sp sp--reader"
+    role="dialog"
+    aria-modal="true"
+    :aria-label="labels.dialogLabel"
+    @keydown="onKeyDown"
+  >
+    <div class="sp-in">
+      <svg class="sp-icon" width="16" height="16" viewBox="0 0 24 24" aria-hidden="true">
+        <circle cx="11" cy="11" r="7" fill="none" stroke="currentColor" stroke-width="2" />
+        <line x1="16.5" y1="16.5" x2="21" y2="21" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+      </svg>
+      <input
+        ref="inputRef"
+        id="lec-search-input"
+        type="text"
+        class="sp-input"
+        autocomplete="off"
+        autocorrect="off"
+        autocapitalize="off"
+        spellcheck="false"
+        role="combobox"
+        aria-autocomplete="list"
+        aria-expanded="true"
+        aria-controls="lec-search-listbox"
+        :aria-activedescendant="activeIndex >= 0 ? optionId(activeIndex) : undefined"
+        :aria-label="labels.placeholder"
+        :placeholder="labels.placeholder"
+        :value="query"
+        @input="handleInput"
+      />
+      <button
+        v-if="query.length > 0"
+        type="button"
+        class="sp-clear"
+        :aria-label="labels.clearQuery"
+        @click="onQuery(''); inputRef?.focus()"
+      >
+        <svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true">
+          <line x1="6" y1="6" x2="18" y2="18" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+          <line x1="18" y1="6" x2="6" y2="18" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+        </svg>
+      </button>
+      <button type="button" class="sp-kbd-btn" :aria-label="labels.footerClose" @click="onClose">
+        <kbd>{{ labels.escKey }}</kbd>
+      </button>
+    </div>
+
+    <div
+      v-if="loadState.loading"
+      class="sp-load"
+      role="status"
+      aria-live="polite"
+    >
+      <div class="sp-load-text">{{ loadState.label }}</div>
+      <div class="bar" aria-hidden="true">
+        <i :style="{ width: `${loadState.percent}%` }" />
+      </div>
+    </div>
+
+    <div class="sp-scope">
+      <span class="sp-scope-lbl">{{ labels.scopeLabel }}</span>
+      <button
+        type="button"
+        class="sp-scope-btn"
+        :class="{ on: scope === 'all' }"
+        :aria-pressed="scope === 'all'"
+        @click="onScope('all')"
+      >
+        {{ labels.scopeAll }}
+      </button>
+      <button
+        v-if="currentGroupId"
+        type="button"
+        class="sp-scope-btn"
+        :class="{ on: scope === 'group' }"
+        :aria-pressed="scope === 'group'"
+        @click="onScope('group')"
+      >
+        {{ currentGroupLabel }}
+      </button>
+      <span v-if="metaText" class="meta" role="status" aria-live="polite">{{ metaText }}</span>
+    </div>
+
+    <div id="lec-search-listbox" class="sp-res" role="listbox" :aria-label="labels.resultsAria">
+      <div v-if="groups.length === 0 && emptyState === 'no-results'" class="sp-empty">
+        {{ labels.noResults }}
+      </div>
+      <div v-else-if="groups.length === 0 && emptyState === 'idle'" class="sp-empty sp-empty--idle">
+        {{ labels.idleHint }}
+      </div>
+
+      <section v-for="(grp, gi) in groups" :key="grp.groupId" class="sp-grp" role="group" :aria-labelledby="`lec-sp-grp-${gi}`">
+        <h4 :id="`lec-sp-grp-${gi}`" role="presentation">
+          <span>{{ grp.groupId }} {{ grp.groupTitle }}</span>
+          <em>{{ grp.countLabel }}</em>
+        </h4>
+        <a
+          v-for="(hit, ii) in grp.items"
+          :id="optionId(flatIndex(groups, gi, ii))"
+          :key="hit.id"
+          :ref="(el) => setOptionRef(flatIndex(groups, gi, ii), el)"
+          :href="hit.href"
+          class="sp-hit"
+          role="option"
+          :aria-selected="activeIndex === flatIndex(groups, gi, ii)"
+          @mouseenter="onHighlight(flatIndex(groups, gi, ii))"
+          @click="handleOpen(hit, $event)"
+        >
+          <span class="mk" :data-status="hit.status" role="img" :aria-label="hit.statusLabel">
+            <i class="mk-fill" />
+          </span>
+          <span class="no">{{ hit.noLabel }}</span>
+          <span class="t">
+            <template v-for="(part, pi) in hit.titleParts" :key="pi">
+              <mark v-if="part.hit">{{ part.text }}</mark>
+              <template v-else>{{ part.text }}</template>
+            </template>
+          </span>
+          <span v-if="hit.crumbParts.length > 0" class="crumb">
+            <template v-for="(part, pi) in hit.crumbParts" :key="pi">
+              <mark v-if="part.hit">{{ part.text }}</mark>
+              <template v-else>{{ part.text }}</template>
+            </template>
+          </span>
+          <span v-if="hit.snippetParts.length > 0" class="snip">
+            <template v-for="(part, pi) in hit.snippetParts" :key="pi">
+              <mark v-if="part.hit">{{ part.text }}</mark>
+              <template v-else>{{ part.text }}</template>
+            </template>
+          </span>
+        </a>
+      </section>
+    </div>
+
+    <div class="sp-foot">
+      <span><kbd>↑</kbd><kbd>↓</kbd> {{ labels.footerSelect }}</span>
+      <span><kbd>Enter</kbd> {{ labels.footerOpen }}</span>
+      <span><kbd>Esc</kbd> {{ labels.footerClose }}</span>
+    </div>
+  </div>
+</template>
+
+<style scoped>
+.sp--reader {
+  width: min(720px, calc(100vw - 24px));
+  max-height: min(82vh, 660px);
+  display: flex;
+  flex-direction: column;
+  border: var(--lec-line-hair) solid var(--lec-border);
+  border-radius: var(--lec-radius-2);
+  background: var(--lec-surface);
+  color: var(--lec-text);
+  font-family: var(--lec-font-body);
+  overflow: hidden;
+}
+
+.sp-in {
+  display: flex;
+  align-items: center;
+  gap: var(--lec-space-2);
+  padding: 12px 16px;
+  border-bottom: var(--lec-line-hair) solid var(--lec-border);
+}
+
+.sp-icon {
+  flex: none;
+  color: var(--lec-text-muted);
+}
+
+.sp-input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--lec-text);
+  font: inherit;
+  font-size: 16px;
+  line-height: 1.4;
+}
+
+.sp-input::placeholder {
+  color: var(--lec-text-muted);
+}
+
+.sp-clear {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border: var(--lec-line-hair) solid var(--lec-border);
+  border-radius: var(--lec-radius-1);
+  background: transparent;
+  color: var(--lec-text-muted);
+  cursor: pointer;
+}
+
+.sp-clear:hover {
+  color: var(--lec-text);
+  border-color: var(--lec-text-muted);
+}
+
+.sp-kbd-btn {
+  flex: none;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  cursor: pointer;
+}
+
+.sp-in kbd,
+.sp-foot kbd {
+  display: inline-block;
+  font-family: var(--lec-font-mono);
+  font-size: 11px;
+  line-height: 1.4;
+  padding: 2px 6px;
+  border: var(--lec-line-hair) solid var(--lec-border);
+  border-radius: var(--lec-radius-1);
+  background: var(--lec-bg);
+  color: var(--lec-text-muted);
+}
+
+.sp-load {
+  padding: 7px 16px;
+  border-bottom: var(--lec-line-hair) solid var(--lec-border);
+  background: var(--lec-accent-tint);
+  font-size: 12px;
+  color: var(--lec-text-muted);
+}
+
+.sp-load .bar {
+  height: 3px;
+  background: var(--lec-border);
+  border-radius: var(--lec-radius-1);
+  overflow: hidden;
+  margin-top: 5px;
+}
+
+.sp-load .bar > i {
+  display: block;
+  height: 100%;
+  background: var(--lec-accent);
+  transition: width 0.15s linear;
+}
+
+.sp-scope {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--lec-space-2);
+  padding: 8px 16px;
+  border-bottom: var(--lec-line-hair) solid var(--lec-border);
+  font-size: 12px;
+  color: var(--lec-text-muted);
+}
+
+.sp-scope-btn {
+  border: var(--lec-line-hair) solid var(--lec-border);
+  border-radius: var(--lec-radius-1);
+  background: transparent;
+  color: var(--lec-text-muted);
+  padding: 2px 9px;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.sp-scope-btn.on {
+  background: var(--lec-accent-tint);
+  border-color: var(--lec-accent);
+  color: var(--lec-text);
+  font-weight: 600;
+}
+
+.sp-scope .meta {
+  margin-left: auto;
+  font-family: var(--lec-font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 11px;
+}
+
+.sp-res {
+  flex: 1;
+  min-height: 120px;
+  max-height: 420px;
+  overflow-y: auto;
+  padding: 6px;
+}
+
+.sp-empty {
+  padding: 32px 16px;
+  text-align: center;
+  font-size: 13px;
+  color: var(--lec-text-muted);
+}
+
+.sp-grp h4 {
+  display: flex;
+  align-items: center;
+  gap: var(--lec-space-2);
+  margin: 0;
+  padding: 8px 10px 4px;
+  font-family: var(--lec-font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.08em;
+  color: var(--lec-text-muted);
+  text-transform: uppercase;
+}
+
+.sp-grp h4 em {
+  font-style: normal;
+  opacity: 0.85;
+}
+
+.sp-hit {
+  display: grid;
+  grid-template-columns: 9px 4.2em minmax(0, 1fr);
+  column-gap: 10px;
+  row-gap: 3px;
+  align-items: baseline;
+  padding: 10px;
+  border-radius: var(--lec-radius-1);
+  border-left: var(--lec-line-heavy) solid transparent;
+  cursor: pointer;
+  text-decoration: none;
+  color: inherit;
+}
+
+.sp-hit:hover,
+.sp-hit[aria-selected='true'] {
+  border-left-color: var(--lec-accent);
+  background: var(--lec-accent-tint);
+}
+
+.mk {
+  position: relative;
+  align-self: center;
+  width: 9px;
+  height: 9px;
+  box-sizing: border-box;
+  border: var(--lec-line-mid) solid var(--lec-border);
+  border-radius: var(--lec-status-radius);
+  overflow: hidden;
+}
+
+.mk-fill {
+  position: absolute;
+  inset: auto 0 0 0;
+  height: 0;
+  background: var(--lec-done);
+}
+
+.mk[data-status='in_progress'],
+.mk[data-status='completed'] {
+  border-color: var(--lec-done);
+}
+
+.mk[data-status='in_progress'] .mk-fill {
+  height: 50%;
+}
+
+.mk[data-status='completed'] .mk-fill {
+  height: 100%;
+}
+
+.sp-hit .no {
+  font-family: var(--lec-font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 11px;
+  color: var(--lec-text-muted);
+  white-space: nowrap;
+}
+
+.sp-hit .t {
+  font-family: var(--lec-font-heading);
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--lec-text);
+  overflow-wrap: anywhere;
+}
+
+.sp-hit .crumb {
+  grid-column: 3;
+  font-size: 11.5px;
+  color: var(--lec-text-muted);
+  overflow-wrap: anywhere;
+}
+
+.sp-hit .snip {
+  grid-column: 3;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--lec-text-muted);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.sp-hit mark {
+  background: var(--lec-accent-tint);
+  color: var(--lec-text);
+  text-decoration: underline;
+  text-decoration-color: var(--lec-accent);
+  text-decoration-thickness: 2px;
+  text-underline-offset: 3px;
+  border-radius: 2px;
+  padding: 0 2px;
+}
+
+.sp-foot {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  padding: 8px 16px;
+  border-top: var(--lec-line-hair) solid var(--lec-border);
+  font-size: 11px;
+  color: var(--lec-text-muted);
+}
+
+.sp-foot kbd + kbd {
+  margin-left: 2px;
+}
+
+@media (max-width: 767px) {
+  .sp--reader {
+    width: 100vw;
+    height: 100dvh;
+    max-height: 100dvh;
+    border: 0;
+    border-radius: 0;
+  }
+
+  .sp-res {
+    max-height: none;
+  }
+
+  .sp-scope-btn {
+    min-height: 36px;
+    padding: 4px 12px;
+  }
+
+  .sp-hit {
+    grid-template-columns: 9px 3.8em minmax(0, 1fr);
+    padding: 12px 10px;
+  }
+}
+</style>

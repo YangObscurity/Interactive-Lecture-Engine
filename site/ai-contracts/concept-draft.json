@@ -1,0 +1,199 @@
+{
+  "id": "concept-draft",
+  "version": 2,
+  "purpose": {
+    "zh": "依据当前讲义选文、全站讲义出现位置（occurrences）、邻近概念（neighbours）、参考来源以及补充模式下的既有概念页（currentConcept），起草或修订呈现概念全貌的独立概念页结构化草稿。",
+    "en": "Draft or revise a full-picture stand-alone concept page grounded in the selected lecture passage, cross-lecture occurrences, neighbour concepts, cited sources, and (in supplement mode) currentConcept."
+  },
+  "instructions": {
+    "zh": [
+      "严格仅输出符合 JSON Schema 的单一 JSON 对象，不要附加额外说明文字。仅提供出处本身，不附加或询问任何多余归属元数据。",
+      "目标是讲清楚概念的“全貌”而非零碎笔记。以下九个方面仅作“讲全貌通常涵盖什么”的提示：1) 一句话定义（约 60 字以内）；2) 直觉与动机（解决什么问题，没有它会怎样）；3) 形式化定义与工作机制（公式、算法步骤、状态与时序，逐项解释符号）；4) 关键参数与取值（讲义中出现的具体数值、对应讲次与条件）；5) 变体与对比（与相邻概念的区别，相邻概念用 [文字](concept:slug) 链接）；6) 在讲义中的出现（每一讲如何使用它，附 /<group>/L<n>#<anchor> 链接与一句话概括，不限于来源一讲）；7) 局限与常见误区；8) 相关概念（写入 related 字段）；9) 出处（每段均有出处）。",
+      "不要机械套用上述九条作为固定小标题或固定顺序：请根据该概念自身特点自行拟定自然流畅的段落标题（heading）与结构顺序；对当前概念不存在或不适用的方面直接省略不写。",
+      "严禁编造讲义上下文与权威来源中未出现的数据、公式、元组维度、硬件规格或引用链接。summary 为 1 到 2 句纯文本概览（≤ 120 字，不含 Markdown 或 HTML 标签），用于正文字词悬停预览与概念图谱摘要。",
+      "每段（paragraphs 每项）都必须交代出处（sources）：优先引用讲义（写明讲义编号与小节或锚点，如 `[LR-L01](/lr/L01#anchor) · 第 3.2 节`）；当讲义内容不足以支撑该段论断时，才补充外部权威出处（教科书、标准规范、原始论文），并写全所有作者、年份、标题、期刊/会议/出版社以及具体位置（章节、页码或图表号）；博客、维基百科（Wiki）或个人笔记绝不能作为唯一出处。",
+      "若某一声明在讲义与外部权威出处中都找不到足够依据，必须将该段设为 `verified: false`、在 `unverifiedReason` 写明欠缺核实的依据、并在 `body` 中明确写出「待核实」字样（引擎会拦截含「待核实」的页面发布，留待作者补充）。",
+      "互链规则：正文中只要点名上下文 `existingConcepts` 或 `neighbours` 里已有的概念（含主称或别名），必须用 `[显示文字](concept:slug)` 链接；只能使用上下文提供的既有 `slug`，严禁自己杜撰新 `slug`。",
+      "必须在顶级输出 `related` 数组（允许为空数组 `[]`）：每项为 `{ slug, rel }`，其中 `slug` 只能取自已提供的既有概念 `slug` 且不得指向本概念自身；`rel` 只能取 `prerequisite`、`part-of`、`contrast`、`generalizes`、`special-case`、`applied-in` 之一。",
+      "补充模式：当输入提供 `currentConcept`（既有已发布概念页）时，输出必须返回修订后的完整概念页 JSON；完整保留原页仍然正确的事实、推导、关系与出处，绝不丢弃仍在支撑所保留句子的旧出处，再将新讲义选文与全站 `occurrences`/`neighbours` 的新增细节融合到对应段落中。",
+      "排版契约：正文公式必须使用 `\\( ... \\)` 或 `$$ ... $$`，严禁裸 `$...$`；严禁使用旧语法 `[[concept:...]]`；正文不要写普通外链 `[文字](https://...)` 或裸 URL（外部引用放进 `sources` 字段）。"
+    ],
+    "en": [
+      "Output a single JSON object conforming strictly to the JSON Schema with no extra commentary. Cite the source only and never add extraneous attribution metadata fields or questions.",
+      "Aim for the whole picture of the concept rather than a rough sketch. What a full picture usually covers (hints only): 1) a one-sentence definition (under ~60 chars); 2) intuition and motivation (what problem it solves and what breaks without it); 3) formal definition and mechanism (equations, steps, state and timing with every symbol explained); 4) key parameters and values (concrete numbers, lecture and condition); 5) variants and contrasts with neighbouring concepts (linked via [text](concept:slug)); 6) occurrences across the lectures (how each lecture uses it with /<group>/L<n>#<anchor> links and one sentence, beyond the origin lecture); 7) limitations and common misconceptions; 8) related concepts (written in `related`); 9) sources (every paragraph).",
+      "Choose headings and ordering that fit the concept itself instead of copying those nine labels mechanically; leave out aspects that do not exist or do not apply to this concept.",
+      "Never fabricate numbers, equations, tuple arity, hardware specs, or citations absent from the supplied context and sources. Write summary as 1-2 plain-text sentences without Markdown or HTML tags.",
+      "Every paragraph in `paragraphs` needs verifiable sources: cite lectures first (lecture code, link, and section/anchor such as `[LR-L01](/lr/L01#anchor) · §3.2`); only when lectures are not enough, cite an external authoritative source (textbook, standard, original paper) giving all authors, year, title, venue/publisher, and exact location (section, page, or table). Never rely on a blog or wiki as the sole source.",
+      "If any claim lacks a verifiable source, set `verified: false`, explain the gap in `unverifiedReason`, and include the literal marker \"待核实\" in `body` (publication is blocked until verified).",
+      "Link every existing concept from `existingConcepts` or `neighbours` named in the prose as `[text](concept:slug)`, using only supplied slugs; never invent a slug.",
+      "Include the required top-level `related` array (may be empty `[]`) of `{ slug, rel }` entries where `slug` exists in the supplied concepts (no self-relation) and `rel` is one of `prerequisite`, `part-of`, `contrast`, `generalizes`, `special-case`, `applied-in`.",
+      "Supplement mode: when input contains `currentConcept`, return the whole revised concept page JSON preserving all still-correct content and sources from `currentConcept`—never drop a source that still supports a kept sentence—while merging in what the new lecture passage, `occurrences`, and `neighbours` add.",
+      "Use `\\( ... \\)` or `$$ ... $$` for math instead of bare `$...$`; never emit `[[concept:...]]`; avoid raw external URLs or `[text](https://...)` inside `body` (place external references inside `sources`)."
+    ]
+  },
+  "schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["slug", "term", "english", "aliases", "field", "groups", "summary", "related", "paragraphs"],
+    "properties": {
+      "slug": {
+        "type": "string",
+        "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+        "minLength": 2,
+        "maxLength": 80
+      },
+      "term": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 100
+      },
+      "english": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 140
+      },
+      "aliases": {
+        "type": "array",
+        "maxItems": 20,
+        "items": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        }
+      },
+      "field": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 80
+      },
+      "groups": {
+        "type": "array",
+        "minItems": 1,
+        "maxItems": 24,
+        "items": {
+          "type": "string",
+          "pattern": "^[A-Za-z][A-Za-z0-9_-]*$"
+        }
+      },
+      "summary": {
+        "type": "string",
+        "minLength": 8,
+        "maxLength": 280
+      },
+      "related": {
+        "type": "array",
+        "maxItems": 24,
+        "items": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["slug", "rel"],
+          "properties": {
+            "slug": {
+              "type": "string",
+              "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+              "minLength": 2,
+              "maxLength": 80
+            },
+            "rel": {
+              "type": "string",
+              "enum": ["prerequisite", "part-of", "contrast", "generalizes", "special-case", "applied-in"]
+            }
+          }
+        }
+      },
+      "paragraphs": {
+        "type": "array",
+        "minItems": 1,
+        "maxItems": 16,
+        "items": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["heading", "body", "sources", "verified"],
+          "properties": {
+            "heading": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 120
+            },
+            "body": {
+              "type": "string",
+              "minLength": 8,
+              "maxLength": 4000
+            },
+            "sources": {
+              "type": "array",
+              "maxItems": 16,
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 500
+              }
+            },
+            "verified": {
+              "type": "boolean"
+            },
+            "unverifiedReason": {
+              "type": "string",
+              "maxLength": 300
+            }
+          }
+        }
+      }
+    }
+  },
+  "example": {
+    "slug": "actuation-lease",
+    "term": "执行租约",
+    "english": "Actuation Lease",
+    "aliases": ["Lease", "控制权租约", "有限时执行凭证"],
+    "field": "边缘智能体协同与并发安全",
+    "groups": ["LR", "G03", "G04", "G10"],
+    "summary": "Root 校验通过后签发的限时七元组凭证，把物理动作授权变成设备端可机检的边界。",
+    "related": [
+      {
+        "slug": "optimistic-concurrency-control",
+        "rel": "prerequisite"
+      }
+    ],
+    "paragraphs": [
+      {
+        "heading": "为什么授权要从提示词挪到数据结构上",
+        "body": "物理设备动作一旦发出就不可撤回。HearthNet 把“谁可以对哪台设备做什么”从自然语言提示词拆出来，变成设备适配器可执行前逐项核验的数据契约，即执行租约：Root 唯一有权签发租约，Manager 只能提议动作并在执行时出示租约，适配器不信任推理层口头约束而直接核对凭证字段。",
+        "sources": [
+          "[LR-L01](/lr/L01#为什么授权要从提示词挪到数据结构上) · 第 2.2 节、第 3.1–3.2 节",
+          "Zhan, Z., Li, K., Zhang, Y., Haddadi, H. (2026). HearthNet: Edge Multi-Agent Orchestration for Smart Homes. Proc. ACM Conference on AI and Agentic Systems (CAIS '26), pp. 1123–1127, §2.2"
+        ],
+        "verified": true
+      },
+      {
+        "heading": "七元组与三道校验机制",
+        "body": "租约形式化为七元组 \\( \\mathcal{L} = \\langle \\mathrm{ManagerID}, \\mathrm{TargetDevice}, O_{\\mathrm{envelope}}, C_{\\mathrm{base}}, C_{\\mathrm{policy}}, T_{\\mathrm{exp}}, R_{\\mathrm{audit}} \\rangle \\)，分别约束执行主体、目标设备、操作与参数包络、提议时的仓库提交哈希、Root 所依策略版本提交、绝对失效时间戳以及审计理由。Verify and Grant 阶段依次完成版本鲜度核验、高优先级意图仲裁与策略包络校验；其中版本核验本质上属于[乐观并发控制](concept:optimistic-concurrency-control)，不提前加锁而在签发瞬间拦截过期状态。",
+        "sources": [
+          "[LR-L01](/lr/L01) · 第 3.2–3.3 节四阶段执行协议",
+          "Gray, C. & Cheriton, D. (1989). Leases: An Efficient Fault-Tolerant Mechanism for Distributed File Cache Consistency. Proc. 12th ACM SOSP, pp. 202–210",
+          "Kleppmann, M. (2017). Designing Data-Intensive Applications. O'Reilly, Ch. 8 \"The Trouble with Distributed Systems\", §\"The leader and the lock\" & §\"Fencing tokens\""
+        ],
+        "verified": true
+      },
+      {
+        "heading": "在讲义中的出现",
+        "body": "除 [LR-L01](/lr/L01) 完整系统定义外，[G10-L19](/g10/L19) 在边缘蜂群任务拍卖中使用带 Mesh 心跳续约的 30 s 倒计时租约；[G10-L23](/g10/L23) 讨论以 TTL 租约与续租替代直接 force-unlock 规避 Terraform 状态锁双写；[G03-L32](/g03/L32) 与 [G04-L21](/g04/L21) 则分别把有限时租约用于句柄看门狗回收及 DHCP \\(T_1 < T_2 < \\text{Lease}\\) 计时器。",
+        "sources": [
+          "[G10-L19](/g10/L19) · 边缘蜂群任务拍卖",
+          "[G10-L23](/g10/L23) · Terraform 状态锁排障",
+          "[G03-L32](/g03/L32) · 资源借出租约超时熔断",
+          "[G04-L21](/g04/L21) · DHCP 计时器参数表与 RFC 2131 §4.4.5"
+        ],
+        "verified": true
+      },
+      {
+        "heading": "局限与常见误用",
+        "body": "单一 Root 节点构成集中式单点，威胁模型仅覆盖崩溃故障而非恶意攻陷或跨机械开关/红外遥控的带外 TOCTOU 窗口；此外，租约本身是否做数字签名在原论文中未展开。",
+        "sources": [
+          "[LR-L01](/lr/L01) · 第 5.1–5.2 节局限分析（Page 4, Section 3.4）"
+        ],
+        "verified": true
+      }
+    ]
+  }
+}

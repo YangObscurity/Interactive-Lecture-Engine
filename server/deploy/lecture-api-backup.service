@@ -1,0 +1,47 @@
+[Unit]
+Description=Daily snapshot backup for lecture-api (PGlite)
+Documentation=https://github.com/your-org/your-repo
+After=network.target
+
+# PGlite is an embedded single-process database: two processes must never open the same data
+# directory at once. The API is therefore stopped for the few seconds the dump takes and started
+# again afterwards, on success and on failure alike. Remove the two lecture-api.service lines
+# below only if DATABASE_URL points to an external PostgreSQL (the script then only prints pg_dump).
+
+[Service]
+Type=oneshot
+User=lecture-api
+Group=lecture-api
+WorkingDirectory=/opt/lecture-api/server
+EnvironmentFile=/opt/lecture-api/server/.env
+
+# The "+" prefix runs these two commands as root (full privileges, outside the sandbox below).
+ExecStartPre=+/usr/bin/systemctl stop lecture-api.service
+ExecStopPost=+/usr/bin/systemctl start lecture-api.service
+
+# scripts/ is not compiled into dist/ (tsconfig rootDir is src), so run the TypeScript file with
+# tsx (a devDependency, present after "npm ci"). Adapt the node path and the install directory.
+ExecStart=/usr/bin/node --import tsx scripts/backup.ts
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=lecture-api-backup
+
+# Sandbox (same as lecture-api.service)
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+ProtectKernelModules=true
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+CapabilityBoundingSet=
+
+# Data directory (read by the dump) and backup directory (written). Both must exist.
+# Keep in sync with DATABASE_URL in .env and BACKUP_DIR (default: <server>/backups).
+ReadWritePaths=/opt/lecture-api/server/data /opt/lecture-api/server/backups

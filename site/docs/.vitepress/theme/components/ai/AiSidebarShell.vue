@@ -4,7 +4,7 @@
  * 
  * 核心职责与交互铁律：
  * 1. 独立浮层无极拉伸与正文恒定防挤压契约：
- *    - 侧边栏的无极拉伸变化完全发生在侧边栏自身浮动层，具有高层级阴影（box-shadow: -10px 0 36px）；
+ *    - 侧边栏的无极拉伸变化完全发生在侧边栏自身浮动层，以边框而非阴影与正文分隔（规格板规则：无阴影）；
  *    - 左侧正文 (.VPDoc) 绝不发生跳动或挤压变形，恒定保留 400px 标准版心边距；
  * 2. 位置记忆与默认最大拉伸契约：
  *    - 记忆 key: 'lecture-ai-sidebar-custom-width'；
@@ -21,33 +21,28 @@
  * 5. 严格规范：零 Emoji 铁律、严格 TypeScript、SSR 安全防护、生命周期 100% 解绑无内存泄漏。
  */
 
-import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
+import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
+import { STORAGE_KEYS } from '../../../site.config.mts'
+import { useT } from '../../../i18n/useT.ts'
 import { aiState } from './aiState'
 import { ICONS } from './icons'
 import { useLectureContext } from './useLectureContext'
-// 侧栏宽度记忆键统一收口在 site.config.mts（键名一旦笔误，用户拖拽宽度就静默不保存）
-import {
-  STORAGE_KEYS,
-  storageKeysFor,
-  readRawWithFallback,
-  writeRawWithDualWrite,
-} from '../../../site.config'
-
-const SIDEBAR_WIDTH_KEYS = storageKeysFor(STORAGE_KEYS.aiSidebarWidth)
 
 defineOptions({
   name: 'AiSidebarShell'
 })
 
+const { t } = useT()
 const { lectureInfo } = useLectureContext()
 
 // 桌面端宽屏断点判定（>= 1200px）
 const isDesktop = ref(false)
 let resizeTimer: number | null = null
+const triggerTabRef = ref<HTMLButtonElement | null>(null)
+const shellRef = ref<HTMLElement | null>(null)
 
 // 侧边栏无极拉伸与记忆状态常量
-// ⚠️ 记忆键不再就地硬编码，改从 site.config.mts 的 STORAGE_KEYS.aiSidebarWidth 取；
-// 键值本身未变（'lecture-ai-sidebar-custom-width'），老用户的记忆宽度照常读回。
+const CUSTOM_WIDTH_KEY = STORAGE_KEYS.aiSidebarWidth
 const DEFAULT_WIDTH = 400
 const MIN_WIDTH = 380
 const EXPANDED_THRESHOLD = 420
@@ -68,12 +63,16 @@ function getMaxWidth(): number {
 function getRememberedWidth(): number {
   if (typeof window === 'undefined') return 1200
   const maxW = getMaxWidth()
-  const saved = readRawWithFallback(SIDEBAR_WIDTH_KEYS)
-  if (saved) {
-    const parsed = parseInt(saved, 10)
-    if (!isNaN(parsed) && parsed > EXPANDED_THRESHOLD) {
-      return Math.min(Math.max(EXPANDED_THRESHOLD, parsed), maxW)
+  try {
+    const saved = localStorage.getItem(CUSTOM_WIDTH_KEY)
+    if (saved) {
+      const parsed = parseInt(saved, 10)
+      if (!isNaN(parsed) && parsed > EXPANDED_THRESHOLD) {
+        return Math.min(Math.max(EXPANDED_THRESHOLD, parsed), maxW)
+      }
     }
+  } catch {
+    // ignore
   }
   return maxW
 }
@@ -81,10 +80,10 @@ function getRememberedWidth(): number {
 // 圆形切换按钮悬停提示
 const toggleBtnTooltip = computed(() => {
   if (isExpanded.value) {
-    return '收缩回标准宽度 (400px)'
+    return t('ai.collapseWidthTitle')
   }
   const remW = getRememberedWidth()
-  return `拉伸至记忆宽度 (${remW}px)`
+  return t('ai.expandWidthTitle', { width: remW })
 })
 
 // 应用侧边栏宽度与动态字体缩放
@@ -136,7 +135,11 @@ function handleMouseUp() {
   // 需求 4：若向左拖拽展开超过 420px，更新并持久化记忆至 localStorage
   // 若未达到 420px 则不覆盖既有的记忆展开宽度
   if (sidebarWidth.value > EXPANDED_THRESHOLD) {
-    writeRawWithDualWrite(SIDEBAR_WIDTH_KEYS, String(sidebarWidth.value))
+    try {
+      localStorage.setItem(CUSTOM_WIDTH_KEY, String(sidebarWidth.value))
+    } catch {
+      // ignore
+    }
   }
 }
 
@@ -198,21 +201,54 @@ const handleResize = () => {
 
 /**
  * 全局键盘快捷键处理器
- * Ctrl+J / Cmd+J 快速切换伴读侧边栏显隐；
+ * Alt+A 或 Ctrl+Shift+A / Cmd+Shift+A 快速切换伴读侧边栏显隐（不抢占浏览器 Ctrl+J 下载键，FE-021）；
  * Esc 在侧边栏开启时快速关闭。
  */
 const handleKeydown = (e: KeyboardEvent) => {
-  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'j') {
+  const key = e.key.toLowerCase()
+  const isAltA = e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey && key === 'a'
+  const isModShiftA = (e.ctrlKey || e.metaKey) && e.shiftKey && !e.altKey && key === 'a'
+  if (isAltA || isModShiftA) {
     e.preventDefault()
     aiState.toggleSidebar()
     return
   }
 
   if (e.key === 'Escape' && aiState.isOpen) {
+    if (typeof document !== 'undefined' && document.querySelector('.session-history-drawer')) {
+      return
+    }
     e.preventDefault()
     aiState.closeSidebar()
   }
 }
+
+watch(
+  () => aiState.isOpen,
+  (open, prev) => {
+    if (open === prev || typeof document === 'undefined') return
+    void nextTick(() => {
+      if (open) {
+        const focusTarget = () => {
+          const inputEl =
+            shellRef.value?.querySelector<HTMLElement>('.chat-textarea') ??
+            shellRef.value?.querySelector<HTMLElement>('button, [tabindex="0"]')
+          inputEl?.focus()
+        }
+        focusTarget()
+        // Wait one frame in case CSS `visibility: hidden -> visible` prevents synchronous focus
+        if (typeof window !== 'undefined') {
+          window.setTimeout(focusTarget, 40)
+        }
+      } else {
+        triggerTabRef.value?.focus()
+        if (typeof window !== 'undefined') {
+          window.setTimeout(() => triggerTabRef.value?.focus(), 40)
+        }
+      }
+    })
+  }
+)
 
 onMounted(() => {
   if (typeof window !== 'undefined') {
@@ -249,10 +285,11 @@ onUnmounted(() => {
   <transition name="ai-trigger-fade">
     <button
       v-if="!aiState.isOpen"
+      ref="triggerTabRef"
       class="ai-trigger-tab"
       type="button"
-      title="展开 AI 伴读 (Ctrl+J / Cmd+J)"
-      aria-label="展开 AI 伴读"
+      :title="t('ai.triggerTitle')"
+      :aria-label="t('ai.triggerAria')"
       @click="aiState.openSidebar()"
     >
       <span class="ai-trigger-icon" v-html="ICONS.chipCore"></span>
@@ -269,8 +306,9 @@ onUnmounted(() => {
     />
   </transition>
 
-  <!-- 3. AI 伴读侧边栏面板容器 (支持左右无极拉伸与动态字号缩放) -->
+  <!-- 3. AI 伴读侧边栏面板容器 (关闭时设 inert 防后台 Tab 获焦，FE-018/022) -->
   <aside
+    ref="shellRef"
     class="ai-sidebar-shell"
     :class="{
       'is-open': aiState.isOpen,
@@ -280,14 +318,15 @@ onUnmounted(() => {
       'is-expanded': isExpanded
     }"
     :style="isDesktop ? { width: `${sidebarWidth}px` } : undefined"
+    :inert="!aiState.isOpen || undefined"
     :aria-hidden="!aiState.isOpen"
-    aria-label="AI 伴读侧边栏"
+    :aria-label="t('ai.sidebarAria')"
   >
     <!-- 左边缘拉伸微手柄 (按住左右无极调节) -->
     <div
       v-if="isDesktop && aiState.isOpen"
       class="ai-resizer-handle"
-      title="按住左右拖拽调节侧边栏宽度与阅读字体大小"
+      :title="t('ai.resizeHandleTitle')"
       @mousedown="startResize"
     >
       <div class="ai-resizer-line"></div>
@@ -317,13 +356,17 @@ onUnmounted(() => {
         <div class="ai-shell-placeholder">
           <div class="ai-placeholder-badge" v-html="ICONS.chipCore"></div>
           <div class="ai-placeholder-title">
-            {{ lectureInfo.lectureId ? `${lectureInfo.lectureId.toUpperCase()} 伴读就绪` : '伴读工作台已就绪' }}
+            {{
+              lectureInfo.lectureId
+                ? t('ai.readyBanner', { id: lectureInfo.lectureId.toUpperCase() })
+                : t('ai.workbenchReady')
+            }}
           </div>
           <div class="ai-placeholder-desc">
-            已接入全站讲义知识图谱，可随时划词或输入工程技术疑问。
+            {{ t('ai.readySubtitle') }}
           </div>
           <div class="ai-placeholder-shortcut">
-            快捷键 <kbd>Ctrl+J</kbd> 或 <kbd>Cmd+J</kbd> 快速切换显隐
+            <kbd>Alt+A</kbd> / <kbd>Ctrl+Shift+A</kbd>
           </div>
         </div>
       </slot>
@@ -337,11 +380,11 @@ onUnmounted(() => {
   font-size: 10px;
   line-height: 1;
   padding: 2px 5px;
-  border-radius: 4px;
-  background: var(--vp-c-bg-soft);
-  color: var(--vp-c-text-3);
-  border: 1px solid var(--vp-c-divider);
-  font-family: var(--vp-font-family-mono, monospace);
+  border-radius: var(--lec-radius-1);
+  background: var(--lec-surface);
+  color: var(--lec-text-muted);
+  border: 1px solid var(--lec-border);
+  font-family: var(--lec-font-mono);
   letter-spacing: 0;
 }
 
@@ -360,7 +403,7 @@ onUnmounted(() => {
 .ai-backdrop {
   position: fixed;
   inset: 0;
-  background-color: rgba(0, 0, 0, 0.45);
+  background-color: color-mix(in srgb, var(--lec-text) 32%, transparent);
   backdrop-filter: blur(2px);
   -webkit-backdrop-filter: blur(2px);
   z-index: 190;
@@ -380,7 +423,7 @@ onUnmounted(() => {
   right: 0;
   display: flex;
   flex-direction: column;
-  background-color: var(--vp-c-bg);
+  background-color: var(--lec-bg);
   box-sizing: border-box;
   transform: translateX(100%);
   transition: transform 0.28s cubic-bezier(0.16, 1, 0.3, 1), visibility 0.28s;
@@ -394,13 +437,13 @@ onUnmounted(() => {
   pointer-events: auto;
 }
 
-/* 拖拽无极拉伸调整手柄 (加宽热区与高亮条，解决不易进入交互问题) */
+/* 拖拽无极拉伸调整手柄 */
 .ai-resizer-handle {
   position: absolute;
   left: -8px;
   top: 0;
   bottom: 0;
-  width: 16px; /* 加宽热区至 16px，确保鼠标极易捕获与进入拖拽交互 */
+  width: 16px;
   cursor: ew-resize;
   z-index: 50;
   display: flex;
@@ -412,49 +455,46 @@ onUnmounted(() => {
 .ai-resizer-line {
   width: 3px;
   height: 48px;
-  border-radius: 2px;
-  background: var(--vp-c-divider);
+  border-radius: var(--lec-radius-1);
+  background: var(--lec-border);
   transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .ai-resizer-handle:hover .ai-resizer-line,
 .ai-sidebar-shell.is-resizing .ai-resizer-line {
-  background: var(--vp-c-brand-1);
+  background: var(--lec-accent);
   height: 84px;
-  width: 5px; /* 加宽至 5px 饱满蓝色交互条 */
-  border-radius: 3px;
-  box-shadow: 0 0 12px var(--vp-c-brand-1);
+  width: 5px;
+  border-radius: var(--lec-radius-1);
 }
 
-/* 圆形拉伸与收缩切换按钮 (向左移动，与拖拉线严格保持 10px 间距，彻底消除重叠冲突) */
+/* 圆形拉伸与收缩切换按钮 */
 .ai-sidebar-toggle-btn {
   position: absolute;
-  right: calc(100% + 10px); /* 位于侧栏左边界以左，预留 10px 独立操作空间 */
+  right: calc(100% + 10px);
   left: auto;
   top: 50%;
   transform: translateY(-50%);
   width: 30px;
   height: 30px;
-  border-radius: 50%;
-  background: var(--vp-c-bg-elv);
-  border: 1px solid var(--vp-c-divider);
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.12), 0 1px 3px rgba(0, 0, 0, 0.08);
+  border-radius: var(--lec-status-radius);
+  background: var(--lec-surface);
+  border: 1px solid var(--lec-border);
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
   z-index: 60;
-  color: var(--vp-c-text-2);
+  color: var(--lec-text-muted);
   transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
   padding: 0;
   outline: none;
 }
 
 .ai-sidebar-toggle-btn:hover {
-  background: var(--vp-c-bg);
-  border-color: var(--vp-c-brand-1);
-  color: var(--vp-c-brand-1);
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.18), 0 0 0 2px rgba(59, 130, 246, 0.2);
+  background: var(--lec-bg);
+  border-color: var(--lec-accent);
+  color: var(--lec-accent);
   transform: translateY(-50%) scale(1.08);
 }
 
@@ -485,18 +525,11 @@ onUnmounted(() => {
   bottom: 0;
   width: var(--lec-ai-width, 400px);
   height: calc(100vh - var(--vp-nav-height, 64px));
-  border-left: 1px solid var(--vp-c-divider);
-  box-shadow: -4px 0 20px rgba(0, 0, 0, 0.08);
-  z-index: 50; /* 桌面端浮层层级高于正文 (.VPDoc)，但严格低于 VitePress 顶栏 (z-index: 100/110) */
+  border-left: 1px solid var(--lec-border);
+  z-index: 50;
   transition: transform 0.28s cubic-bezier(0.16, 1, 0.3, 1),
               width 0.28s cubic-bezier(0.16, 1, 0.3, 1),
-              box-shadow 0.28s ease,
               visibility 0.28s;
-}
-
-.ai-sidebar-shell.is-desktop.is-expanded,
-.ai-sidebar-shell.is-desktop.is-resizing {
-  box-shadow: -10px 0 36px rgba(0, 0, 0, 0.18), -2px 0 8px rgba(0, 0, 0, 0.08);
 }
 
 /* 移动端/窄屏滑出抽屉规格 */
@@ -505,7 +538,7 @@ onUnmounted(() => {
   bottom: 0;
   width: min(420px, 88vw);
   height: 100vh;
-  box-shadow: -8px 0 32px rgba(0, 0, 0, 0.28);
+  border-left: 1px solid var(--lec-border);
   z-index: 200;
 }
 
@@ -516,8 +549,8 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  border-bottom: 1px solid var(--vp-c-divider);
-  background-color: var(--vp-c-bg-elv);
+  border-bottom: 1px solid var(--lec-border);
+  background-color: var(--lec-surface);
   flex-shrink: 0;
 }
 
@@ -531,13 +564,13 @@ onUnmounted(() => {
 .ai-brand-icon {
   display: flex;
   align-items: center;
-  color: var(--vp-c-brand-1);
+  color: var(--lec-accent);
 }
 
 .ai-brand-title {
   font-size: 14px;
   font-weight: 600;
-  color: var(--vp-c-text-1);
+  color: var(--lec-text);
   letter-spacing: 0.3px;
 }
 
@@ -547,10 +580,10 @@ onUnmounted(() => {
   line-height: 1;
   padding: 3px 8px;
   border-radius: 999px;
-  background-color: rgba(59, 130, 246, 0.1);
-  color: var(--vp-c-brand-1);
-  font-family: var(--vp-font-family-mono, monospace);
-  border: 1px solid rgba(59, 130, 246, 0.2);
+  background-color: var(--lec-accent-tint);
+  color: var(--lec-accent);
+  font-family: var(--lec-font-mono);
+  border: 1px solid var(--lec-accent);
 }
 
 .ai-shell-actions {
@@ -565,18 +598,18 @@ onUnmounted(() => {
   justify-content: center;
   width: 28px;
   height: 28px;
-  border-radius: 6px;
+  border-radius: var(--lec-radius-1);
   border: 1px solid transparent;
   background: transparent;
-  color: var(--vp-c-text-2);
+  color: var(--lec-text-muted);
   cursor: pointer;
   transition: all 0.15s ease;
 }
 
 .ai-close-btn:hover {
-  background-color: var(--vp-c-bg-soft);
-  color: var(--vp-c-text-1);
-  border-color: var(--vp-c-divider);
+  background-color: var(--lec-bg);
+  color: var(--lec-text);
+  border-color: var(--lec-border);
 }
 
 .ai-btn-icon {
@@ -592,7 +625,7 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   min-height: 0;
-  background-color: var(--vp-c-bg);
+  background-color: var(--lec-bg);
 }
 
 /* 默认占位界面（极简工程风） */
@@ -612,41 +645,41 @@ onUnmounted(() => {
   justify-content: center;
   width: 44px;
   height: 44px;
-  border-radius: 12px;
-  background-color: var(--vp-c-bg-soft);
-  border: 1px solid var(--vp-c-divider);
-  color: var(--vp-c-brand-1);
+  border-radius: var(--lec-radius-2);
+  background-color: var(--lec-surface);
+  border: 1px solid var(--lec-border);
+  color: var(--lec-accent);
   margin-bottom: 14px;
 }
 
 .ai-placeholder-title {
   font-size: 14px;
   font-weight: 600;
-  color: var(--vp-c-text-1);
+  color: var(--lec-text);
   margin-bottom: 8px;
 }
 
 .ai-placeholder-desc {
   font-size: 12px;
   line-height: 1.6;
-  color: var(--vp-c-text-2);
+  color: var(--lec-text-muted);
   max-width: 260px;
   margin-bottom: 16px;
 }
 
 .ai-placeholder-shortcut {
   font-size: 11px;
-  color: var(--vp-c-text-3);
+  color: var(--lec-text-muted);
 }
 
 .ai-placeholder-shortcut kbd {
   font-size: 10px;
   padding: 2px 5px;
-  border-radius: 4px;
-  background: var(--vp-c-bg-soft);
-  border: 1px solid var(--vp-c-divider);
-  font-family: var(--vp-font-family-mono, monospace);
-  color: var(--vp-c-text-2);
+  border-radius: var(--lec-radius-1);
+  background: var(--lec-surface);
+  border: 1px solid var(--lec-border);
+  font-family: var(--lec-font-mono);
+  color: var(--lec-text-muted);
 }
 </style>
 

@@ -1,0 +1,488 @@
+/**
+ * theme/styles/concepts.css - Styles for stand-alone concept pages, inline term links (`.lec-term`),
+ * on-demand hover popover cards (`.lec-tcard`), and draft preview confirmation bars (`.lec-draft-banner`).
+ *
+ * Uses ONLY declared `--lec-*` contract tokens (zero raw colour literals, zero box-shadow).
+ */
+
+/* Inline term links inside lectures (spec board 11.1: dotted underline in reader, dashed in datasheet; hover only recolours) */
+.vp-doc a.lec-term {
+  color: inherit;
+  text-decoration: underline dotted var(--lec-accent) 1.5px;
+  text-underline-offset: 4px;
+  cursor: pointer;
+}
+
+html[data-lec-theme='datasheet'] .vp-doc a.lec-term {
+  text-decoration-style: dashed;
+}
+
+.vp-doc a.lec-term:hover,
+.vp-doc a.lec-term:focus-visible {
+  color: var(--lec-accent);
+}
+
+.vp-doc a.lec-term:focus-visible {
+  outline: var(--lec-line-heavy) solid var(--lec-accent);
+  outline-offset: 2px;
+}
+
+.vp-doc a.lec-term.is-missing {
+  text-decoration-color: var(--lec-warning);
+}
+
+/* On-demand hover preview card (non-interactive tooltip surface; zero shadow, hard border) */
+.lec-tcard {
+  position: fixed;
+  z-index: 90;
+  width: min(22rem, calc(100vw - 1.5rem));
+  padding: var(--lec-space-3) var(--lec-space-4);
+  background: var(--lec-surface);
+  color: var(--lec-text);
+  border: var(--lec-line-hair) solid var(--lec-border);
+  border-radius: var(--lec-radius-2);
+  font-family: var(--lec-font-body);
+  font-size: 0.875rem;
+  line-height: 1.55;
+  pointer-events: none;
+}
+
+/* datasheet: heavy top rule in the text colour, square lower corners (spec board 11.1) */
+html[data-lec-theme='datasheet'] .lec-tcard {
+  border-top: var(--lec-line-heavy) solid var(--lec-text);
+  border-radius: 0 0 var(--lec-radius-1) var(--lec-radius-1);
+}
+
+.lec-tcard-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--lec-space-2);
+  margin-bottom: var(--lec-space-1);
+}
+
+.lec-tcard-term {
+  font-family: var(--lec-font-heading);
+  font-weight: 700;
+  font-size: 0.96rem;
+  color: var(--lec-text);
+}
+
+.lec-tcard-en {
+  font-family: var(--lec-font-mono);
+  font-size: 0.75rem;
+  color: var(--lec-text-muted);
+}
+
+.lec-tcard-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--lec-space-2);
+  margin-bottom: var(--lec-space-2);
+  font-size: 0.75rem;
+  color: var(--lec-text-muted);
+}
+
+.lec-tcard-tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px var(--lec-space-2);
+  border: var(--lec-line-hair) solid var(--lec-border);
+  border-radius: var(--lec-radius-1);
+  background: var(--lec-bg);
+}
+
+.lec-tcard-summary {
+  margin: 0;
+  color: var(--lec-text);
+}
+
+.lec-tcard-aliases {
+  margin: var(--lec-space-2) 0 0;
+  font-size: 0.75rem;
+  color: var(--lec-text-muted);
+}
+
+/* Concept page header & layout (§5.2.5) */
+.lec-concept-header {
+  margin-bottom: var(--lec-space-5);
+  padding-bottom: var(--lec-space-4);
+  border-bottom: var(--lec-line-hair) solid var(--lec-border);
+}
+
+.lec-concept-crumb {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--lec-space-2);
+  margin-bottom: var(--lec-space-3);
+}
+
+.lec-concept-back {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--lec-space-1);
+  padding: var(--lec-space-1) var(--lec-space-2);
+  border: var(--lec-line-hair) solid var(--lec-border);
+  border-radius: var(--lec-radius-1);
+  background: var(--lec-surface);
+  color: var(--lec-text);
+  font-size: 0.82rem;
+  font-weight: 500;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.lec-concept-back:hover,
+.lec-concept-back:focus-visible {
+  border-color: var(--lec-accent);
+  color: var(--lec-accent);
+  outline: none;
+}
+
+.lec-concept-eyebrow {
+  display: block;
+  margin-bottom: var(--lec-space-1);
+  font-family: var(--lec-font-mono);
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--lec-accent);
+}
+
+.lec-concept-title {
+  margin: 0 0 var(--lec-space-3);
+  font-family: var(--lec-font-heading);
+  font-weight: var(--lec-heading-weight);
+  font-size: clamp(1.55rem, 2.4vw, 2.05rem);
+  line-height: 1.25;
+  color: var(--lec-text);
+}
+
+.lec-concept-meta-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--lec-space-2) var(--lec-space-4);
+  padding: var(--lec-space-2) var(--lec-space-3);
+  background: var(--lec-surface);
+  border: var(--lec-line-hair) solid var(--lec-border);
+  border-radius: var(--lec-radius-1);
+  font-size: 0.82rem;
+  color: var(--lec-text-muted);
+}
+
+.lec-concept-meta-item strong {
+  color: var(--lec-text);
+  font-weight: 600;
+}
+
+.lec-concept-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-weight: 600;
+}
+
+.lec-concept-mark {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  flex-shrink: 0;
+}
+
+.lec-concept-mark[data-status='published'] {
+  background: var(--lec-done);
+  border-radius: var(--lec-status-radius);
+}
+
+.lec-concept-mark[data-status='draft'] {
+  border: 1.5px solid var(--lec-warning);
+  border-radius: 1px;
+  transform: rotate(45deg);
+}
+
+.lec-concept-mark[data-status='revision'] {
+  background: var(--lec-accent-tint);
+  border: 1.5px solid var(--lec-accent);
+  border-radius: 1px;
+  transform: rotate(45deg);
+}
+
+.lec-concept-mark[data-status='unverified'] {
+  background: var(--lec-danger);
+  clip-path: polygon(50% 0%, 100% 100%, 0% 100%);
+}
+
+/* Draft bar on /concepts/_drafts/* (§14.1) */
+.lec-draft-banner {
+  margin-bottom: var(--lec-space-4);
+  padding: var(--lec-space-3) var(--lec-space-4);
+  border: var(--lec-line-hair) solid var(--lec-warning);
+  border-left: var(--lec-line-heavy) solid var(--lec-warning);
+  border-radius: var(--lec-radius-1);
+  background: var(--lec-warning-tint);
+  color: var(--lec-text);
+}
+
+.lec-draft-banner-top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--lec-space-2);
+}
+
+.lec-draft-label {
+  font-weight: 700;
+  font-size: 0.9rem;
+  color: var(--lec-warning);
+}
+
+.lec-draft-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--lec-space-2);
+}
+
+.lec-cbtn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--lec-space-1);
+  padding: 0.35rem 0.7rem;
+  border: var(--lec-line-hair) solid var(--lec-border);
+  border-radius: var(--lec-radius-1);
+  background: var(--lec-bg);
+  color: var(--lec-text);
+  font-size: 0.8rem;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.lec-cbtn:hover:not(:disabled) {
+  border-color: var(--lec-accent);
+  color: var(--lec-accent);
+}
+
+.lec-cbtn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.lec-cbtn-primary {
+  background: var(--lec-accent);
+  border-color: var(--lec-accent);
+  color: var(--lec-on-accent);
+}
+
+.lec-cbtn-primary:hover:not(:disabled) {
+  color: var(--lec-on-accent);
+  opacity: 0.92;
+}
+
+.lec-cbtn-danger {
+  border-color: var(--lec-danger);
+  color: var(--lec-danger);
+}
+
+.lec-draft-unverified {
+  margin: var(--lec-space-2) 0 0;
+  font-size: 0.82rem;
+  color: var(--lec-danger);
+  font-weight: 600;
+}
+
+/* Diff / confirmation panel on draft preview or sidebar */
+.lec-diff-panel {
+  margin-top: var(--lec-space-3);
+  padding: var(--lec-space-3);
+  border: var(--lec-line-hair) solid var(--lec-border);
+  border-radius: var(--lec-radius-1);
+  background: var(--lec-surface);
+}
+
+.lec-diff-pre {
+  margin: var(--lec-space-2) 0;
+  padding: var(--lec-space-2) var(--lec-space-3);
+  overflow-x: auto;
+  font-family: var(--lec-font-mono);
+  font-size: 0.76rem;
+  line-height: 1.5;
+  background: var(--lec-bg);
+  border: var(--lec-line-hair) solid var(--lec-border);
+  border-radius: var(--lec-radius-1);
+  white-space: pre;
+}
+
+.lec-diff-line-add {
+  color: var(--lec-done-text);
+}
+
+.lec-diff-line-del {
+  color: var(--lec-danger);
+}
+
+/* Panels at the end of a concept page: 相关概念 / 被这些概念引用 / 出现在这些讲 (spec board 11.1) */
+.lec-concept-related {
+  margin-top: var(--lec-space-7);
+  padding-top: var(--lec-space-4);
+  border-top: var(--lec-line-hair) solid var(--lec-border);
+  display: grid;
+  gap: var(--lec-space-6);
+}
+
+.lec-cpanel {
+  display: grid;
+  gap: var(--lec-space-3);
+  min-width: 0;
+}
+
+.lec-cpanel-title {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  font-family: var(--lec-font-heading);
+  font-size: 1rem;
+  font-weight: 700;
+  line-height: 1.4;
+  color: var(--lec-text);
+}
+
+.lec-cpanel-group {
+  display: grid;
+  gap: var(--lec-space-2);
+}
+
+.lec-cpanel-role {
+  margin: 0;
+  font-family: var(--lec-font-heading);
+  font-size: 0.8125rem;
+  font-weight: 500;
+  line-height: 1.4;
+  letter-spacing: 0;
+  color: var(--lec-text-muted);
+}
+
+.lec-cpanel-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 15rem), 1fr));
+  gap: var(--lec-space-2);
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.lec-cpanel-list > li {
+  margin: 0;
+  min-width: 0;
+}
+
+.lec-cpanel-card {
+  display: grid;
+  gap: var(--lec-space-1);
+  height: 100%;
+  padding: var(--lec-space-2) var(--lec-space-3);
+  border: var(--lec-line-hair) solid var(--lec-border);
+  border-radius: var(--lec-radius-2);
+  background: var(--lec-surface);
+  color: var(--lec-text);
+  text-decoration: none;
+  overflow-wrap: anywhere;
+}
+
+.lec-cpanel-card:hover,
+.lec-cpanel-card:focus-visible {
+  border-color: var(--lec-accent);
+  outline: none;
+}
+
+.lec-cpanel-card:focus-visible {
+  outline: var(--lec-line-heavy) solid var(--lec-accent);
+  outline-offset: 2px;
+}
+
+.lec-cpanel-term {
+  font-family: var(--lec-font-heading);
+  font-size: 0.9375rem;
+  font-weight: 700;
+  line-height: 1.4;
+  color: var(--lec-accent);
+}
+
+.lec-cpanel-summary {
+  font-family: var(--lec-font-body);
+  font-size: 0.8125rem;
+  line-height: 1.6;
+  color: var(--lec-text-muted);
+}
+
+/* datasheet: panel title sits on a heavy rule, cards are square with a heavy left edge, role labels in mono */
+html[data-lec-theme='datasheet'] .lec-cpanel-title {
+  padding-top: var(--lec-space-2);
+  border-top: var(--lec-line-heavy) solid var(--lec-text);
+}
+
+html[data-lec-theme='datasheet'] .lec-cpanel-role {
+  font-family: var(--lec-font-mono);
+  font-size: 0.75rem;
+  font-weight: 400;
+}
+
+html[data-lec-theme='datasheet'] .lec-cpanel-card {
+  border-radius: var(--lec-radius-1);
+  border-left: var(--lec-line-heavy) solid var(--lec-text);
+}
+
+html[data-lec-theme='datasheet'] .lec-cpanel-card:hover,
+html[data-lec-theme='datasheet'] .lec-cpanel-card:focus-visible {
+  border-left-color: var(--lec-accent);
+}
+
+html[data-lec-theme='datasheet'] .lec-concept-related-link {
+  border-radius: var(--lec-radius-1);
+}
+
+@media (max-width: 480px) {
+  .lec-cpanel-list {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.lec-concept-related-list {
+  display: grid;
+  gap: var(--lec-space-2);
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.lec-concept-related-link {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--lec-space-2);
+  padding: var(--lec-space-2) var(--lec-space-3);
+  border: var(--lec-line-hair) solid var(--lec-border);
+  border-radius: var(--lec-radius-1);
+  background: var(--lec-surface);
+  color: var(--lec-text);
+  text-decoration: none;
+  font-size: 0.875rem;
+}
+
+.lec-concept-related-link:hover,
+.lec-concept-related-link:focus-visible {
+  border-color: var(--lec-accent);
+  color: var(--lec-accent);
+  outline: none;
+}
+
+.lec-concept-related-code {
+  font-family: var(--lec-font-mono);
+  font-size: 0.78rem;
+  color: var(--lec-text-muted);
+}

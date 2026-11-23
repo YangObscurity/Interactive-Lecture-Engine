@@ -1,10 +1,14 @@
 <script setup lang="ts">
-import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
+import { defineAsyncComponent, ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
+import { useT } from '../../../i18n/useT.ts'
 import { ICONS } from './icons'
 import { aiState } from './aiState'
 import type { ChatMessage, ScopeType, SendPayload } from './types'
 import ChatInput from './ChatInput.vue'
-import MarkdownRenderer from './MarkdownRenderer.vue'
+
+const MarkdownRenderer = defineAsyncComponent(() => import('./MarkdownRenderer.vue'))
+
+const { t } = useT()
 
 const props = withDefaults(
   defineProps<{
@@ -16,6 +20,18 @@ const props = withDefaults(
     messages?: ChatMessage[]
     isStreaming?: boolean
     disabled?: boolean
+    canUpload?: boolean
+    statusState?:
+      | 'checking'
+      | 'ok'
+      | 'unconfigured'
+      | 'unavailable'
+      | 'rate-limited'
+      | 'byok-unverified'
+      | 'byok-ok'
+      | 'byok-failed'
+      | 'mock'
+    sourceLabel?: string
   }>(),
   {
     lectureId: '',
@@ -25,7 +41,10 @@ const props = withDefaults(
     selectedText: '',
     messages: () => [],
     isStreaming: false,
-    disabled: false
+    disabled: false,
+    canUpload: false,
+    statusState: 'checking',
+    sourceLabel: ''
   }
 )
 
@@ -34,6 +53,7 @@ const emit = defineEmits<{
   (e: 'toggleHistory'): void
   (e: 'send', payload: SendPayload): void
   (e: 'stop'): void
+  (e: 'retry'): void
   (e: 'uploadPptx', file: File): void
   (e: 'clearSelection'): void
 }>()
@@ -46,33 +66,57 @@ let copyTimer: number | null = null
 const messageListRef = ref<HTMLDivElement | null>(null)
 const isUserScrolledUp = ref(false)
 
-// 顶栏讲次徽章显示文本 (自适应单讲、课程组与全局状态)
+const statusGlyph = computed<string>(() => {
+  switch (props.statusState) {
+    case 'ok':
+    case 'byok-ok':
+      return ICONS.statusOk
+    case 'unconfigured':
+      return ICONS.statusUnconfigured
+    case 'rate-limited':
+      return ICONS.statusRateLimited
+    case 'unavailable':
+    case 'byok-failed':
+      return ICONS.statusUnavailable
+    default:
+      return ICONS.statusUnverified
+  }
+})
+
+// 顶栏讲次徽章显示文本 (绑定真实状态而非假"就绪")
 const lectureBadgeText = computed(() => {
-  if (props.lectureId) {
-    return `${props.lectureId.toUpperCase()} · 伴读就绪`
+  const scopeId = props.lectureId
+    ? props.lectureId.toUpperCase()
+    : props.groupId
+      ? props.groupId.toUpperCase()
+      : t('ai.globalName')
+  if (
+    props.statusState === 'unavailable' ||
+    props.statusState === 'unconfigured' ||
+    props.statusState === 'rate-limited' ||
+    props.statusState === 'byok-failed'
+  ) {
+    return t('ai.statusOffline', { id: scopeId })
   }
-  if (props.groupId) {
-    return `${props.groupId.toUpperCase()} 课程组 · 伴读就绪`
-  }
-  return '伴读工作台已就绪'
+  return t('ai.statusReady', { id: scopeId })
 })
 
-// 空白态辅助问候语 (自适应单讲与组别)
+// 空白态辅助问候语 (真实反映在线/BYOK/离线状态)
 const emptyGreetingText = computed(() => {
-  if (props.lectureId) {
-    return '已连接本讲工程上下文，可随时划词或输入技术疑问'
+  if (props.statusState === 'unavailable' || props.statusState === 'unconfigured') {
+    return t('ai.emptyOffline')
   }
-  if (props.groupId) {
-    return `已连接 ${props.groupId.toUpperCase()} 课程组上下文，可随时探讨全组知识脉络`
-  }
-  return '已连接全站讲义知识库，可随时输入技术疑问或上传课件'
+  return t('ai.emptyLecture')
 })
 
-// 过滤小节标题噪声前缀，防止折行与排版错位 (Issue 4)
+// 过滤小节标题噪声前缀，防止折行与排版错位（Unicode 转义避免硬编码中文）
 const cleanSectionTitle = computed(() => {
   if (!props.currentSection) return ''
   return props.currentSection
-    .replace(/^(避坑警示|工程实战避坑|实战避坑|避坑指南|开篇|引子|小结|本讲总结|随堂测验|随堂自测)[：:]\s*/, '')
+    .replace(
+      /^(\u907f\u5751\u8b66\u793a|\u5de5\u7a0b\u5b9e\u6218\u907f\u5751|\u5b9e\u6218\u907f\u5751|\u907f\u5751\u6307\u5357|\u5f00\u7bc7|\u5f15\u5b50|\u5c0f\u7ed3|\u672c\u8bb2\u603b\u7ed3|\u968f\u5802\u6d4b\u9a8c|\u968f\u5802\u81ea\u6d4b)[\uff1a:]\s*/,
+      '',
+    )
     .trim()
 })
 
@@ -141,9 +185,9 @@ function handleCopyMessage(msg: ChatMessage) {
 // 范围标签格式化
 function getScopeBadge(scope?: ScopeType): string {
   switch (scope) {
-    case 'group': return '课程组'
-    case 'all': return '全站'
-    case 'selection': return '选区'
+    case 'group': return t('ai.scopeGroup')
+    case 'all': return t('ai.scopeAll')
+    case 'selection': return t('ai.scopeSelection')
     default: return ''
   }
 }
@@ -172,9 +216,16 @@ onUnmounted(() => {
       <div class="header-left">
         <div class="lecture-badge">
           <span class="badge-icon" v-html="ICONS.chipCore"></span>
-          <span class="pulse-indicator"></span>
-          <span class="badge-text">{{ lectureBadgeText }}</span>
+          <span class="badge-text">{{ lectureId ? lectureId.toUpperCase() : t('ai.title') }}</span>
         </div>
+        <span
+          class="ai-src-badge"
+          :data-ai-status="statusState || 'checking'"
+          data-ai-source
+        >
+          <span class="ai-status-glyph" aria-hidden="true" v-html="statusGlyph"></span>
+          <span>{{ sourceLabel || t('ai.sourceChecking') }}</span>
+        </span>
       </div>
 
       <div class="header-right">
@@ -182,8 +233,8 @@ onUnmounted(() => {
         <button
           type="button"
           class="header-action-btn"
-          title="历史会话"
-          aria-label="历史会话"
+          :title="t('ai.historyTitle')"
+          :aria-label="t('ai.historyTitle')"
           @click="emit('toggleHistory')"
         >
           <span class="btn-svg" v-html="ICONS.history"></span>
@@ -193,8 +244,8 @@ onUnmounted(() => {
         <button
           type="button"
           class="header-action-btn"
-          title="收起伴读"
-          aria-label="收起伴读"
+          :title="t('ai.closeTitle')"
+          :aria-label="t('ai.closeTitle')"
           @click="emit('close')"
         >
           <span class="btn-svg" v-html="ICONS.close"></span>
@@ -202,22 +253,22 @@ onUnmounted(() => {
       </div>
     </header>
 
-    <!-- 2. 消息展示区 (Message List) -->
-    <div ref="messageListRef" class="chat-messages-area">
+    <!-- 2. 消息展示区 (Message List, FE-020 aria-live) -->
+    <div ref="messageListRef" class="chat-messages-area" aria-live="polite" aria-atomic="false">
       <!-- 极简初始空白态 (Clean Empty State) -->
       <div v-if="!messages || messages.length === 0" class="clean-empty-state">
         <div class="core-vector-badge">
           <span class="badge-vector" v-html="ICONS.chipCore"></span>
         </div>
         <div class="empty-status-line">
-          <span class="status-dot"></span>
+          <span class="ai-status-glyph" aria-hidden="true" v-html="statusGlyph"></span>
           <span class="status-name">{{ lectureBadgeText }}</span>
         </div>
         <p class="empty-subtle-greeting">
           {{ emptyGreetingText }}
         </p>
-        <div v-if="cleanSectionTitle" class="empty-anchor-hint" :title="`当前阅读小节: ${currentSection}`">
-          <span class="anchor-tag">当前小节</span>
+        <div v-if="cleanSectionTitle" class="empty-anchor-hint" :title="t('ai.sectionPrefixTitle', { section: currentSection })">
+          <span class="anchor-tag">{{ t('ai.currentSectionTag') }}</span>
           <span class="anchor-name">{{ cleanSectionTitle }}</span>
         </div>
       </div>
@@ -234,10 +285,10 @@ onUnmounted(() => {
           <template v-if="msg.role === 'user'">
             <div class="user-bubble-wrapper">
               <!-- 划选上下文引用卡片 (严格剔除“无”与空选区，无实质划词绝对不渲染卡片) -->
-              <div v-if="msg.selectedText && msg.selectedText !== '无' && msg.selectedText.trim().length > 0" class="message-quote-box">
+              <div v-if="msg.selectedText && msg.selectedText !== t('ai.noSelection') && msg.selectedText !== '\u65e0' && msg.selectedText.trim().length > 0" class="message-quote-box">
                 <div class="quote-tag">
                   <span class="quote-svg" v-html="ICONS.scopeSelection"></span>
-                  <span>划词引用</span>
+                  <span>{{ t('ai.quotedLabel') }}</span>
                 </div>
                 <div class="quote-body">{{ msg.selectedText }}</div>
               </div>
@@ -259,36 +310,82 @@ onUnmounted(() => {
             <div class="assistant-content-wrapper">
               <div class="assistant-header">
                 <span class="assistant-icon" v-html="ICONS.chipCore"></span>
-                <span class="assistant-name">AI 伴读</span>
+                <span class="assistant-name">{{ t('ai.assistantName') }}</span>
+              </div>
+
+              <!-- 工具调用进度条（原生 SSE tool_call 与 BYOK 浏览器工具循环共用；仅展示工具名与状态，绝不显示参数或返回值） -->
+              <div v-if="msg.toolCalls && msg.toolCalls.length > 0" class="ai-tool-calls" data-ai-tool-calls>
+                <span
+                  v-for="tc in msg.toolCalls"
+                  :key="tc.id"
+                  class="ai-tool-pill"
+                  :data-ai-tool-call="tc.name"
+                  :data-ai-tool-state="tc.state"
+                >
+                  <span class="ai-tool-mark" :data-state="tc.state" aria-hidden="true"></span>
+                  <span class="ai-tool-name">{{
+                    tc.state === 'running'
+                      ? t('ai.toolCallRunning', { name: tc.name })
+                      : tc.state === 'error'
+                        ? t('ai.toolCallError', { name: tc.name })
+                        : t('ai.toolCallDone', { name: tc.name })
+                  }}</span>
+                </span>
               </div>
 
               <div class="assistant-body">
-                <MarkdownRenderer :content="msg.content" />
+                <MarkdownRenderer
+                  v-if="msg.content"
+                  :content="msg.content"
+                  :is-streaming="msg.isStreaming"
+                />
 
                 <!-- 流式打字中微脉冲动画 -->
-                <div v-if="msg.isStreaming && !msg.content" class="typing-pulse-bar">
+                <div v-if="msg.isStreaming && !msg.content && !(msg.toolCalls && msg.toolCalls.length > 0)" class="typing-pulse-bar">
                   <span class="pulse-dot"></span>
                   <span class="pulse-dot"></span>
                   <span class="pulse-dot"></span>
                 </div>
 
-                <!-- 异常状态指示 (点 2: 错误提示) -->
-                <div v-if="msg.error" class="ai-msg-error-alert">
-                  <span class="err-badge">通信中断</span>
-                  <span class="err-text">{{ msg.error }}</span>
+                <!-- 不完整或异常提示 (D-07 / FE-003，附带重试入口，绝不存为完整回答) -->
+                <div
+                  v-if="msg.isIncomplete || msg.isError || msg.error"
+                  class="ai-msg-error-card"
+                  :class="{ 'is-incomplete': Boolean(msg.isIncomplete) }"
+                  :data-ai-incomplete="msg.isIncomplete ? '1' : undefined"
+                  data-ai-error-bubble
+                >
+                  <p class="err-text">
+                    {{
+                      msg.isIncomplete
+                        ? (msg.errorDetail && msg.errorDetail !== t('ai.incompleteBanner')
+                            ? `${t('ai.incompleteBanner')} (${msg.errorDetail})`
+                            : t('ai.incompleteBanner'))
+                        : t('ai.errorBubble', { detail: msg.errorDetail || msg.error || t('ai.networkError') })
+                    }}
+                  </p>
+                  <button
+                    type="button"
+                    class="ai-retry-btn"
+                    data-ai-retry
+                    :disabled="isStreaming"
+                    @click="emit('retry')"
+                  >
+                    {{ t('ai.retry') }}
+                  </button>
                 </div>
               </div>
 
               <!-- 消息底部操作条 -->
-              <div class="assistant-footer">
+              <div v-if="!msg.isError && !msg.isIncomplete && msg.content" class="assistant-footer">
                 <button
                   type="button"
                   class="msg-tool-btn"
-                  :title="copiedMessageId === msg.id ? '已复制' : '复制回答'"
+                  :title="copiedMessageId === msg.id ? t('ai.copied') : t('ai.copyAnswer')"
                   @click="handleCopyMessage(msg)"
                 >
                   <span class="tool-svg" v-html="copiedMessageId === msg.id ? ICONS.check : ICONS.copy"></span>
-                  <span class="tool-text">{{ copiedMessageId === msg.id ? '已复制' : '复制' }}</span>
+                  <span class="tool-text">{{ copiedMessageId === msg.id ? t('ai.copied') : t('ai.copy') }}</span>
                 </button>
               </div>
             </div>
@@ -296,12 +393,12 @@ onUnmounted(() => {
         </div>
       </div>
 
-      <!-- 悬浮回到最底按钮 (严格限定在伴读展开、消息多于2条且上滑时在内部呈现，绝不漏出屏幕) -->
+      <!-- 悬浮回到最底按钮 -->
       <button
         v-if="aiState.isOpen && isUserScrolledUp && messages && messages.length > 2"
         type="button"
         class="floating-scroll-bottom-btn"
-        title="回到底部"
+        :title="t('ai.scrollBottomTitle')"
         @click="scrollToBottom(true)"
       >
         <span class="scroll-icon" v-html="ICONS.chevronDown"></span>
@@ -315,6 +412,7 @@ onUnmounted(() => {
       :selected-text="selectedText"
       :is-streaming="isStreaming"
       :disabled="disabled"
+      :can-upload="canUpload"
       @send="emit('send', $event)"
       @stop="emit('stop')"
       @upload-pptx="emit('uploadPptx', $event)"
@@ -329,8 +427,8 @@ onUnmounted(() => {
   flex-direction: column;
   height: 100%;
   width: 100%;
-  background: var(--vp-c-bg);
-  color: var(--vp-c-text-1);
+  background: var(--lec-bg);
+  color: var(--lec-text);
   overflow: hidden;
   box-sizing: border-box;
 }
@@ -342,8 +440,8 @@ onUnmounted(() => {
   justify-content: space-between;
   height: 46px;
   padding: 0 12px;
-  background: var(--vp-c-bg-soft);
-  border-bottom: 1px solid var(--vp-c-divider);
+  background: var(--lec-surface);
+  border-bottom: 1px solid var(--lec-border);
   flex-shrink: 0;
   user-select: none;
 }
@@ -359,17 +457,17 @@ onUnmounted(() => {
   align-items: center;
   gap: 6px;
   padding: 3px 8px;
-  border-radius: 6px;
-  background: var(--vp-c-bg);
-  border: 1px solid var(--vp-c-divider);
+  border-radius: var(--lec-radius-1);
+  background: var(--lec-bg);
+  border: 1px solid var(--lec-border);
   font-size: 11.5px;
   font-weight: 600;
-  color: var(--vp-c-text-1);
+  color: var(--lec-text);
 }
 
 .badge-icon {
   display: inline-flex;
-  color: var(--vp-c-brand-1);
+  color: var(--lec-accent);
 }
 
 .badge-icon :deep(svg) {
@@ -377,25 +475,86 @@ onUnmounted(() => {
   height: 13px;
 }
 
-.pulse-indicator {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background-color: #10b981;
-  box-shadow: 0 0 6px rgba(16, 185, 129, 0.6);
-  animation: pulse-glow 2s infinite ease-in-out;
+.ai-src-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 7px;
+  border-radius: var(--lec-radius-1);
+  background: var(--lec-surface);
+  border: 1px solid var(--lec-border);
+  font-size: 11px;
+  color: var(--lec-text-muted);
+  white-space: nowrap;
+}
+.ai-src-badge[data-ai-status='ok'],
+.ai-src-badge[data-ai-status='byok-ok'] {
+  color: var(--lec-done-text);
+  border-color: var(--lec-done);
+  background: var(--lec-surface);
+}
+.ai-src-badge[data-ai-status='byok-unverified'] {
+  color: var(--lec-accent);
+  border-color: var(--lec-accent);
+  background: var(--lec-accent-tint);
+}
+.ai-src-badge[data-ai-status='rate-limited'] {
+  color: var(--lec-warning);
+  border-color: var(--lec-warning);
+  background: var(--lec-warning-tint);
+}
+.ai-src-badge[data-ai-status='unavailable'],
+.ai-src-badge[data-ai-status='byok-failed'] {
+  color: var(--lec-danger);
+  border-color: var(--lec-danger);
+  background: var(--lec-danger-tint);
+}
+.ai-src-badge[data-ai-status='unconfigured'] {
+  color: var(--lec-text-muted);
+  border-style: dashed;
+  border-color: var(--lec-border);
 }
 
-@keyframes pulse-glow {
-  0%, 100% {
-    transform: scale(1);
-    opacity: 0.8;
-  }
-  50% {
-    transform: scale(1.25);
-    opacity: 1;
-    box-shadow: 0 0 10px rgba(16, 185, 129, 0.9);
-  }
+.ai-status-glyph {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.ai-msg-error-card {
+  margin-top: 8px;
+  padding: 10px 12px;
+  border-radius: var(--lec-radius-2);
+  border: 1px solid var(--lec-danger);
+  background: var(--lec-danger-tint);
+  color: var(--lec-text);
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+.ai-msg-error-card.is-incomplete {
+  border-color: var(--lec-warning);
+  background: var(--lec-warning-tint);
+}
+.ai-msg-error-card .err-text {
+  margin: 0 0 8px;
+  color: var(--lec-danger);
+}
+.ai-msg-error-card.is-incomplete .err-text {
+  color: var(--lec-text);
+}
+.ai-retry-btn {
+  padding: 3px 10px;
+  border-radius: var(--lec-radius-1);
+  border: 1px solid var(--lec-border);
+  background: var(--lec-bg);
+  color: var(--lec-text);
+  font-size: 12px;
+  cursor: pointer;
+}
+.ai-retry-btn:hover:not(:disabled) {
+  border-color: var(--lec-accent);
+  color: var(--lec-accent);
 }
 
 .header-right {
@@ -410,18 +569,18 @@ onUnmounted(() => {
   justify-content: center;
   width: 28px;
   height: 28px;
-  border-radius: 5px;
+  border-radius: var(--lec-radius-1);
   background: transparent;
   border: 1px solid transparent;
-  color: var(--vp-c-text-2);
+  color: var(--lec-text-muted);
   cursor: pointer;
   transition: all 0.15s ease;
 }
 
 .header-action-btn:hover {
-  background: var(--vp-c-bg-mute);
-  color: var(--vp-c-text-1);
-  border-color: var(--vp-c-divider);
+  background: var(--lec-bg);
+  color: var(--lec-text);
+  border-color: var(--lec-border);
 }
 
 .btn-svg :deep(svg) {
@@ -457,12 +616,11 @@ onUnmounted(() => {
   justify-content: center;
   width: 56px;
   height: 56px;
-  border-radius: 14px;
-  background: var(--vp-c-bg-soft);
-  border: 1px solid var(--vp-c-divider);
-  color: var(--vp-c-brand-1);
+  border-radius: var(--lec-radius-2);
+  background: var(--lec-surface);
+  border: 1px solid var(--lec-border);
+  color: var(--lec-accent);
   margin-bottom: 14px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.04);
 }
 
 .badge-vector :deep(svg) {
@@ -476,20 +634,13 @@ onUnmounted(() => {
   gap: 6px;
   font-size: 13px;
   font-weight: 600;
-  color: var(--vp-c-text-1);
+  color: var(--lec-text);
   margin-bottom: 6px;
-}
-
-.status-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: #10b981;
 }
 
 .empty-subtle-greeting {
   font-size: 12.5px;
-  color: var(--vp-c-text-3);
+  color: var(--lec-text-muted);
   max-width: 240px;
   line-height: 1.5;
   margin: 0 0 14px;
@@ -501,23 +652,23 @@ onUnmounted(() => {
   gap: 6px;
   max-width: 88%;
   padding: 4px 10px;
-  border-radius: 6px;
-  background: var(--vp-c-bg-soft);
-  border: 1px solid var(--vp-c-divider);
+  border-radius: var(--lec-radius-1);
+  background: var(--lec-surface);
+  border: 1px solid var(--lec-border);
   font-size: 11px;
   box-sizing: border-box;
   overflow: hidden;
 }
 
 .anchor-tag {
-  color: var(--vp-c-text-3);
+  color: var(--lec-text-muted);
   white-space: nowrap;
   flex-shrink: 0;
   font-weight: 500;
 }
 
 .anchor-name {
-  color: var(--vp-c-brand-1);
+  color: var(--lec-accent);
   font-weight: 500;
   white-space: nowrap;
   overflow: hidden;
@@ -587,30 +738,29 @@ onUnmounted(() => {
 
 .message-scope-tag {
   font-size: 10.5px;
-  color: var(--vp-c-brand-1);
+  color: var(--lec-accent);
   font-weight: 500;
 }
 
 .user-bubble {
   padding: 8px 12px;
-  background: var(--vp-c-brand-soft, rgba(62, 99, 221, 0.12));
-  border: 1px solid var(--vp-c-brand-1);
-  color: var(--vp-c-text-1);
-  border-radius: 10px 10px 2px 10px;
-  font-size: 13.5px !important; /* 用户本人提问字体恒定保持小巧紧凑，绝不随拉伸放大 */
+  background: var(--lec-accent-tint);
+  border: 1px solid var(--lec-accent);
+  color: var(--lec-text);
+  border-radius: var(--lec-radius-2);
+  font-size: 13.5px !important;
   line-height: 1.5 !important;
   word-break: break-word;
   white-space: pre-wrap;
 }
 
-/* 助手卡片 */
 .assistant-content-wrapper {
   display: flex;
   flex-direction: column;
   width: 100%;
-  background: var(--vp-c-bg-soft);
-  border: 1px solid var(--vp-c-divider);
-  border-radius: 10px;
+  background: var(--lec-surface);
+  border: 1px solid var(--lec-border);
+  border-radius: var(--lec-radius-2);
   padding: 10px 12px;
   gap: 6px;
 }
@@ -621,19 +771,83 @@ onUnmounted(() => {
   gap: 6px;
   font-size: 12px;
   font-weight: 600;
-  color: var(--vp-c-text-2);
-  border-bottom: 1px dashed var(--vp-c-divider);
+  color: var(--lec-text-muted);
+  border-bottom: 1px dashed var(--lec-border);
   padding-bottom: 6px;
 }
 
 .assistant-icon {
   display: inline-flex;
-  color: var(--vp-c-brand-1);
+  color: var(--lec-accent);
 }
 
 .assistant-icon :deep(svg) {
   width: 13px;
   height: 13px;
+}
+
+.ai-tool-calls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 2px 0;
+}
+
+.ai-tool-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 8px;
+  border: var(--lec-line-hair) solid var(--lec-border);
+  border-radius: 999px;
+  background: var(--lec-bg);
+  color: var(--lec-text-muted);
+  font-size: 11.5px;
+  line-height: 1.5;
+  white-space: nowrap;
+}
+
+.ai-tool-pill[data-ai-tool-state='running'] {
+  border-color: var(--lec-accent);
+  color: var(--lec-text);
+}
+
+.ai-tool-pill[data-ai-tool-state='error'] {
+  border-color: var(--lec-danger);
+  color: var(--lec-danger);
+}
+
+.ai-tool-mark {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  flex-shrink: 0;
+  border-radius: var(--lec-status-radius);
+  background: var(--lec-text-muted);
+}
+
+.ai-tool-mark[data-state='running'] {
+  background: var(--lec-accent);
+  animation: ai-tool-pulse 1.1s ease-in-out infinite;
+}
+
+.ai-tool-mark[data-state='done'] {
+  background: var(--lec-done);
+}
+
+.ai-tool-mark[data-state='error'] {
+  background: var(--lec-danger);
+}
+
+[data-lec-theme='datasheet'] .ai-tool-pill {
+  border-radius: var(--lec-radius-1);
+  font-family: var(--lec-font-mono);
+  font-size: 11px;
+}
+
+@keyframes ai-tool-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
 }
 
 .assistant-body {
@@ -647,9 +861,9 @@ onUnmounted(() => {
 .ai-msg-error-alert {
   margin-top: 6px;
   padding: 6px 10px;
-  border-radius: 6px;
-  background: rgba(239, 68, 68, 0.08);
-  border: 1px solid rgba(239, 68, 68, 0.25);
+  border-radius: var(--lec-radius-1);
+  background: var(--lec-danger-tint);
+  border: 1px solid var(--lec-danger);
   display: flex;
   align-items: center;
   gap: 8px;
@@ -657,15 +871,15 @@ onUnmounted(() => {
 }
 .ai-msg-error-alert .err-tag {
   padding: 1px 6px;
-  border-radius: 4px;
-  background: #ef4444;
-  color: #fff;
+  border-radius: var(--lec-radius-1);
+  background: var(--lec-danger);
+  color: var(--lec-on-accent);
   font-weight: 600;
   font-size: 10px;
   flex-shrink: 0;
 }
 .ai-msg-error-alert .err-text {
-  color: #ef4444;
+  color: var(--lec-danger);
   word-break: break-all;
 }
 
@@ -680,7 +894,7 @@ onUnmounted(() => {
   width: 5px;
   height: 5px;
   border-radius: 50%;
-  background: var(--vp-c-brand-1);
+  background: var(--lec-accent);
   animation: dot-bounce 1.4s infinite ease-in-out both;
 }
 
@@ -703,7 +917,7 @@ onUnmounted(() => {
   align-items: center;
   justify-content: flex-end;
   padding-top: 4px;
-  border-top: 1px dashed var(--vp-c-divider);
+  border-top: 1px dashed var(--lec-border);
 }
 
 .msg-tool-btn {
@@ -712,18 +926,18 @@ onUnmounted(() => {
   gap: 4px;
   background: transparent;
   border: 1px solid transparent;
-  border-radius: 4px;
+  border-radius: var(--lec-radius-1);
   padding: 2px 6px;
   font-size: 11px;
-  color: var(--vp-c-text-3);
+  color: var(--lec-text-muted);
   cursor: pointer;
   transition: all 0.15s ease;
 }
 
 .msg-tool-btn:hover {
-  background: var(--vp-c-bg-mute);
-  color: var(--vp-c-text-1);
-  border-color: var(--vp-c-divider);
+  background: var(--lec-bg);
+  color: var(--lec-text);
+  border-color: var(--lec-border);
 }
 
 .tool-svg :deep(svg) {
@@ -731,7 +945,6 @@ onUnmounted(() => {
   height: 12px;
 }
 
-/* 浮动滚到底部快捷键 */
 .floating-scroll-bottom-btn {
   position: absolute;
   right: 18px;
@@ -742,19 +955,18 @@ onUnmounted(() => {
   width: 28px;
   height: 28px;
   border-radius: 50%;
-  background: var(--vp-c-bg-soft);
-  border: 1px solid var(--vp-c-border);
-  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
-  color: var(--vp-c-text-2);
+  background: var(--lec-surface);
+  border: 1px solid var(--lec-border);
+  color: var(--lec-text-muted);
   cursor: pointer;
   transition: all 0.2s ease;
   z-index: 10;
 }
 
 .floating-scroll-bottom-btn:hover {
-  background: var(--vp-c-bg);
-  color: var(--vp-c-brand-1);
-  border-color: var(--vp-c-brand-1);
+  background: var(--lec-bg);
+  color: var(--lec-accent);
+  border-color: var(--lec-accent);
 }
 
 .scroll-icon :deep(svg) {

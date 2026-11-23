@@ -12,13 +12,22 @@
 import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useRoute, useData } from 'vitepress'
 import { LECTURE_EXPORT } from '../../export.config'
+import { useT } from '../../i18n/useT.ts'
+import { CHARTS_SETTLED_EVENT } from '../core/lifecycle'
+import { splitLocale } from '../core/route'
+import { getLocaleKeys } from '../core/locales'
+import { tierAssetPrefix } from '../access/paths'
+import { currentAccessConfig } from '../access/store'
 
 const route = useRoute()
+const { t } = useT()
 const { frontmatter } = useData()
 
-// 讲义页面路由判定（结构判据，解耦具体课程组代号）
+// 讲义页面路由判定（结构判据，解耦具体课程组代号）。
+// 非根语言页（/en/...）不显示导出：静态产物按根语言路径预生成，译文导出以后再做（P2d）。
 const isLecture = computed(() => {
   const p = route.path || ''
+  if (splitLocale(p, getLocaleKeys()).locale !== null) return false
   return /\/[^/]+\/L\d+(?:\.html)?\/?$/i.test(p)
 })
 
@@ -97,7 +106,9 @@ function parseRouteInfo(): { groupKey: string; lecture: string } | null {
 /** 构造静态资产 URL */
 function assetUrl(info: { groupKey: string; lecture: string }, type: ExportType): string {
   const suffix = LECTURE_EXPORT.types[type].suffix
-  return `${LECTURE_EXPORT.exportsPublicPath}/${info.groupKey}/${info.lecture}/${info.lecture}${suffix}`
+  // P3b: the exports of a restricted tier live under /_access/<tier>/exports/ (production builds only)
+  const prefix = tierAssetPrefix(frontmatter.value?.accessTier, currentAccessConfig()?.tiers, import.meta.env.DEV)
+  return `${prefix}${LECTURE_EXPORT.exportsPublicPath}/${info.groupKey}/${info.lecture}/${info.lecture}${suffix}`
 }
 
 /** 构造下载文件名 */
@@ -137,7 +148,7 @@ async function handleExport(type: ExportType) {
   try {
     const headRes = await fetch(url, { method: 'HEAD' }).catch(() => null)
     if (headRes && headRes.ok && !headRes.headers.get('content-type')?.includes('text/html')) {
-      showToast(`正在下载: ${fileName}`, 'success')
+      showToast(t('export.toast.downloading', { file: fileName }), 'success')
       triggerDownload(url, fileName)
       setTimeout(() => {
         isExporting.value = false
@@ -148,10 +159,10 @@ async function handleExport(type: ExportType) {
 
   // 2. 尝试调用后端无头 Chromium 按需即时生成
   exportProgressText.value = type === 'continuous'
-    ? '正在启动无头 Chromium 矢量生成一整张长卷 PDF...'
+    ? t('export.progress.continuous')
     : type === 'png'
-    ? '正在启动无头 Chromium 渲染全景超清长图...'
-    : '正在排版生成出版级 A4 多页 PDF...'
+    ? t('export.progress.png')
+    : t('export.progress.a4')
 
   try {
     const genRes = await fetch(
@@ -162,7 +173,7 @@ async function handleExport(type: ExportType) {
     if (genRes && genRes.ok) {
       const data = await genRes.json().catch(() => null)
       if (data && data.ok) {
-        showToast(`生成完毕，正在下载: ${fileName}`, 'success')
+        showToast(t('export.toast.generated', { file: fileName }), 'success')
         triggerDownload(url, fileName)
         setTimeout(() => {
           isExporting.value = false
@@ -175,19 +186,43 @@ async function handleExport(type: ExportType) {
 
   // 3. 优雅端侧降级（保证纯静态环境或离线时 100% 可用）
   if (type === 'continuous') {
-    exportProgressText.value = '正在准备单页长卷打印...'
+    exportProgressText.value = t('export.fallback.continuous')
     await exportContinuousPdfFallback()
   } else if (type === 'png') {
-    exportProgressText.value = '正在前端合成全景长图...'
+    exportProgressText.value = t('export.fallback.png')
     await exportLongImagePngFallback(fileName)
   } else if (type === 'a4') {
-    exportProgressText.value = '正在调起出版级 A4 打印...'
+    exportProgressText.value = t('export.fallback.a4')
     await exportA4PdfFallback()
   }
 }
 
-/** 降级实现：端侧单页无缝长卷 PDF 打印 */
-async function exportContinuousPdfFallback() {
+async function waitForChartsSettled(waitDarkMermaid: boolean, timeoutMs = 3000): Promise<void> {
+  const win = window as unknown as { __CHARTS_DONE__?: boolean }
+  if (!waitDarkMermaid && win.__CHARTS_DONE__ !== false) return
+  await new Promise<void>((resolve) => {
+    let done = false
+    const finish = () => {
+      if (done) return
+      done = true
+      window.removeEventListener(CHARTS_SETTLED_EVENT, onSettled)
+      clearTimeout(timer)
+      resolve()
+    }
+    const onSettled = () => finish()
+    window.addEventListener(CHARTS_SETTLED_EVENT, onSettled)
+    const timer = setTimeout(finish, timeoutMs)
+    if (!waitDarkMermaid && win.__CHARTS_DONE__ === true) finish()
+  })
+}
+
+async function runPrintFallback(opts: {
+  mode: 'continuous' | 'a4'
+  styleId: string
+  toastText: string
+  resizeWidth?: () => number | undefined
+  pageRule: (docEl: HTMLElement) => string
+}) {
   const docEl = (document.querySelector('.VPDoc') || document.querySelector('.vp-doc')) as HTMLElement
   if (!docEl) {
     isExporting.value = false
@@ -196,11 +231,13 @@ async function exportContinuousPdfFallback() {
 
   // 暗色模式保护：打印统一采用高可读性纯净白底出版模式，防止 Shiki 暗色浅文本与白底冲撞
   const wasDark = document.documentElement.classList.contains('dark')
+  const hasMermaid = document.querySelector('figure.chart[data-type="mermaid"]') !== null
+  const settledPromise = waitForChartsSettled(wasDark && hasMermaid)
   if (wasDark) {
     document.documentElement.classList.remove('dark')
   }
 
-  // 自动展开所有自测/详情折叠框，保证长卷中全部解析与答案可见
+  // 自动展开所有自测/详情折叠框，保证导出/打印中全部解析与答案可见
   const autoOpenedDetails: HTMLDetailsElement[] = []
   document.querySelectorAll<HTMLDetailsElement>('details:not(.chart-code)').forEach((d) => {
     if (!d.open) {
@@ -210,179 +247,30 @@ async function exportContinuousPdfFallback() {
     }
   })
 
-  // 触发图表自适应重排与重绘（依据当前版心容器动态标定，严禁硬编码 1080px 导致右侧截断）
+  await settledPromise
+
   if (typeof (window as any).__RESIZE_ALL_CHARTS__ === 'function') {
-    const cont = document.querySelector('.VPDoc .content-container') as HTMLElement | null
-    const usableW = cont ? Math.min(cont.clientWidth - 24, 850) : 850
-    try { (window as any).__RESIZE_ALL_CHARTS__(usableW) } catch {}
+    try { (window as any).__RESIZE_ALL_CHARTS__(opts.resizeWidth?.()) } catch {}
   }
   window.dispatchEvent(new Event('resize'))
+  await new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r())))
 
-  const w = 1200
-  const h = Math.ceil(Math.max(docEl.scrollHeight, docEl.offsetHeight)) + 80
-
-  const styleId = '__lecture_continuous_print_style__'
-  let styleEl = document.getElementById(styleId) as HTMLStyleElement
+  document.documentElement.dataset.lecPrint = opts.mode
+  let styleEl = document.getElementById(opts.styleId) as HTMLStyleElement | null
   if (!styleEl) {
     styleEl = document.createElement('style')
-    styleEl.id = styleId
+    styleEl.id = opts.styleId
     document.head.appendChild(styleEl)
   }
+  styleEl.textContent = opts.pageRule(docEl)
 
-  styleEl.textContent = `
-    @page {
-      size: ${w}px ${h}px !important;
-      margin: 0 !important;
-    }
-    @media print {
-      html, body {
-        width: ${w}px !important;
-        min-height: 100% !important;
-        height: auto !important;
-        max-height: none !important;
-        overflow: visible !important;
-        margin: 0 !important;
-        padding: 0 !important;
-        background: #ffffff !important;
-        color: #1e293b !important;
-        -webkit-print-color-adjust: exact !important;
-        print-color-adjust: exact !important;
-      }
-      .VPNav, .VPLocalNav, .VPSidebar, .aside, .VPDocAside, .reading-mode-nav-wrapper,
-      .lecture-export-wrapper, .lecture-export-toast, .lecture-export-hud-overlay,
-      .ai-sidebar-shell, .selection-toolbar-root, .lecture-progress-card,
-      .VPDocFooter, .edit-link, .next-and-prev-link, .chart-tools, details.chart-code {
-        display: none !important;
-        visibility: hidden !important;
-      }
-      .VPContent, .VPDoc {
-        width: ${w}px !important;
-        max-width: ${w}px !important;
-        margin: 0 auto !important;
-        padding: 32px 48px !important;
-        box-sizing: border-box !important;
-      }
-      .VPDoc .container {
-        max-width: 100% !important;
-        margin: 0 auto !important;
-        display: block !important;
-      }
-      .VPDoc .content,
-      .VPDoc .content-container {
-        max-width: 100% !important;
-        margin: 0 auto !important;
-        padding: 0 !important;
-        width: 100% !important;
-      }
-      .vp-doc {
-        font-size: 16px !important;
-      }
-      * {
-        break-inside: auto !important;
-        page-break-inside: auto !important;
-      }
-
-      /* 图表防截断与自适应 */
-      figure.chart {
-        break-inside: avoid !important;
-        page-break-inside: avoid !important;
-        box-sizing: border-box !important;
-        width: 100% !important;
-        max-width: 100% !important;
-        margin: 24px auto !important;
-        background: #f8fafc !important;
-        border: 1px solid #e2e8f0 !important;
-        -webkit-print-color-adjust: exact !important;
-        print-color-adjust: exact !important;
-      }
-      figure.chart .chart-body {
-        overflow: visible !important;
-        width: 100% !important;
-        max-width: 100% !important;
-        box-sizing: border-box !important;
-      }
-      figure.chart .chart-body svg {
-        max-width: 100% !important;
-        height: auto !important;
-        display: block !important;
-        margin: 0 auto !important;
-      }
-      figure.chart .chart-body canvas {
-        max-width: 100% !important;
-        height: auto !important;
-        object-fit: contain !important;
-      }
-      /* ECharts 打印与导出尺寸防溢出与等比锁定 */
-      figure.chart[data-type='echarts'] .chart-body {
-        height: 440px !important;
-        max-height: 440px !important;
-        overflow: hidden !important;
-      }
-      figure.chart[data-type='echarts'] .chart-body > div {
-        height: 100% !important;
-        max-height: 100% !important;
-        width: 100% !important;
-      }
-      figure.chart[data-type='echarts'] .chart-body svg {
-        width: 100% !important;
-        max-width: 100% !important;
-        height: 100% !important;
-        max-height: 100% !important;
-        display: block !important;
-      }
-
-
-      /* 代码块高保真与防截断 */
-      .vp-doc div[class*='language-'],
-      div[class*='language-'],
-      pre,
-      .vp-code-block {
-        overflow: visible !important;
-        overflow-x: visible !important;
-        overflow-y: visible !important;
-        box-sizing: border-box !important;
-        max-width: 100% !important;
-        white-space: pre-wrap !important;
-        word-break: break-all !important;
-        word-wrap: break-word !important;
-        -webkit-print-color-adjust: exact !important;
-        print-color-adjust: exact !important;
-      }
-      .vp-doc div[class*='language-'],
-      div[class*='language-'] {
-        background-color: #f8fafc !important;
-        border: 1px solid #e2e8f0 !important;
-        border-radius: 6px !important;
-        margin: 16px 0 !important;
-        padding: 12px 16px !important;
-        position: relative !important;
-      }
-      .vp-doc div[class*='language-'] pre,
-      div[class*='language-'] pre {
-        background: transparent !important;
-        margin: 0 !important;
-        padding: 0 !important;
-        border: none !important;
-      }
-      .vp-doc div[class*='language-'] button.copy {
-        display: none !important;
-      }
-      .vp-doc div[class*='language-'] span.lang {
-        position: absolute !important;
-        top: 6px !important;
-        right: 12px !important;
-        font-size: 11px !important;
-        color: #94a3b8 !important;
-      }
-    }
-  `
-
-  showToast('已唤起长卷打印面板：目标请选「另存为 PDF」并勾选「背景图形」', 'info')
+  showToast(opts.toastText, 'info')
 
   let cleanedUp = false
   const cleanup = () => {
     if (cleanedUp) return
     cleanedUp = true
+    delete document.documentElement.dataset.lecPrint
     if (wasDark) {
       document.documentElement.classList.add('dark')
     }
@@ -401,227 +289,56 @@ async function exportContinuousPdfFallback() {
   }
 
   window.addEventListener('afterprint', cleanup)
-  setTimeout(() => window.print(), 100)
+  window.print()
   setTimeout(() => { if (!cleanedUp) cleanup() }, 60000)
+}
+
+/** 降级实现：端侧单页无缝长卷 PDF 打印 */
+async function exportContinuousPdfFallback() {
+  const w = 1200
+  await runPrintFallback({
+    mode: 'continuous',
+    styleId: '__lecture_continuous_print_style__',
+    toastText: t('export.print.continuous'),
+    resizeWidth: () => {
+      const cont = document.querySelector('.VPDoc .content-container') as HTMLElement | null
+      return cont ? Math.min(cont.clientWidth - 24, 850) : 850
+    },
+    pageRule: (docEl) => {
+      const h = Math.ceil(Math.max(docEl.scrollHeight, docEl.offsetHeight)) + 80
+      return `
+        @page { size: ${w}px ${h}px !important; margin: 0 !important; }
+        @media print {
+          html[data-lec-print="continuous"],
+          html[data-lec-print="continuous"] body,
+          html[data-lec-print="continuous"] .VPContent,
+          html[data-lec-print="continuous"] .VPDoc {
+            width: ${w}px !important;
+            max-width: ${w}px !important;
+          }
+        }`
+    },
+  })
 }
 
 /** 降级实现：端侧出版级 A4 多页 PDF 打印 */
 async function exportA4PdfFallback() {
-  // 暗色模式保护：打印统一采用高可读性纯净白底出版模式
-  const wasDark = document.documentElement.classList.contains('dark')
-  if (wasDark) {
-    document.documentElement.classList.remove('dark')
-  }
-
-  // 自动展开所有自测/详情折叠框，保证 A4 打印中全部解析与答案可见
-  const autoOpenedDetails: HTMLDetailsElement[] = []
-  document.querySelectorAll<HTMLDetailsElement>('details:not(.chart-code)').forEach((d) => {
-    if (!d.open) {
-      d.setAttribute('open', '')
-      d.dataset.printAutoOpened = '1'
-      autoOpenedDetails.push(d)
-    }
+  await runPrintFallback({
+    mode: 'a4',
+    styleId: '__lecture_a4_print_style__',
+    toastText: t('export.print.a4'),
+    resizeWidth: () => 660,
+    pageRule: () => `
+      @page {
+        size: A4 portrait;
+        margin: 16mm 14mm 16mm 14mm;
+        @bottom-center {
+          content: counter(page);
+          font-size: 9pt;
+          color: var(--lec-text-muted);
+        }
+      }`,
   })
-
-  // 触发图表自适应重排与重绘（A4 使用 660px 宽度）
-  if (typeof (window as any).__RESIZE_ALL_CHARTS__ === 'function') {
-    try { (window as any).__RESIZE_ALL_CHARTS__(660) } catch {}
-  }
-  window.dispatchEvent(new Event('resize'))
-
-  const styleId = '__lecture_a4_print_style__'
-  let styleEl = document.getElementById(styleId) as HTMLStyleElement
-  if (!styleEl) {
-    styleEl = document.createElement('style')
-    styleEl.id = styleId
-    document.head.appendChild(styleEl)
-  }
-
-  styleEl.textContent = `
-    @page {
-      size: A4 portrait;
-      margin: 16mm 14mm 16mm 14mm;
-      @bottom-center {
-        content: counter(page);
-        font-size: 9pt;
-        color: #64748b;
-      }
-    }
-    @media print {
-      html, body {
-        background: #ffffff !important;
-        color: #1e293b !important;
-        width: 100% !important;
-        height: auto !important;
-        overflow: visible !important;
-        -webkit-print-color-adjust: exact !important;
-        print-color-adjust: exact !important;
-      }
-      .VPNav, .VPLocalNav, .VPSidebar, .aside, .VPDocAside, .reading-mode-nav-wrapper,
-      .lecture-export-wrapper, .lecture-export-toast, .lecture-export-hud-overlay,
-      .ai-sidebar-shell, .selection-toolbar-root, .lecture-progress-card,
-      .VPDocFooter, .edit-link, .next-and-prev-link, .chart-tools, details.chart-code {
-        display: none !important;
-        visibility: hidden !important;
-      }
-      .VPContent, .VPDoc {
-        max-width: 100% !important;
-        width: 100% !important;
-        margin: 0 auto !important;
-        padding: 0 !important;
-        box-sizing: border-box !important;
-      }
-      .VPDoc .container {
-        max-width: 100% !important;
-        margin: 0 auto !important;
-        display: block !important;
-      }
-      .VPDoc .content,
-      .VPDoc .content-container {
-        max-width: 100% !important;
-        margin: 0 auto !important;
-        padding: 0 !important;
-        width: 100% !important;
-      }
-
-      /* 图表防截断与自适应 */
-      figure.chart {
-        break-inside: avoid !important;
-        page-break-inside: avoid !important;
-        max-height: 240mm !important;
-        box-sizing: border-box !important;
-        width: 100% !important;
-        max-width: 100% !important;
-        margin: 18px auto !important;
-        background: #f8fafc !important;
-        border: 1px solid #e2e8f0 !important;
-        -webkit-print-color-adjust: exact !important;
-        print-color-adjust: exact !important;
-      }
-      figure.chart .chart-body {
-        max-height: 230mm !important;
-        overflow: visible !important;
-        width: 100% !important;
-        max-width: 100% !important;
-        box-sizing: border-box !important;
-      }
-      figure.chart .chart-body svg {
-        max-width: 100% !important;
-        max-height: 220mm !important;
-        height: auto !important;
-        display: block !important;
-        margin: 0 auto !important;
-      }
-      figure.chart .chart-body canvas {
-        max-height: 220mm !important;
-        max-width: 100% !important;
-        object-fit: contain !important;
-      }
-      /* ECharts 打印与导出尺寸防溢出与等比锁定 */
-      figure.chart[data-type='echarts'] .chart-body {
-        height: 440px !important;
-        max-height: 440px !important;
-        overflow: hidden !important;
-      }
-      figure.chart[data-type='echarts'] .chart-body > div {
-        height: 100% !important;
-        max-height: 100% !important;
-        width: 100% !important;
-      }
-      figure.chart[data-type='echarts'] .chart-body svg {
-        width: 100% !important;
-        max-width: 100% !important;
-        height: 100% !important;
-        max-height: 100% !important;
-        display: block !important;
-      }
-
-
-      /* 表格、折叠块防断行 */
-      table, tr, details.details, .wave-compare-grid, .scope-viewer {
-        break-inside: avoid !important;
-        page-break-inside: avoid !important;
-        -webkit-print-color-adjust: exact !important;
-        print-color-adjust: exact !important;
-      }
-      h1, h2, h3, h4, h5, h6 {
-        break-after: avoid !important;
-        page-break-after: avoid !important;
-      }
-
-      /* 代码块高保真与跨页防截断 */
-      .vp-doc div[class*='language-'],
-      div[class*='language-'],
-      pre,
-      .vp-code-block {
-        overflow: visible !important;
-        overflow-x: visible !important;
-        overflow-y: visible !important;
-        box-sizing: border-box !important;
-        max-width: 100% !important;
-        white-space: pre-wrap !important;
-        word-break: break-all !important;
-        word-wrap: break-word !important;
-        -webkit-print-color-adjust: exact !important;
-        print-color-adjust: exact !important;
-      }
-      .vp-doc div[class*='language-'],
-      div[class*='language-'] {
-        background-color: #f8fafc !important;
-        border: 1px solid #e2e8f0 !important;
-        border-radius: 6px !important;
-        margin: 16px 0 !important;
-        padding: 12px 16px !important;
-        page-break-inside: auto !important;
-        break-inside: auto !important;
-        position: relative !important;
-      }
-      .vp-doc div[class*='language-'] pre,
-      div[class*='language-'] pre {
-        background: transparent !important;
-        margin: 0 !important;
-        padding: 0 !important;
-        border: none !important;
-      }
-      .vp-doc div[class*='language-'] button.copy {
-        display: none !important;
-      }
-      .vp-doc div[class*='language-'] span.lang {
-        position: absolute !important;
-        top: 6px !important;
-        right: 12px !important;
-        font-size: 11px !important;
-        color: #94a3b8 !important;
-      }
-    }
-  `
-
-  showToast('已唤起标准 A4 打印：目标请选「另存为 PDF」并勾选「背景图形」', 'info')
-
-  let cleanedUp = false
-  const cleanup = () => {
-    if (cleanedUp) return
-    cleanedUp = true
-    if (wasDark) {
-      document.documentElement.classList.add('dark')
-    }
-    autoOpenedDetails.forEach((d) => {
-      d.removeAttribute('open')
-      delete d.dataset.printAutoOpened
-    })
-    if (styleEl && styleEl.parentNode) styleEl.parentNode.removeChild(styleEl)
-    if (typeof (window as any).__RESIZE_ALL_CHARTS__ === 'function') {
-      try { (window as any).__RESIZE_ALL_CHARTS__() } catch {}
-    }
-    window.dispatchEvent(new Event('resize'))
-    window.removeEventListener('afterprint', cleanup)
-    isExporting.value = false
-    exportProgressText.value = ''
-  }
-
-  window.addEventListener('afterprint', cleanup)
-  setTimeout(() => window.print(), 100)
-  setTimeout(() => { if (!cleanedUp) cleanup() }, 60000)
 }
 
 /** 降级实现：端侧合成 1200px 高清长图 */
@@ -629,7 +346,7 @@ async function exportLongImagePngFallback(fileName: string) {
   try {
     const { toPng } = await import('html-to-image')
     const docEl = (document.querySelector('.VPDoc') || document.querySelector('.vp-doc')) as HTMLElement
-    if (!docEl) throw new Error('未找到正文容器')
+    if (!docEl) throw new Error(t('export.png.noBody'))
 
     const isDark = document.documentElement.classList.contains('dark')
     const bgColor = isDark ? '#1a1a1a' : '#ffffff'
@@ -658,6 +375,7 @@ async function exportLongImagePngFallback(fileName: string) {
           if (node.classList.contains('edit-link')) return false
           if (node.classList.contains('next-and-prev-link')) return false
           if (node.classList.contains('chart-tools')) return false
+          if (node.classList.contains('chart-enlarge')) return false
           if (node.classList.contains('chart-code')) return false
         }
         return true
@@ -665,9 +383,9 @@ async function exportLongImagePngFallback(fileName: string) {
     })
 
     triggerDownload(dataUrl, fileName)
-    showToast('全景高清长图已成功生成并下载！', 'success')
+    showToast(t('export.png.done'), 'success')
   } catch (err: any) {
-    showToast(`长图生成异常: ${err?.message || '画布超限'}，推荐改用「长卷 PDF」`, 'error')
+    showToast(t('export.png.failed', { message: err?.message || t('export.png.canvasLimit') }), 'error')
   } finally {
     isExporting.value = false
     exportProgressText.value = ''
@@ -710,12 +428,12 @@ onBeforeUnmount(() => {
         'is-loading': isExporting,
         'is-active': isOpen,
       }"
-      :title="isExporting ? exportProgressText : '讲义导出：单页长卷 PDF / 全景长图 / A4 多页'"
+      :title="isExporting ? exportProgressText : t('export.button.title')"
       :aria-expanded="isOpen"
       :disabled="isExporting"
       aria-haspopup="menu"
       aria-controls="lecture-export-menu"
-      aria-label="讲义导出菜单"
+      :aria-label="t('export.button.aria')"
       @click="toggleMenu"
     >
       <span class="export-icon">
@@ -749,7 +467,7 @@ onBeforeUnmount(() => {
         </svg>
       </span>
       <span class="export-text">
-        {{ isExporting ? '处理中...' : '导出讲义' }}
+        {{ isExporting ? t('export.button.busy') : t('export.button.label') }}
       </span>
       <span class="export-chevron">
         <svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" stroke-width="2">
@@ -765,12 +483,12 @@ onBeforeUnmount(() => {
         id="lecture-export-menu"
         class="lecture-export-dropdown"
         role="menu"
-        aria-label="导出格式选项"
+        :aria-label="t('export.menu.aria')"
       >
         <div class="dropdown-header">
-          <div class="dropdown-title">讲义完整版导出</div>
+          <div class="dropdown-title">{{ t('export.menu.title') }}</div>
           <div class="dropdown-sub">
-            支持单页无缝长卷、超清长图与出版级 A4 多页规格
+            {{ t('export.menu.subtitle') }}
           </div>
         </div>
 
@@ -793,11 +511,11 @@ onBeforeUnmount(() => {
             </div>
             <div class="option-content">
               <div class="option-title">
-                <span>一整张长卷 PDF</span>
-                <span class="badge-tag rec">推荐 · 单页连续</span>
+                <span>{{ t('export.option.continuous.title') }}</span>
+                <span class="badge-tag rec">{{ t('export.option.continuous.badge') }}</span>
               </div>
               <div class="option-desc">
-                单页连续延伸，零分页切断，原生矢量排版，文字支持检索复制
+                {{ t('export.option.continuous.desc') }}
               </div>
             </div>
           </button>
@@ -819,11 +537,11 @@ onBeforeUnmount(() => {
             </div>
             <div class="option-content">
               <div class="option-title">
-                <span>全景超清长图</span>
+                <span>{{ t('export.option.png.title') }}</span>
                 <span class="badge-tag">PNG · 1200px</span>
               </div>
               <div class="option-desc">
-                1200px 出版级宽度，高清晰度，适合移动端与社交分享
+                {{ t('export.option.png.desc') }}
               </div>
             </div>
           </button>
@@ -844,11 +562,11 @@ onBeforeUnmount(() => {
             </div>
             <div class="option-content">
               <div class="option-title">
-                <span>出版级 A4 多页 PDF</span>
-                <span class="badge-tag">多页装订</span>
+                <span>{{ t('export.option.a4.title') }}</span>
+                <span class="badge-tag">{{ t('export.option.a4.badge') }}</span>
               </div>
               <div class="option-desc">
-                标准 A4 规格多页排版，代码与图表智能防截断，带页码适合打印
+                {{ t('export.option.a4.desc') }}
               </div>
             </div>
           </button>
@@ -867,7 +585,7 @@ onBeforeUnmount(() => {
             </svg>
           </div>
           <div class="hud-text-area">
-            <div class="hud-main-title">讲义导出处理中</div>
+            <div class="hud-main-title">{{ t('export.hud.title') }}</div>
             <div class="hud-sub-desc">{{ exportProgressText }}</div>
           </div>
         </div>
@@ -880,7 +598,7 @@ onBeforeUnmount(() => {
         <span class="toast-body">
           <span class="toast-msg">{{ toastMessage }}</span>
         </span>
-        <button type="button" class="toast-close" aria-label="关闭提示" @click="dismissToast">
+        <button type="button" class="toast-close" :aria-label="t('export.toast.close')" @click="dismissToast">
           <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
             <line x1="18" y1="6" x2="6" y2="18" />
             <line x1="6" y1="6" x2="18" y2="18" />
@@ -961,13 +679,29 @@ onBeforeUnmount(() => {
   }
 }
 
-@media (max-width: 640px) {
-  .export-text {
+@media (min-width: 768px) and (max-width: 1023px) {
+  .export-text,
+  .export-chevron {
     display: none;
   }
   .lecture-export-btn {
-    padding: 0 7px;
-    gap: 2px;
+    gap: 0;
+    padding-left: 8px;
+    padding-right: 8px;
+  }
+}
+
+@media (max-width: 767px) {
+  .export-text,
+  .export-chevron {
+    display: none;
+  }
+  .lecture-export-btn {
+    width: 40px;
+    height: 40px;
+    padding: 0;
+    justify-content: center;
+    gap: 0;
   }
 }
 
