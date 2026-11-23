@@ -10,6 +10,7 @@ import { isLecture, parseLecture } from '../core/route'
 import { getLocaleKeys } from '../core/locales'
 import { currentLang, translate } from '../../i18n/index.ts'
 import { LecSlot } from '../slots'
+import { quizPlan } from './quizCards'
 
 export const quizFeature: PageFeature = {
   id: 'quiz-header',
@@ -18,23 +19,21 @@ export const quizFeature: PageFeature = {
     if (typeof document === 'undefined') return
     for (const stale of Array.from(document.querySelectorAll('.vp-doc .lec-quiz-host'))) stale.remove()
 
-    const detailsList = Array.from(document.querySelectorAll<HTMLDetailsElement>('.vp-doc details.details.custom-block'))
-    if (detailsList.length === 0) return
+    const { items, total } = quizPlan(document)
+    if (items.length === 0) return
 
     const lec = parseLecture(ctx.path, '/', getLocaleKeys())
     const lectureNo = lec?.lectureNo ?? 0
-    const total = detailsList.length
     const lang = currentLang()
     const apps: Array<{ unmount: () => void; host: HTMLElement }> = []
 
-    detailsList.forEach((det, idx) => {
+    items.forEach(({ card: det, index }) => {
       const parent = det.parentNode
       if (!parent) return
       const host = document.createElement('div')
       host.className = 'lec-quiz-host'
       parent.insertBefore(host, det)
 
-      const index = idx + 1
       const summaryText = det.querySelector('summary')?.textContent?.trim() ?? ''
       const badge =
         lectureNo > 0

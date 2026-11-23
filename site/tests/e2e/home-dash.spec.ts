@@ -53,7 +53,7 @@ test.describe('(a) the remembered mode is right from the first paint', () => {
         const btns = [...document.querySelectorAll('.hb-mode-btn')]
         if (btns.length) {
           const pressed = btns.filter(looksPressed).map((b) => b.getAttribute('data-map-mode'))
-          const stage = document.querySelector('.am-stage')
+          const stage = document.querySelector('.am-map')
           w.__frames.push({
             pressed: pressed.length === 1 ? (pressed[0] as string) : pressed.join('+') || null,
             atlasVisible: !!stage && getComputedStyle(stage).visibility === 'visible',
@@ -100,7 +100,7 @@ test.describe('(a) the remembered mode is right from the first paint', () => {
     await page.goto('/')
     await page.waitForSelector('html[data-hydrated="1"]')
     await expect(page.locator('[data-map-mode="atlas"]')).toHaveAttribute('aria-pressed', 'true')
-    await expect(page.locator('section.am-stage')).toBeVisible()
+    await expect(page.locator('section.am-map')).toBeVisible()
   })
 
   test('the toggle keeps the choice for the next visit', async ({ page }) => {

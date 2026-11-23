@@ -21,7 +21,7 @@ import MapInfoPanel from '../MapInfoPanel.vue'
 import MapStage from '../MapStage.vue'
 import { mapAriaLabel, mapSvgLabel } from '../aria'
 import type { Insets, Transform } from '../geometry'
-import { DEFAULT_INSETS } from '../geometry'
+import { DEFAULT_INSETS, PAN_MIN_ZOOM, ladder } from '../geometry'
 import type { Label } from '../labels'
 import { useClickRule } from '../useClickRule'
 import { useInfoPanel } from '../useInfoPanel'
@@ -328,10 +328,11 @@ const edgeInfoText = computed(() => {
   return `${main}; ${t('canvas.edgeInfoOff', { groups: off.join(t('canvas.listSep')) })}`
 })
 
+/** "54%，讲名视图": the scale and the level of detail (home-canvas prototype l.1345; S6Y AH #10). */
 const zoomLabelText = computed(() => {
-  if (zoomK.value < 0.22) return t('canvas.zoom.far')
-  if (zoomK.value < 0.45) return t('canvas.zoom.mid')
-  return t('canvas.zoom.near')
+  const k = zoomK.value
+  const lod = k < 0.22 ? t('canvas.zoom.far') : k < 0.45 ? t('canvas.zoom.mid') : t('canvas.zoom.near')
+  return `${Math.round(k * 100)}%${t('group.sep.comma')}${lod}`
 })
 
 function traceLectureOf(id: string): TraceLectureView | null {
@@ -426,7 +427,13 @@ function onEscape(): boolean {
   return false
 }
 
-async function lockOnNode(id: string): Promise<void> {
+/**
+ * Lock on lecture `id`. `how`: `'box'` (a double click on the lecture) zooms to it with its prerequisites and
+ * follow-ups; `'pan'` (the panel's "trace" button, a click on a lit link, search Enter) only centres it at
+ * `ladder(max(k, 0.7))`, so the scale stays readable and does not change on every move (home-canvas prototype
+ * `lockNode(id, true)` -> `panTo`; S6Y AH #4).
+ */
+async function lockOnNode(id: string, how: 'box' | 'pan' = 'box'): Promise<void> {
   if (!graphIndex.value.byId.has(id)) return
   hoverNodeId.value = null
   hotPairKey.value = null
@@ -435,6 +442,16 @@ async function lockOnNode(id: string): Promise<void> {
   tip.hide()
   lock.value = { type: 'node', id }
   await nextTick()
+  if (how === 'pan') {
+    const pt = view.value.focusPointOf(id)
+    if (!pt) return
+    // centre it in the part of the stage the trace panel leaves free (desktop: right of the panel; phone: above it).
+    // The prototype centres on the whole stage, which on a phone puts the lecture under the bottom panel.
+    const k1 = ladder(Math.max(stage.value?.viewport?.viewport.value?.view.k ?? 1, PAN_MIN_ZOOM))
+    const ins = stageInsets(true)
+    stage.value?.viewport?.panTo(pt[0] - (ins.left - ins.right) / 2 / k1, pt[1] - (ins.top - ins.bottom) / 2 / k1)
+    return
+  }
   const preIds = graphIndex.value.pre.get(id) ?? []
   const postIds = graphIndex.value.post.get(id) ?? []
   const box = unionBoxes([id, ...preIds, ...postIds].map((nid) => view.value.nodeBoxOf(nid)))
@@ -463,9 +480,7 @@ function openUrl(href: string): void {
 function jumpToMatch(): void {
   const first = matches.value.values().next().value as string | undefined
   if (!first) return
-  void lockOnNode(first)
-  const pt = view.value.focusPointOf(first)
-  if (pt && !lock.value) stage.value?.viewport?.panTo(pt[0], pt[1])
+  void lockOnNode(first, 'pan')
 }
 
 function onPanelHover(val: string | null): void {
@@ -595,7 +610,7 @@ function onLayerClick(ev: MouseEvent): void {
           : te.kind === 'trace-pre'
             ? te.from
             : te.to
-      void lockOnNode(nextId)
+      void lockOnNode(nextId, 'pan')
     }
     return
   }
@@ -622,7 +637,16 @@ function onLayerClick(ev: MouseEvent): void {
   if (grpEl) {
     const gId = grpEl.getAttribute('data-g') ?? ''
     const cg = graphIndex.value.groupsById.get(gId)
-    if (cg) clicks.click(() => void router.go(props.groupHref(cg.dir)))
+    if (cg) {
+      clicks.click(() => {
+        // while tracing, the first click on a group only leaves trace mode (AH #3, home-canvas prototype l.734-739)
+        if (lock.value !== null) {
+          clearLock()
+          return
+        }
+        void router.go(props.groupHref(cg.dir))
+      })
+    }
   }
 }
 
@@ -653,11 +677,15 @@ function onLayerDblclick(ev: MouseEvent): void {
   }
 }
 
+/** A click on these is not a click on the blank stage. */
+const STAGE_KEEP = '.lec-map-hud, .lec-map-panel, .cv-node, .g-hit, .bundle-g, .lk'
+
 function onStageClick(ev: MouseEvent): void {
   if (vp()?.wasDragged) return
-  const target = ev.target as Element | null
-  if (!target) return
-  if (target.closest('.lec-map-hud, .lec-map-panel, .cv-node, .g-hit, .bundle-g, .lk')) return
+  // the path fixed when the click was dispatched, not `ev.target.closest()`: a real click runs the trace panel's own
+  // handler first and Vue re-renders between listeners, so by the time the click bubbles here the pressed "trace" button
+  // may already be detached (its list item belongs to the old lock) and `closest()` would no longer find the panel
+  if (ev.composedPath().some((n) => n instanceof Element && n.matches(STAGE_KEEP))) return
   if (lock.value !== null) {
     clicks.cancel()
     clearLock()
@@ -907,7 +935,7 @@ function onNodeKeydown(ev: KeyboardEvent, id: string): void {
         :labels="traceLabels"
         @exit="clearLock"
         @open="openUrl"
-        @trace="lockOnNode"
+        @trace="(id: string) => lockOnNode(id, 'pan')"
         @hover-item="onPanelHover"
       />
     </template>
@@ -942,27 +970,29 @@ function onNodeKeydown(ev: KeyboardEvent, id: string): void {
   outline: 2px solid var(--lec-accent);
   outline-offset: 1px;
 }
+/* the legend is a row of chips, like the edge info (home-canvas prototype `.chip` l.108; S6Y AH #12): the wrapper
+   only groups them for aria-hidden, the chips are items of the HUD row and wrap with it */
 .cv-legend {
+  display: contents;
+}
+.cv-legend .lg,
+.cv-edgeinfo {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  padding: 0 8px;
-  height: 30px;
-  background: color-mix(in srgb, var(--lec-bg) 90%, transparent);
-  border: 1px solid var(--lec-border);
-  border-radius: var(--lec-radius-1, 4px);
+  gap: 6px;
+  padding: 3px 8px;
   font-size: 12px;
   color: var(--lec-text-muted);
+  background: var(--lec-bg);
+  border: 1px solid var(--lec-border);
+  border-radius: var(--lec-radius-1, 4px);
 }
 .cv-legend .lg {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
   white-space: nowrap;
 }
 .lg-dot {
-  width: 8px;
-  height: 8px;
+  width: 9px;
+  height: 9px;
   border-radius: var(--lec-status-radius, 50%);
   border: 1.5px solid var(--lec-border);
   background: var(--lec-bg);
@@ -976,7 +1006,7 @@ function onNodeKeydown(ev: KeyboardEvent, id: string): void {
   border-color: var(--lec-done);
 }
 .lg-line {
-  width: 14px;
+  width: 20px;
   height: 0;
   border-top: 2px solid var(--lec-accent);
 }
@@ -1008,19 +1038,13 @@ function onNodeKeydown(ev: KeyboardEvent, id: string): void {
   background: var(--lec-text);
   border-color: var(--lec-text);
 }
-.cv-edgeinfo {
-  font-size: 12px;
-  color: var(--lec-text-muted);
-  padding: 2px 6px;
-  background: color-mix(in srgb, var(--lec-bg) 85%, transparent);
-  border-radius: var(--lec-radius-1, 4px);
-}
 .cv-zoomlabel {
   position: absolute;
   z-index: 2;
   left: 12px;
   bottom: 12px;
-  padding: 3px 9px;
+  /* prototype `.hud.bl` l.104 */
+  padding: 4px 8px;
   font-size: 12px;
   color: var(--lec-text-muted);
   background: var(--lec-bg);

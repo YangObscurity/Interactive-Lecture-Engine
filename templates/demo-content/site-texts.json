@@ -4,13 +4,13 @@
     "shortName": "示例",
     "navText": "示例学堂",
     "tagline": "引擎自带的示例课程",
-    "description": "讲义引擎的示例内容：四个课程组，十四讲。"
+    "description": "讲义引擎的示例内容：九个课程组，四十六讲。"
   },
   "en": {
     "name": "Sample Academy",
     "shortName": "Sample",
     "navText": "Sample Academy",
     "tagline": "The demo course that ships with the engine",
-    "description": "Demo content of the lecture engine: four groups, fourteen lectures."
+    "description": "Demo content of the lecture engine: nine groups, forty-six lectures."
   }
 }

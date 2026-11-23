@@ -3,8 +3,8 @@
   "source": {
     "file": "demo-graph",
     "sha256": "000000000000",
-    "nodes": 14,
-    "edges": 15
+    "nodes": 46,
+    "edges": 62
   },
   "categories": [
     {
@@ -19,7 +19,20 @@
         "mea_dims",
         "log_truth",
         "log_cond",
-        "log_proofs"
+        "log_proofs",
+        "log_sets",
+        "log_counter",
+        "prb_freq",
+        "prb_cond",
+        "prb_expect",
+        "prb_dist",
+        "prb_sample",
+        "prb_corr",
+        "geo_vec",
+        "geo_trig",
+        "geo_sim",
+        "geo_area",
+        "geo_xform"
       ]
     },
     {
@@ -29,8 +42,33 @@
         "pln_split",
         "pln_crit",
         "pln_buffer",
+        "pln_level",
+        "pln_retro",
         "dat_tidy",
-        "dat_group"
+        "dat_group",
+        "dat_clean",
+        "dat_pivot",
+        "dat_repro",
+        "vis_choose",
+        "vis_axes",
+        "vis_color",
+        "vis_mislead",
+        "vis_story"
+      ]
+    },
+    {
+      "id": "cat_method",
+      "title": "方法训练",
+      "nodes": [
+        "exp_question",
+        "exp_control",
+        "exp_random",
+        "exp_record",
+        "exp_conclude",
+        "wrt_lead",
+        "wrt_struct",
+        "wrt_caption",
+        "wrt_review"
       ]
     }
   ],
@@ -117,6 +155,123 @@
       "binding": "legacy"
     },
     {
+      "id": "log_sets",
+      "title": "集合与量词",
+      "category": "cat_found",
+      "kind": "lecture",
+      "status": "unread",
+      "lecture": "/log/L04",
+      "binding": "legacy"
+    },
+    {
+      "id": "log_counter",
+      "title": "反例与归谬",
+      "category": "cat_found",
+      "kind": "lecture",
+      "status": "unread",
+      "lecture": "/log/L05",
+      "binding": "legacy"
+    },
+    {
+      "id": "prb_freq",
+      "title": "随机与频率",
+      "category": "cat_found",
+      "kind": "lecture",
+      "status": "unread",
+      "lecture": "/prb/L01",
+      "binding": "legacy"
+    },
+    {
+      "id": "prb_cond",
+      "title": "条件概率",
+      "category": "cat_found",
+      "kind": "lecture",
+      "status": "unread",
+      "lecture": "/prb/L02",
+      "binding": "legacy"
+    },
+    {
+      "id": "prb_expect",
+      "title": "期望值",
+      "category": "cat_found",
+      "kind": "lecture",
+      "status": "unread",
+      "lecture": "/prb/L03",
+      "binding": "legacy"
+    },
+    {
+      "id": "prb_dist",
+      "title": "分布与直方图",
+      "category": "cat_found",
+      "kind": "lecture",
+      "status": "unread",
+      "lecture": "/prb/L04",
+      "binding": "legacy"
+    },
+    {
+      "id": "prb_sample",
+      "title": "抽样与估计",
+      "category": "cat_found",
+      "kind": "lecture",
+      "status": "unread",
+      "lecture": "/prb/L05",
+      "binding": "legacy"
+    },
+    {
+      "id": "prb_corr",
+      "title": "相关与因果",
+      "category": "cat_found",
+      "kind": "lecture",
+      "status": "unread",
+      "lecture": "/prb/L06",
+      "binding": "legacy"
+    },
+    {
+      "id": "geo_vec",
+      "title": "坐标与向量",
+      "category": "cat_found",
+      "kind": "lecture",
+      "status": "unread",
+      "lecture": "/geo/L01",
+      "binding": "legacy"
+    },
+    {
+      "id": "geo_trig",
+      "title": "角度与三角",
+      "category": "cat_found",
+      "kind": "lecture",
+      "status": "unread",
+      "lecture": "/geo/L02",
+      "binding": "legacy"
+    },
+    {
+      "id": "geo_sim",
+      "title": "比例与相似",
+      "category": "cat_found",
+      "kind": "lecture",
+      "status": "unread",
+      "lecture": "/geo/L03",
+      "binding": "legacy"
+    },
+    {
+      "id": "geo_area",
+      "title": "面积与体积估算",
+      "category": "cat_found",
+      "kind": "lecture",
+      "status": "unread",
+      "lecture": "/geo/L04",
+      "binding": "legacy"
+    },
+    {
+      "id": "geo_xform",
+      "title": "坐标变换",
+      "category": "cat_found",
+      "kind": "lecture",
+      "status": "unread",
+      "lecture": "/geo/L05",
+      "binding": "legacy"
+    },
+    {
       "id": "pln_split",
       "title": "拆分任务",
       "category": "cat_apply",
@@ -144,6 +299,24 @@
       "binding": "legacy"
     },
     {
+      "id": "pln_level",
+      "title": "资源平衡",
+      "category": "cat_apply",
+      "kind": "lecture",
+      "status": "unread",
+      "lecture": "/pln/L04",
+      "binding": "legacy"
+    },
+    {
+      "id": "pln_retro",
+      "title": "复盘与迭代",
+      "category": "cat_apply",
+      "kind": "lecture",
+      "status": "unread",
+      "lecture": "/pln/L05",
+      "binding": "legacy"
+    },
+    {
       "id": "dat_tidy",
       "title": "一行一条记录",
       "category": "cat_apply",
@@ -159,6 +332,159 @@
       "kind": "lecture",
       "status": "unread",
       "lecture": "/dat/L02",
+      "binding": "legacy"
+    },
+    {
+      "id": "dat_clean",
+      "title": "缺失值与清洗",
+      "category": "cat_apply",
+      "kind": "lecture",
+      "status": "unread",
+      "lecture": "/dat/L03",
+      "binding": "legacy"
+    },
+    {
+      "id": "dat_pivot",
+      "title": "透视与重塑",
+      "category": "cat_apply",
+      "kind": "lecture",
+      "status": "unread",
+      "lecture": "/dat/L04",
+      "binding": "legacy"
+    },
+    {
+      "id": "dat_repro",
+      "title": "可复现的整理流程",
+      "category": "cat_apply",
+      "kind": "lecture",
+      "status": "unread",
+      "lecture": "/dat/L05",
+      "binding": "legacy"
+    },
+    {
+      "id": "vis_choose",
+      "title": "选对图表",
+      "category": "cat_apply",
+      "kind": "lecture",
+      "status": "unread",
+      "lecture": "/vis/L01",
+      "binding": "legacy"
+    },
+    {
+      "id": "vis_axes",
+      "title": "坐标轴与刻度",
+      "category": "cat_apply",
+      "kind": "lecture",
+      "status": "unread",
+      "lecture": "/vis/L02",
+      "binding": "legacy"
+    },
+    {
+      "id": "vis_color",
+      "title": "颜色与对比",
+      "category": "cat_apply",
+      "kind": "lecture",
+      "status": "unread",
+      "lecture": "/vis/L03",
+      "binding": "legacy"
+    },
+    {
+      "id": "vis_mislead",
+      "title": "会误导的图",
+      "category": "cat_apply",
+      "kind": "lecture",
+      "status": "unread",
+      "lecture": "/vis/L04",
+      "binding": "legacy"
+    },
+    {
+      "id": "vis_story",
+      "title": "用数据讲故事",
+      "category": "cat_apply",
+      "kind": "lecture",
+      "status": "unread",
+      "lecture": "/vis/L05",
+      "binding": "legacy"
+    },
+    {
+      "id": "exp_question",
+      "title": "可检验的问题",
+      "category": "cat_method",
+      "kind": "lecture",
+      "status": "unread",
+      "lecture": "/exp/L01",
+      "binding": "legacy"
+    },
+    {
+      "id": "exp_control",
+      "title": "变量与对照",
+      "category": "cat_method",
+      "kind": "lecture",
+      "status": "unread",
+      "lecture": "/exp/L02",
+      "binding": "legacy"
+    },
+    {
+      "id": "exp_random",
+      "title": "随机化与重复",
+      "category": "cat_method",
+      "kind": "lecture",
+      "status": "unread",
+      "lecture": "/exp/L03",
+      "binding": "legacy"
+    },
+    {
+      "id": "exp_record",
+      "title": "记录与复现",
+      "category": "cat_method",
+      "kind": "lecture",
+      "status": "unread",
+      "lecture": "/exp/L04",
+      "binding": "legacy"
+    },
+    {
+      "id": "exp_conclude",
+      "title": "从结果到结论",
+      "category": "cat_method",
+      "kind": "lecture",
+      "status": "unread",
+      "lecture": "/exp/L05",
+      "binding": "legacy"
+    },
+    {
+      "id": "wrt_lead",
+      "title": "先写结论",
+      "category": "cat_method",
+      "kind": "lecture",
+      "status": "unread",
+      "lecture": "/wrt/L01",
+      "binding": "legacy"
+    },
+    {
+      "id": "wrt_struct",
+      "title": "段落与结构",
+      "category": "cat_method",
+      "kind": "lecture",
+      "status": "unread",
+      "lecture": "/wrt/L02",
+      "binding": "legacy"
+    },
+    {
+      "id": "wrt_caption",
+      "title": "图表的说明文字",
+      "category": "cat_method",
+      "kind": "lecture",
+      "status": "unread",
+      "lecture": "/wrt/L03",
+      "binding": "legacy"
+    },
+    {
+      "id": "wrt_review",
+      "title": "审稿与修改",
+      "category": "cat_method",
+      "kind": "lecture",
+      "status": "unread",
+      "lecture": "/wrt/L04",
       "binding": "legacy"
     }
   ],
@@ -222,6 +548,194 @@
     [
       "dat_group",
       "pln_buffer"
+    ],
+    [
+      "log_cond",
+      "log_sets"
+    ],
+    [
+      "log_proofs",
+      "log_counter"
+    ],
+    [
+      "log_sets",
+      "log_counter"
+    ],
+    [
+      "mea_units",
+      "prb_freq"
+    ],
+    [
+      "prb_freq",
+      "prb_cond"
+    ],
+    [
+      "log_cond",
+      "prb_cond"
+    ],
+    [
+      "prb_freq",
+      "prb_expect"
+    ],
+    [
+      "prb_expect",
+      "prb_dist"
+    ],
+    [
+      "mea_spread",
+      "prb_dist"
+    ],
+    [
+      "prb_dist",
+      "prb_sample"
+    ],
+    [
+      "prb_sample",
+      "prb_corr"
+    ],
+    [
+      "log_counter",
+      "prb_corr"
+    ],
+    [
+      "mea_units",
+      "geo_vec"
+    ],
+    [
+      "geo_vec",
+      "geo_trig"
+    ],
+    [
+      "geo_trig",
+      "geo_sim"
+    ],
+    [
+      "geo_sim",
+      "geo_area"
+    ],
+    [
+      "mea_uncert",
+      "geo_area"
+    ],
+    [
+      "geo_vec",
+      "geo_xform"
+    ],
+    [
+      "geo_trig",
+      "geo_xform"
+    ],
+    [
+      "pln_buffer",
+      "pln_level"
+    ],
+    [
+      "pln_level",
+      "pln_retro"
+    ],
+    [
+      "exp_record",
+      "pln_retro"
+    ],
+    [
+      "dat_tidy",
+      "dat_clean"
+    ],
+    [
+      "dat_group",
+      "dat_pivot"
+    ],
+    [
+      "dat_clean",
+      "dat_pivot"
+    ],
+    [
+      "dat_pivot",
+      "dat_repro"
+    ],
+    [
+      "dat_group",
+      "vis_choose"
+    ],
+    [
+      "vis_choose",
+      "vis_axes"
+    ],
+    [
+      "mea_plots",
+      "vis_axes"
+    ],
+    [
+      "vis_choose",
+      "vis_color"
+    ],
+    [
+      "vis_axes",
+      "vis_mislead"
+    ],
+    [
+      "prb_dist",
+      "vis_mislead"
+    ],
+    [
+      "vis_color",
+      "vis_story"
+    ],
+    [
+      "vis_mislead",
+      "vis_story"
+    ],
+    [
+      "wrt_lead",
+      "vis_story"
+    ],
+    [
+      "log_cond",
+      "exp_question"
+    ],
+    [
+      "exp_question",
+      "exp_control"
+    ],
+    [
+      "exp_control",
+      "exp_random"
+    ],
+    [
+      "prb_sample",
+      "exp_random"
+    ],
+    [
+      "exp_random",
+      "exp_record"
+    ],
+    [
+      "dat_repro",
+      "exp_record"
+    ],
+    [
+      "exp_record",
+      "exp_conclude"
+    ],
+    [
+      "prb_corr",
+      "exp_conclude"
+    ],
+    [
+      "wrt_lead",
+      "wrt_struct"
+    ],
+    [
+      "wrt_struct",
+      "wrt_caption"
+    ],
+    [
+      "vis_choose",
+      "wrt_caption"
+    ],
+    [
+      "wrt_caption",
+      "wrt_review"
     ]
   ]
 }

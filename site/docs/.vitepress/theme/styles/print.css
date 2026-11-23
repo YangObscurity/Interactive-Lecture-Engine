@@ -224,17 +224,16 @@
   }
 
   .vp-doc div[class*='language-'] button.copy,
-  div[class*='language-'] button.copy {
+  div[class*='language-'] button.copy,
+  .code-head button,
+  .code-copy-btn,
+  button[data-copy] {
     display: none !important;
   }
 
   .vp-doc div[class*='language-'] span.lang,
   div[class*='language-'] span.lang {
-    position: absolute !important;
-    top: 6px !important;
-    right: 12px !important;
-    font-size: 11px !important;
-    color: var(--lec-text-muted) !important;
+    display: none !important;
   }
 
   h1,

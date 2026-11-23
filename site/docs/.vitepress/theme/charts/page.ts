@@ -45,7 +45,7 @@ export interface ChartsDeps {
   /** Theme re-render debounce (V1: 80 ms). */
   themeDebounceMs?: number
   /** Optional P5 WP-R1 chrome slot mounter (`FigureFrame`). Omitted in unit tests without Vite virtual modules. */
-  mountFrame?(fig: HTMLElement, meta: { type: string; index: number; lectureNo: number; title: string; caption: string }, signal: AbortSignal): void
+  mountFrame?(fig: HTMLElement, meta: { type: string; index: number; lectureNo: number; label?: string; title: string; caption: string }, signal: AbortSignal): void
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -207,12 +207,18 @@ export class PageCharts {
     const jobs: Promise<void>[] = []
     let count = 0
 
+    // The number is assigned at build time (figures/numbering.ts via figures/markdown.ts: charts and <LectureFigure> share
+    // one sequence per lecture) and arrives as `data-fig-no` / `data-fig-lec` / `data-fig-label`; the runtime never counts.
+    // Only figures without it (inline ```mermaid blocks created here) fall back to their position among the page's charts.
     const figureIndexOf = (fig: HTMLElement): number => {
+      const fromBuild = Number(fig.dataset.figNo)
+      if (Number.isFinite(fromBuild) && fromBuild > 0) return fromBuild
       const all = Array.from(this.root.querySelectorAll<HTMLElement>('figure.chart:not(.chart--modal)'))
       const idx = all.indexOf(fig)
       return idx >= 0 ? idx + 1 : 1
     }
     const lectureNoOf = (fig: HTMLElement): number => {
+      if (fig.dataset.figLec !== undefined && fig.dataset.figLec !== '') return Number(fig.dataset.figLec) || 0
       const fromData = /L(\d+)$/i.exec(fig.dataset.lecture || '')
       if (fromData?.[1]) return Number(fromData[1])
       const fromPath = /\/L(\d+)(?:\.html)?$/i.exec(this.path)
@@ -221,7 +227,7 @@ export class PageCharts {
     const mountChrome = (fig: HTMLElement, type: string, title = '', caption = '') => {
       this.deps.mountFrame?.(
         fig,
-        { type, index: figureIndexOf(fig), lectureNo: lectureNoOf(fig), title, caption },
+        { type, index: figureIndexOf(fig), lectureNo: lectureNoOf(fig), label: fig.dataset.figLabel || '', title, caption },
         signal,
       )
     }

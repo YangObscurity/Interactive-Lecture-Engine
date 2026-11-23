@@ -685,7 +685,6 @@ export class LectureSearchEngine {
       return (a.lectureNo ?? 999) - (b.lectureNo ?? 999)
     })
 
-    const totalHits = sorted.length
     const perLectureCount = new Map<string, number>()
     const kept: CandidateMatch[] = []
     for (const item of sorted) {
@@ -696,6 +695,9 @@ export class LectureSearchEngine {
       kept.push(item)
       if (kept.length >= 60) break
     }
+    // the count next to the timing is what the panel lists (after the 3-per-lecture cap and the 60 limit), so it matches the
+    // rows the reader sees (spec board 04.2 "右侧显示结果数与用时"; S6Y audit-spec #17: "6 条" over 5 rows)
+    const totalHits = kept.length
 
     const grouped = new Map<string, { groupTitle: string; order: number; items: SearchHitView[] }>()
     for (const c of kept) {

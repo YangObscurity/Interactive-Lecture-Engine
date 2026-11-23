@@ -80,7 +80,7 @@ async function openHome(p: Page, mode: Mode, impl: string): Promise<void> {
 }
 
 /** The label canvas of `mode`'s map (any map's when no mode is given). */
-const LABEL_CANVAS: Record<Mode, string> = { atlas: '.am-stage canvas.lec-map-labels', graph: '.cv-stage canvas.lec-map-labels' }
+const LABEL_CANVAS: Record<Mode, string> = { atlas: '.am-map canvas.lec-map-labels', graph: '.cv-stage canvas.lec-map-labels' }
 const probe = (p: Page, mode?: Mode): Promise<Probe | null> =>
   p.evaluate((sel) => (document.querySelector(sel) as (HTMLCanvasElement & { lecLabels?: Probe }) | null)?.lecLabels ?? null, mode ? LABEL_CANVAS[mode] : 'canvas.lec-map-labels')
 

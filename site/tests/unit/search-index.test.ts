@@ -379,4 +379,64 @@ describe('client LectureSearchEngine: instant title results, progress, scope and
     const parts = splitHighlightParts(snip, ['keyword'])
     expect(parts.filter((p) => p.hit).map((p) => p.text)).toEqual(['keyword'])
   })
+
+  // spec board 04.2 "右侧显示结果数与用时"; S6Y audit-spec #17: the panel said "6 条" over 5 rows because the count was taken
+  // before the 3-per-lecture cap
+  it('the result count is the number of rows the panel lists (after the per-lecture cap)', async () => {
+    const titlePayload: TitleIndexFile = {
+      v: 1,
+      locale: 'root',
+      groups: [{ id: 'G01', dir: 'g01', title: '电子基础', catSlot: 1 }],
+      pages: [[0, 1, 'G01-L01', '/g01/L01', '第1讲 · 分压电阻', [[2, '分压一']]]],
+    }
+    const shardRaw = Buffer.from(
+      JSON.stringify({
+        v: 1,
+        shardId: 'g01',
+        groupId: 'G01',
+        pages: ['/g01/L01'],
+        sections: [1, 2, 3, 4, 5].map((i) => [0, `s${i}`, [`分压${i}`], `第 ${i} 段讲分压电阻的取值。`]),
+      }),
+      'utf8',
+    )
+    const shard = zlib.deflateRawSync(shardRaw, { level: 9 })
+    const manifestPayload: SearchManifestFile = {
+      v: 1,
+      locale: 'root',
+      titleFile: 'titles.json',
+      titleBytes: Buffer.byteLength(JSON.stringify(titlePayload)),
+      totalShardBytes: shard.byteLength,
+      totalRawShardBytes: shardRaw.byteLength,
+      shards: [{ shardId: 'g01', groupId: 'G01', url: 'shards/g01.sz', bytes: shard.byteLength, rawBytes: shardRaw.byteLength, pageCount: 1 }],
+    }
+    const fetchFn: typeof fetch = async (input) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url
+      if (url.endsWith('/manifest.json')) return new Response(JSON.stringify(manifestPayload), { status: 200 })
+      if (url.endsWith('/titles.json')) return new Response(JSON.stringify(titlePayload), { status: 200 })
+      if (url.endsWith('/shards/g01.sz')) return new Response(new Uint8Array(shard), { status: 200 })
+      return new Response('not found', { status: 404 })
+    }
+    const engine = new LectureSearchEngine({
+      base: '/',
+      localeKeys: ['en'],
+      siteData: () => ({ themeConfig: { lectureAccess: { inlineTier: 'public', tiers: [] } } }),
+      statusOf: () => 'not_started',
+      labels: {
+        lectureNo: (n) => `第${n}讲`,
+        groupCount: (n) => `${n} 条`,
+        groupSite: '概览',
+        loadingBar: (l, t) => `loading ${l}/${t}`,
+        loadingIdle: (l, t) => `idle ${l}/${t}`,
+        statusLabel: (s) => s,
+      },
+      fetchFn,
+    })
+    await engine.ensureLoaded('root', 'G01')
+    await vi.waitFor(() => expect(engine.getLoadState('root', true).loading).toBe(false), { timeout: 10_000, interval: 10 })
+    const res = engine.query('root', '分压', 'all', 'G01')
+    const rows = res.groups.reduce((n, g) => n + g.items.length, 0)
+    expect(rows).toBeGreaterThan(0)
+    expect(rows).toBeLessThan(5) // five matching sections, capped per lecture
+    expect(res.totalHits).toBe(rows)
+  })
 })

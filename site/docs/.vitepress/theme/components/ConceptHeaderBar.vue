@@ -6,7 +6,7 @@
  *   1. (If draft) Draft warning banner ("草稿 · AI 生成 · 待确认") with dev confirm/edit/discard tools
  *   2. Breadcrumb back-to-lecture bar
  *   3. Eyebrow ("概念" / "Concept") + single semantic `<h1>` term title
- *   4. Compact one-line spec metadata bar
+ *   4. The 06 title block spec table (英文 / 别名 / 领域 / 所属组 / 状态 / 来源; spec board 11.1)
  */
 import { computed, onMounted, ref, watch } from 'vue'
 import { useData, useRoute, useRouter, withBase } from 'vitepress'
@@ -76,6 +76,10 @@ const meta = computed<ConceptFrontmatterMeta>(() => {
 const isDraft = computed(() => Boolean(frontmatter.value?.conceptIsDraft || meta.value.status === 'draft'))
 const slug = computed(() => meta.value.slug || String(frontmatter.value?.conceptSlug ?? ''))
 const termTitle = computed(() => meta.value.term || String(frontmatter.value?.title ?? slug.value))
+/** an empty spec-table cell (as in the lecture title block) */
+const NONE = '—'
+const aliasesText = computed(() => (meta.value.aliases ?? []).filter(Boolean).join(t('concepts.listSep')))
+const groupsText = computed(() => (meta.value.groups ?? []).filter(Boolean).join(t('concepts.listSep')))
 
 const backlinks = computed<BacklinkEntry[]>(() =>
   Array.isArray(frontmatter.value?.conceptBacklinks) ? (frontmatter.value.conceptBacklinks as BacklinkEntry[]) : [],
@@ -370,27 +374,35 @@ async function handleDiscard(): Promise<void> {
     <span class="lec-concept-eyebrow">{{ t('concepts.eyebrow') }}</span>
     <h1 class="lec-concept-title">{{ termTitle }}</h1>
 
-    <!-- One compact meta line -->
-    <div class="lec-concept-meta-line" data-concept-meta-line>
-      <span v-if="meta.english" class="lec-concept-meta-item">
-        {{ t('concepts.metaEnglish') }}: <strong>{{ meta.english }}</strong>
-      </span>
-      <span v-if="meta.aliases && meta.aliases.length > 0" class="lec-concept-meta-item">
-        {{ t('concepts.metaAliases') }}: <strong>{{ meta.aliases.join(' / ') }}</strong>
-      </span>
-      <span v-if="meta.field" class="lec-concept-meta-item">
-        {{ t('concepts.metaField') }}: <strong>{{ meta.field }}</strong>
-      </span>
-      <span v-if="meta.groups && meta.groups.length > 0" class="lec-concept-meta-item">
-        {{ t('concepts.metaGroups') }}: <strong>{{ meta.groups.join(', ') }}</strong>
-      </span>
-      <span class="lec-concept-status">
-        <span class="lec-concept-mark" :data-status="statusState" aria-hidden="true"></span>
-        <span>{{ statusLabel }}</span>
-      </span>
-      <span v-if="(meta.sourcesCount ?? 0) > 0" class="lec-concept-meta-item">
-        {{ t('concepts.metaSources') }}: <strong>{{ t('concepts.sourcesCount', { n: meta.sourcesCount ?? 0 }) }}</strong>
-      </span>
-    </div>
+    <!-- The 06 title block spec table (spec board 11.1: 英文 / 别名 / 领域 / 所属组 / 状态 / 来源; an empty value is "—") -->
+    <table class="lec-tb-spec lec-concept-spec" data-concept-meta-line :aria-label="t('concepts.specLabel')">
+      <tbody>
+        <tr>
+          <th scope="row">{{ t('concepts.metaEnglish') }}</th>
+          <td :class="{ 'lec-tb-none': !meta.english }">{{ meta.english || NONE }}</td>
+          <th scope="row">{{ t('concepts.metaAliases') }}</th>
+          <td :class="{ 'lec-tb-none': !aliasesText }">{{ aliasesText || NONE }}</td>
+        </tr>
+        <tr>
+          <th scope="row">{{ t('concepts.metaField') }}</th>
+          <td :class="{ 'lec-tb-none': !meta.field }">{{ meta.field || NONE }}</td>
+          <th scope="row">{{ t('concepts.specGroups') }}</th>
+          <td :class="{ 'lec-tb-none': !groupsText }">{{ groupsText || NONE }}</td>
+        </tr>
+        <tr>
+          <th scope="row">{{ t('concepts.metaStatus') }}</th>
+          <td>
+            <span class="lec-concept-status">
+              <span class="lec-concept-mark" :data-status="statusState" aria-hidden="true"></span>
+              <span>{{ statusLabel }}</span>
+            </span>
+          </td>
+          <th scope="row">{{ t('concepts.metaSources') }}</th>
+          <td :class="(meta.sourcesCount ?? 0) > 0 ? 'num' : 'lec-tb-none'">
+            {{ (meta.sourcesCount ?? 0) > 0 ? t('concepts.sourcesCount', { n: meta.sourcesCount ?? 0 }) : NONE }}
+          </td>
+        </tr>
+      </tbody>
+    </table>
   </header>
 </template>

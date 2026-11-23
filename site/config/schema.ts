@@ -81,8 +81,8 @@ export const MODULES: readonly ModuleSpec[] = [
 
 /** An extra option of a site module (besides its adapter choice): a typed value with a neutral default. */
 export interface SiteOptionSpec {
-  /** `path` is a site-absolute URL path such as `/api/db`; `bool` is a true / false switch. */
-  type: 'path' | 'bool'
+  /** `path` is a site-absolute URL path such as `/api/db`; `bool` is a true / false switch; `url` is a path or absolute http(s) URL. */
+  type: 'path' | 'bool' | 'url'
   default: string | boolean
   description: Text
 }
@@ -127,6 +127,13 @@ export const SITE_MODULES = {
       sessionEndpoint: {
         type: 'path', default: '/api/auth/session',
         description: { zh: '身份接口路径：返回当前请求者是谁（adapter 为 none 时前端不请求）', en: 'Path of the identity endpoint that says who the requester is (not requested when adapter is none)' },
+      },
+      loginUrl: {
+        type: 'url', default: '',
+        description: {
+          zh: '登录页面地址（同源路径如 /login?rd={rd} 或绝对 URL 如 https://auth.example.com/?rd={rd}），{rd} 为 URL 编码的回跳地址；留空则回退到当前页面',
+          en: 'Login portal address (same-origin path like /login?rd={rd} or absolute URL like https://auth.example.com/?rd={rd}); {rd} is replaced with the URL-encoded current page URL; empty falls back to the current page',
+        },
       },
     },
   },

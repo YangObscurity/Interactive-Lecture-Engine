@@ -242,11 +242,11 @@ describe('P6.5 WP-D2 dashboard client, exclusions & dev middleware', () => {
       companion: { adapter: 'off' },
       graph: { source: 'merge' },
       contentSync: { adapter: 'none' },
-      auth: { adapter: 'none', sessionEndpoint: '/api/auth/session' },
+      auth: { adapter: 'none', sessionEndpoint: '/api/auth/session', loginUrl: '' },
     } as const
     const trustedMod = {
       ...noneMod,
-      auth: { adapter: 'trusted-header', sessionEndpoint: '/api/auth/session' },
+      auth: { adapter: 'trusted-header', sessionEndpoint: '/api/auth/session', loginUrl: '' },
     } as const
 
     expect(v2DashboardExcludes(noneMod, true, {}, ['en'])).toEqual(['dashboard.md', 'en/dashboard.md'])

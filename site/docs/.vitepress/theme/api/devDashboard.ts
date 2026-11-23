@@ -3,6 +3,7 @@
  * Every call returns null / an error object outside `vitepress dev`; writes and file reads carry the dev token.
  */
 import type { CompanionPromptsFile } from '../../prompts/companion.ts'
+import type { DevDashboardStatus } from './admin'
 import { request } from './http'
 import { currentLang, translate } from '../../i18n/index.ts'
 
@@ -47,15 +48,55 @@ async function get(pathname: string, token?: string): Promise<Record<string, unk
   return res.ok && isRecord(res.data) ? res.data : null
 }
 
+async function writeJson(
+  method: 'POST' | 'DELETE',
+  pathname: string,
+  token: string,
+  body?: unknown,
+  timeoutMs = 8000,
+): Promise<{ ok: boolean; data: Record<string, unknown> | null; status?: number }> {
+  if (!import.meta.env.DEV || typeof window === 'undefined' || typeof fetch !== 'function') {
+    return { ok: false, data: null }
+  }
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), timeoutMs)
+  try {
+    const headers: Record<string, string> = { accept: 'application/json', 'x-lecture-dev-token': token }
+    let serialized: string | undefined
+    if (body !== undefined) {
+      headers['content-type'] = 'application/json'
+      serialized = JSON.stringify(body)
+    }
+    const res = await fetch(`${base()}${pathname}`, {
+      method,
+      headers,
+      body: serialized,
+      signal: controller.signal,
+      credentials: 'same-origin',
+      redirect: 'manual',
+    })
+    let data: Record<string, unknown> | null = null
+    try {
+      const parsed: unknown = await res.json()
+      if (isRecord(parsed)) data = parsed
+    } catch {
+      data = null
+    }
+    if (!res.ok) return { ok: false, data, status: res.status }
+    return { ok: true, data }
+  } catch {
+    return { ok: false, data: null }
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
 async function post(pathname: string, token: string, body: unknown, timeoutMs?: number): Promise<{ ok: boolean; data: Record<string, unknown> | null; status?: number }> {
-  if (!import.meta.env.DEV) return { ok: false, data: null }
-  const res = await request<unknown>('POST', `${base()}${pathname}`, {
-    headers: { 'x-lecture-dev-token': token },
-    body,
-    ...(timeoutMs ? { timeoutMs } : {}),
-  })
-  if (!res.ok) return { ok: false, data: null, ...(res.status ? { status: res.status } : {}) }
-  return { ok: true, data: isRecord(res.data) ? res.data : null }
+  return writeJson('POST', pathname, token, body, timeoutMs)
+}
+
+async function del(pathname: string, token: string): Promise<{ ok: boolean; data: Record<string, unknown> | null; status?: number }> {
+  return writeJson('DELETE', pathname, token)
 }
 
 /** The last check run (null before the first run). */
@@ -189,6 +230,68 @@ export interface DevAccessSummary {
   enforcement: 'none' | 'gateway'
   groups: DevAccessGroup[]
   configFile: string
+  accessFile?: {
+    path: string
+    exists: boolean
+    savedAt: string | null
+  }
+  rawAccess?: Record<string, unknown>
+}
+
+export interface SaveAccessResult {
+  ok: boolean
+  access?: unknown
+  accessFile?: {
+    path: string
+    exists: boolean
+    savedAt: string | null
+  }
+  status?: DevDashboardStatus
+  autheliaPreview?: string
+  autheliaPreviewNote?: { code: string; detail?: string } | null
+  error?: string
+}
+
+export async function saveDevAccess(token: string, access: unknown): Promise<SaveAccessResult> {
+  const r = await post('/access', token, { access })
+  if (!r.ok || !r.data) {
+    const error =
+      r.data && typeof r.data.error === 'string'
+        ? r.data.error
+        : r.status === 409
+          ? demoReadOnlyHint()
+          : r.status
+            ? `HTTP ${r.status}`
+            : 'network'
+    return { ok: false, error }
+  }
+  return {
+    ok: true,
+    access: r.data.access,
+    accessFile: r.data.accessFile as SaveAccessResult['accessFile'],
+    ...(isRecord(r.data.status) ? { status: r.data.status as unknown as DevDashboardStatus } : {}),
+    ...(typeof r.data.autheliaPreview === 'string' ? { autheliaPreview: r.data.autheliaPreview } : {}),
+    ...(r.data.autheliaPreviewNote !== undefined ? { autheliaPreviewNote: r.data.autheliaPreviewNote as SaveAccessResult['autheliaPreviewNote'] } : {}),
+  }
+}
+
+export interface PreviewAccessResult {
+  ok: boolean
+  autheliaPreview?: string
+  autheliaPreviewNote?: { code: string; detail?: string } | null
+  error?: string
+}
+
+export async function previewDevAccess(token: string, access: unknown): Promise<PreviewAccessResult> {
+  const r = await post('/access/preview', token, { access })
+  if (!r.ok || !r.data) {
+    return { ok: false, error: r.data && typeof r.data.error === 'string' ? r.data.error : 'network' }
+  }
+  return {
+    ok: true,
+    autheliaPreview: typeof r.data.autheliaPreview === 'string' ? r.data.autheliaPreview : '',
+    autheliaPreviewNote: r.data.autheliaPreviewNote as PreviewAccessResult['autheliaPreviewNote'],
+  }
 }
 
 export interface ToolsServer {
@@ -216,10 +319,24 @@ export async function fetchTools(): Promise<ToolsPayload | null> {
   return d && isRecord(d.engine) ? (d as unknown as ToolsPayload) : null
 }
 
-/** Save on/off switches only (engine tools, servers, server tools). */
+/** Save on/off switches, additions or removals (engine tools, servers, server tools). */
 export async function saveToolSwitches(
   token: string,
-  sw: { engine: Record<string, boolean>; servers: Record<string, { enabled: boolean; tools: Record<string, boolean> }> },
+  sw: {
+    engine?: Record<string, boolean>
+    servers?:
+      | Record<string, { enabled?: boolean; tools?: Record<string, boolean> }>
+      | Array<{
+          id: string
+          name?: string
+          url?: string
+          enabled?: boolean
+          headers?: Array<{ name: string; env: string }>
+          headerEnv?: Record<string, string>
+          tools?: Record<string, boolean | { enabled: boolean }>
+          timeoutMs?: number | null
+        }>
+  },
 ): Promise<{ ok: true; tools: ToolsPayload } | { ok: false; error: string }> {
   const r = await post('/tools', token, sw)
   if (!r.ok || !r.data) {
@@ -227,6 +344,57 @@ export async function saveToolSwitches(
     return { ok: false, error }
   }
   return { ok: true, tools: r.data as unknown as ToolsPayload }
+}
+
+export async function addExternalMcpServer(
+  token: string,
+  server: { id?: string; name: string; url: string; hdr?: string; env: string },
+): Promise<{ ok: true; server: ToolsServer; tools: ToolsPayload } | { ok: false; error: string; field?: string }> {
+  const r = await post('/tools/servers', token, server)
+  if (!r.ok || !r.data) {
+    const error = r.data && typeof r.data.error === 'string' ? r.data.error : r.status === 409 ? demoReadOnlyHint() : r.status ? `HTTP ${r.status}` : 'network'
+    const field = r.data && typeof r.data.field === 'string' ? r.data.field : undefined
+    return { ok: false, error, ...(field ? { field } : {}) }
+  }
+  return { ok: true, server: r.data.server as unknown as ToolsServer, tools: r.data.tools as unknown as ToolsPayload }
+}
+
+export async function deleteExternalMcpServer(
+  token: string,
+  serverId: string,
+): Promise<{ ok: true; tools: ToolsPayload } | { ok: false; error: string }> {
+  const r = await del(`/tools/servers/${encodeURIComponent(serverId)}`, token)
+  if (!r.ok || !r.data) {
+    const error = r.data && typeof r.data.error === 'string' ? r.data.error : r.status === 409 ? demoReadOnlyHint() : r.status ? `HTTP ${r.status}` : 'network'
+    return { ok: false, error }
+  }
+  return { ok: true, tools: r.data.tools as unknown as ToolsPayload }
+}
+
+export interface ThemeView {
+  file: string
+  exists: boolean
+  skin: 'reader' | 'datasheet'
+  base: 'paper' | 'sepia' | 'green' | 'dark' | 'custom'
+  custom: string
+}
+
+export async function fetchThemeConfig(): Promise<ThemeView | null> {
+  const d = await get('/theme')
+  return d && isRecord(d.theme) ? (d.theme as unknown as ThemeView) : null
+}
+
+export async function saveThemeConfig(
+  token: string,
+  theme: { skin: 'reader' | 'datasheet'; base: 'paper' | 'sepia' | 'green' | 'dark' | 'custom'; custom: string },
+): Promise<{ ok: true; theme: ThemeView } | { ok: false; error: string; reason?: string }> {
+  const r = await post('/theme', token, theme)
+  if (!r.ok || !r.data) {
+    const error = r.data && typeof r.data.error === 'string' ? r.data.error : r.status === 409 ? demoReadOnlyHint() : r.status ? `HTTP ${r.status}` : 'network'
+    const reason = r.data && typeof r.data.reason === 'string' ? r.data.reason : undefined
+    return { ok: false, error, ...(reason ? { reason } : {}) }
+  }
+  return { ok: true, theme: r.data.theme as unknown as ThemeView }
 }
 
 /**

@@ -28,6 +28,30 @@ export interface TodoItem {
 
 type T = (key: MessageKey, params?: Record<string, string | number>) => string
 
+const pad2 = (n: number): string => String(n).padStart(2, '0')
+
+/**
+ * The reader limits lecture-api enforces (keys, built-in defaults, allowed range): the same table as `LIMIT_KEYS` in
+ * plugins/dashboardDevExtras.mts (a unit test keeps them equal). Shown when there are no runtime numbers (online, or the
+ * local runtime read failed) so the page says where the values come from and how to change them (S6Y decision: the
+ * limits stay read-only; the Dashboard never writes server/.env).
+ */
+export const READER_LIMIT_DEFAULTS: ReadonlyArray<{ key: string; def: number; min: number; max: number }> = [
+  { key: 'AI_DAILY_LIMIT', def: 300, min: 1, max: 100000 },
+  { key: 'AI_RATE_PER_MINUTE', def: 20, min: 1, max: 600 },
+  { key: 'AI_MAX_CONCURRENT', def: 2, min: 1, max: 20 },
+]
+/**
+ * The Dashboard's one time format: `11-21 15:58` in local time (prototype v3.4; the same in both languages), instead of
+ * `toLocaleString()` with the browser's locale (an en-US browser wrote `11/23/2026, 9:24:13 PM` on a Chinese page).
+ * Anything that is not a date is returned as it came.
+ */
+export function shortDateTime(value: string | number | Date): string {
+  const d = value instanceof Date ? value : new Date(value)
+  if (Number.isNaN(d.getTime())) return String(value)
+  return `${pad2(d.getMonth() + 1)}-${pad2(d.getDate())} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`
+}
+
 /** Is `file` (content-relative) a lecture of the group folder `dir` (not a translation)? */
 function inGroup(file: string | undefined, dir: string): boolean {
   if (!file) return false

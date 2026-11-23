@@ -32,7 +32,8 @@ export const REQUIRED_MODE_TOKENS = [
 /**
  * Colour tokens a mode may define. When absent the compiler derives them:
  * cat-7 / cat-8 wrap to cat-1 / cat-2; chip* fall back to text / bg / text (spec board `decls()`);
- * *-tint are the base colour at a fixed alpha.
+ * *-tint are the base colour at a fixed alpha; canvas (the map stage behind the home maps, home-canvas prototype
+ * `--canvas`) falls back to the mode's own bg — a tint preset never inherits the light canvas.
  */
 export const OPTIONAL_MODE_TOKENS = [
   'cat-7',
@@ -43,6 +44,7 @@ export const OPTIONAL_MODE_TOKENS = [
   'accent-tint',
   'danger-tint',
   'warning-tint',
+  'canvas',
 ] as const
 
 /** Theme-wide (mode-independent) tokens. All optional: missing ones inherit the `reader` defaults. */

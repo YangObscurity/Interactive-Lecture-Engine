@@ -8,7 +8,7 @@
  * is painted by the label layer of `MapStage`. Statuses come from the progress store (all "not read" until it is ready, as in
  * the server render); the text widths are estimated until mount, then measured with the theme's fonts.
  */
-import { computed, h, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
+import { computed, defineComponent, h, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import type { Component, VNode } from 'vue'
 import { useRouter, withBase } from 'vitepress'
 import type { CurriculumData } from '../../../curriculum/data.ts'
@@ -264,6 +264,22 @@ const labelOptions = {
 
 let userChanged = false
 
+/** The zoom label at the bottom left: scale and the label tier it shows (the same steps as `labelOptions`). */
+const zoomK = ref(1)
+function onCommit(tr: { k: number }): void {
+  zoomK.value = tr.k
+}
+const zoomLabelText = computed(() => {
+  const k = zoomK.value
+  const tier = t(k < 0.22 ? 'canvas.zoom.far' : k < 0.45 ? 'canvas.zoom.mid' : 'canvas.zoom.near')
+  return t('atlas.zoomLabel', { pct: Math.round(k * 100), tier })
+})
+/** Its own component, so that a zoom re-renders the label only, never the map. */
+const ZoomLabel = defineComponent({
+  name: 'AtlasZoomLabel',
+  setup: () => () => h('div', { class: 'lec-map-panel am-zoomlabel', 'aria-hidden': 'true' }, zoomLabelText.value),
+})
+
 function stageSize(): { width: number; height: number } {
   const r = stage.value?.stage?.getBoundingClientRect()
   return { width: r?.width ?? 0, height: r?.height ?? 0 }
@@ -426,6 +442,11 @@ function onClick(ev: MouseEvent): void {
       if (L) viewport()?.zoomToBox(blockBox(L, layout.value.ox))
       break
     }
+    case 'root':
+      // the centre fits the whole map (prototype: root click -> fit(); its tooltip says so)
+      clicks.cancel()
+      fit()
+      break
     default:
       break
   }
@@ -510,8 +531,9 @@ function choosePreset(p: AtlasPreset): void {
   setRaw('atlasExpand', p)
   clearHover()
   userChanged = false
-  if (layout.value.key === prevKey) fitNow()
-  else deferLabels()
+  // a new way of expanding always shows the whole new map (prototype: redraw, then fit), also after the reader moved it
+  if (layout.value.key !== prevKey) deferLabels()
+  fitNow()
 }
 
 function jump(): void {
@@ -574,7 +596,7 @@ defineExpose({ layout, preset, choosePreset, fit })
 </script>
 
 <template>
-  <MapStage ref="stage" class="am-stage" :width="layout.width" :height="layout.height" v-bind="stageProps">
+  <MapStage ref="stage" class="am-map" :width="layout.width" :height="layout.height" v-bind="stageProps" @commit="onCommit">
     <template #hud>
       <input v-model="queryRaw" class="am-search" type="search" :aria-label="t('atlas.search.label')" :placeholder="t('atlas.search.placeholder')" autocomplete="off" @keydown.enter.prevent="jump" />
       <span class="am-expand" role="group" :aria-label="t('atlas.expand.group')">
@@ -583,10 +605,18 @@ defineExpose({ layout, preset, choosePreset, fit })
           {{ t(`atlas.expand.${p}` as 'atlas.expand.reading') }}
         </button>
       </span>
+      <span class="am-legend" aria-hidden="true">
+        <span class="am-lg"><i class="am-lg-dot" />{{ t('canvas.legend.unread') }}</span>
+        <span class="am-lg"><i class="am-lg-dot reading" />{{ t('canvas.legend.reading') }}</span>
+        <span class="am-lg"><i class="am-lg-dot read" />{{ t('canvas.legend.read') }}</span>
+        <span class="am-lg"><i class="am-lg-line" />{{ t('canvas.legend.pre') }}</span>
+        <span class="am-lg"><i class="am-lg-line post" />{{ t('canvas.legend.post') }}</span>
+      </span>
+      <span class="am-lg am-info">{{ t('atlas.info') }}</span>
       <span class="am-status" role="status" aria-live="polite">{{ statusMsg }}</span>
     </template>
     <g class="am-layer" :class="{ 'am-dim': focus !== null, 'am-searching': query !== '' }" @click="onClick" @dblclick="onDblclick" @pointerover="onOver" @pointerleave="clearHover">
-      <component :is="parts.cat.component" v-for="p in drawn.cats" :key="p.id" v-memo="[parts.cat.impl, p.x0, p.xi, p.xo, p.w, p.y, p.label, p.labelW, p.caption, p.trunk, p.read, p.total, p.highlight, p.match]" v-bind="p" />
+      <component :is="parts.cat.component" v-for="p in drawn.cats" :key="p.id" v-memo="[parts.cat.impl, p.x0, p.xi, p.xo, p.w, p.y, p.label, p.labelW, p.caption, p.captionW, p.trunk, p.read, p.total, p.groups, p.innerX, p.outerX, p.zoneTop, p.zoneH, p.highlight, p.match]" v-bind="p" />
       <SlotList :items="drawn.links" :comp="parts.link.component" :key-of="linkKey" />
       <component :is="parts.center.component" v-bind="drawn.center" data-node="root" data-slot="AtlasCenter" :data-slot-impl="parts.center.impl" />
       <component :is="parts.group.component" v-for="p in drawn.groups" :key="p.id" v-memo="[parts.group.impl, p.x0, p.xi, p.xo, p.w, p.y, p.title, p.progress, p.ticks, p.stripFrom, p.stripCol, p.open, p.read, p.reading, p.highlight, p.match]" v-bind="p" />
@@ -595,6 +625,7 @@ defineExpose({ layout, preset, choosePreset, fit })
       <text v-for="b in drawn.bigs" :key="b.id" v-memo="[b.x, b.y, b.anchor, b.size, b.text]" class="am-big" data-label-kind="big" :x="b.x" :y="b.y" :text-anchor="b.anchor" :style="{ fontSize: `${b.size}px` }">{{ b.text }}</text>
     </g>
     <template #overlay>
+      <ZoomLabel />
       <MapInfoPanel :content="info.content.value" :open="info.open.value" />
     </template>
   </MapStage>
@@ -611,4 +642,17 @@ defineExpose({ layout, preset, choosePreset, fit })
 .am-expand button:focus-visible { outline: 2px solid var(--lec-accent); outline-offset: 1px; }
 .am-status { padding: 4px 8px; font-size: 12.5px; color: var(--lec-text); }
 .am-status:empty { display: none; }
+/* legend chips, the how-to chip and the zoom label (home-canvas prototype `.chip`: 12px, 3px 8px, 1px border, --lec-bg) */
+.am-legend { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.am-lg { display: inline-flex; align-items: center; gap: 6px; padding: 3px 8px; font-size: 12px; line-height: 1.6; color: var(--lec-text-muted); background: var(--lec-bg); border: 1px solid var(--lec-border); border-radius: var(--lec-radius-1, 4px); white-space: nowrap; }
+.am-lg-dot { width: 9px; height: 9px; border-radius: var(--lec-status-radius, 50%); border: 1.5px solid var(--lec-border); background: var(--lec-bg); }
+.am-lg-dot.reading { border-color: var(--lec-accent); background: linear-gradient(to top, var(--lec-accent) 50%, transparent 50%); }
+.am-lg-dot.read { border-color: var(--lec-done); background: var(--lec-done); }
+.am-lg-line { width: 20px; height: 0; border-top: 2px solid var(--lec-accent); }
+.am-lg-line.post { border-top: 2px dashed var(--lec-done); }
+.am-info { white-space: normal; }
+.am-zoomlabel { position: absolute; z-index: 2; left: 12px; bottom: 12px; padding: 3px 9px; font-size: 12px; line-height: 1.6; color: var(--lec-text-muted); background: var(--lec-bg); border: 1px solid var(--lec-border); border-radius: var(--lec-radius-1, 4px); pointer-events: none; }
+@media (max-width: 700px) {
+  .am-legend, .am-info { display: none; }
+}
 </style>

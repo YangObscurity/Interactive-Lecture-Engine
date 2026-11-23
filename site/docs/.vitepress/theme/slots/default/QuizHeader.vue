@@ -18,14 +18,15 @@ defineProps<QuizHeaderProps>()
   justify-content: space-between;
   align-items: center;
   gap: var(--lec-space-3);
-  padding: 6px var(--lec-space-4);
+  padding: var(--lec-space-2) var(--lec-space-4);
   background: var(--lec-surface);
   border: var(--lec-line-hair) solid var(--lec-border);
   border-left: 3px solid var(--lec-accent);
   border-bottom: 0;
   border-radius: var(--lec-radius-2) var(--lec-radius-2) 0 0;
   font-size: 13px;
-  line-height: 1.4;
+  /* S6Y F1: spec board 08 .quiz-head (8px 16px, line 1.6 = 20.8 -> 38px with the top rule) */
+  line-height: 1.6;
 }
 .lec-quiz-head--reader b {
   font-family: var(--lec-font-heading);

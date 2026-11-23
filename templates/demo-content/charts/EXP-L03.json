@@ -1,0 +1,6 @@
+{
+  "c1": {
+    "type": "echarts",
+    "code": "{\n  \"title\": {\n    \"text\": \"盆数越多，差距的估计越稳定\",\n    \"left\": 8\n  },\n  \"tooltip\": {\n    \"trigger\": \"axis\"\n  },\n  \"grid\": {\n    \"top\": 72,\n    \"bottom\": 56,\n    \"left\": 56\n  },\n  \"xAxis\": {\n    \"type\": \"category\",\n    \"data\": [\n      \"1\",\n      \"2\",\n      \"3\",\n      \"4\",\n      \"5\",\n      \"6\"\n    ],\n    \"name\": \"每组盆数\",\n    \"nameLocation\": \"middle\",\n    \"nameGap\": 30\n  },\n  \"yAxis\": {\n    \"type\": \"value\",\n    \"name\": \"平均苗高之差 / cm\",\n    \"min\": 0,\n    \"max\": 2\n  },\n  \"series\": [\n    {\n      \"name\": \"每天浇 − 隔天浇\",\n      \"type\": \"line\",\n      \"symbolSize\": 8,\n      \"itemStyle\": {\n        \"color\": \"#65A30D\"\n      },\n      \"data\": [\n        0.9,\n        1.15,\n        1.17,\n        1.13,\n        1.2,\n        1.23\n      ],\n      \"markLine\": {\n        \"symbol\": \"none\",\n        \"lineStyle\": {\n          \"type\": \"dashed\"\n        },\n        \"label\": {\n          \"formatter\": \"判断标准 1 cm\",\n          \"position\": \"insideEndTop\"\n        },\n        \"data\": [\n          {\n            \"yAxis\": 1\n          }\n        ]\n      }\n    }\n  ]\n}"
+  }
+}

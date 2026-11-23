@@ -104,9 +104,12 @@ test.describe('WP-F8: group figures wiki thumbnails, dark mode, skins & cross-re
     expect(metrics!.clearsHeading).toBe(true)
     expect(metrics!.wrapsBeside).toBe(true)
     expect(metrics!.tagBadges).toBe(0)
-    expect(metrics!.hasCaptionLabel).toContain('说明')
-    // source line of figures.json: paper · number · page
-    expect(metrics!.hasSource).toContain('Original Example Diagram')
+    // S6Y: the number is "图 <讲号>-<序号>" with no "说明" suffix (audit-spec #11); MEA L02 has no chart before it
+    expect(metrics!.hasCaptionLabel).toBe('图 2-1')
+    // source line of figures.json: "出处：<paper>，原文 <Fig. N>，第 N 页", no middle dots (audit-spec #23)
+    expect(metrics!.hasSource).toContain('出处：Original Example Diagram')
+    expect(metrics!.hasSource).toMatch(/，原文 Fig\. \d+，第 \d+ 页$/)
+    expect(metrics!.hasSource).not.toContain('·')
     expect(pageErrors).toEqual([])
   })
 
@@ -119,6 +122,55 @@ test.describe('WP-F8: group figures wiki thumbnails, dark mode, skins & cross-re
     expect(await gallery.evaluate((el) => getComputedStyle(el).float)).toBe('none')
     expect(pageErrors).toEqual([])
   })
+
+  // spec board 07.1: "宽表格、代码块和公式块用 flow-root 排到图的下方，不会被挤成窄条" (S6Y audit-spec #7: the self-check
+  // card on MEA L02 was 319 px and the ECharts chart on MEA L05 319×478 next to a 624 px text column)
+  for (const skin of ['reader', 'datasheet'] as const) {
+    test(`${skin}: block components after a floated thumbnail take the full text width (no half-width squeeze)`, async ({
+      page,
+      pageErrors,
+    }) => {
+      await useTheme(page, skin, 'light')
+      await page.setViewportSize({ width: 1280, height: 900 })
+      for (const lecture of [FIG_LECTURE, '/mea/L05']) {
+        await gotoAndSettle(page, lecture)
+        const res = await page.evaluate(() => {
+          const doc = document.querySelector<HTMLElement>('.vp-doc')
+          const floats = [...document.querySelectorAll<HTMLElement>('.vp-doc figure.lec-fig')].filter(
+            (f) => getComputedStyle(f).float !== 'none',
+          )
+          if (!doc || floats.length === 0) return null
+          // the text column: the content box of the markdown root (the parent of the floated figure)
+          const column = floats[0]!.parentElement!
+          const ccs = getComputedStyle(column)
+          const colWidth = column.clientWidth - parseFloat(ccs.paddingLeft) - parseFloat(ccs.paddingRight)
+          const blocks = [
+            ...document.querySelectorAll<HTMLElement>(
+              '.vp-doc details.custom-block:not(details details), .vp-doc figure.chart, .vp-doc div[class*="language-"], .vp-doc table, .vp-doc .math-block',
+            ),
+          ].filter((b) => floats.some((f) => f.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING))
+          return {
+            colWidth: Math.round(colWidth),
+            blocks: blocks.map((b) => {
+              const r = b.getBoundingClientRect()
+              const beside = floats.some((f) => {
+                const fr = f.getBoundingClientRect()
+                return r.top < fr.bottom - 1 && r.bottom > fr.top + 1 && r.right > fr.left + 1 && r.left < fr.right - 1
+              })
+              return { tag: `${b.tagName.toLowerCase()}.${b.className.split(' ')[0]}`, width: Math.round(r.width), beside }
+            }),
+          }
+        })
+        expect(res, `${lecture} has a floated thumbnail`).not.toBeNull()
+        expect(res!.blocks.length, `${lecture} has blocks after the float`).toBeGreaterThan(0)
+        for (const b of res!.blocks) {
+          expect(b.width, `${lecture} ${b.tag} width = text column ${res!.colWidth}`).toBeGreaterThanOrEqual(res!.colWidth - 2)
+          expect(b.beside, `${lecture} ${b.tag} sits beside the float`).toBe(false)
+        }
+      }
+      expect(pageErrors).toEqual([])
+    })
+  }
 
   test('390px mobile collapses float to full width with max-height <= 50vh and zero horizontal overflow', async ({
     page,
@@ -239,13 +291,13 @@ test.describe('WP-F8: group figures wiki thumbnails, dark mode, skins & cross-re
     await gotoAndSettle(page, FIG_LECTURE)
 
     const xref = page.locator(`.lec-xref[data-xref-id="${FIG}"]`).first()
-    await expect(xref).toHaveText('图 1')
+    await expect(xref).toHaveText('图 2-1')
     await xref.scrollIntoViewIfNeeded()
 
     // Desktop hover preview card appears and hides on leave
     await xref.hover()
     await expect(page.locator('.lec-xref-peek')).toBeVisible()
-    await expect(page.locator('.lec-xref-peek__title')).toHaveText('图 1')
+    await expect(page.locator('.lec-xref-peek__title')).toHaveText('图 2-1')
     await page.mouse.move(10, 10)
     await expect(page.locator('.lec-xref-peek')).toHaveCount(0)
 
@@ -277,10 +329,44 @@ test.describe('WP-F8: group figures wiki thumbnails, dark mode, skins & cross-re
     const backlink = page.locator(`#fig-${FIG} .lec-fig-backlink`).first()
     await expect(backlink).toBeVisible()
 
-    // Translated demo lecture renders its figure pack figure in English with Figure 1 caption & zero Chinese
+    // Translated demo lecture renders its figure pack figure in English; the WaveDrom chart c1 comes first on the page, so
+    // the figure is the second of lecture 1 (charts and figures share one sequence, S6Y)
     await gotoAndSettle(page, EN_FIG_LECTURE)
-    await expect(page.locator(`.lec-xref[data-xref-id="${EN_FIG}"]`).first()).toHaveText('Fig. 1')
-    await expect(page.locator(`#fig-${EN_FIG} .lec-ff-no`)).toHaveText('Figure 1 caption')
+    await expect(page.locator(`.lec-xref[data-xref-id="${EN_FIG}"]`).first()).toHaveText('Fig. 1-2')
+    await expect(page.locator(`#fig-${EN_FIG} .lec-ff-no`)).toHaveText('Fig. 1-2')
+    await expect(page.locator('figure.chart[data-id="c1"] .lec-ff-no')).toHaveText('Fig. 1-1')
+    await expect(page.locator(`#fig-${EN_FIG} .lec-ff-source`)).toHaveText(/^Source: .+, original Fig\. \d+, p\. \d+$/)
+    expect(pageErrors).toEqual([])
+  })
+
+  // S6Y user decision 2026-11-23 21:47 (s6y/DECISIONS.md): one sequence "图 <讲号>-<序号>" for charts and figures in page order.
+  // MEA L05: Mermaid c1, figure mea-interp, ECharts c2, WaveDrom c3 (templates/demo-content/lectures/mea/L05.md)
+  test('MEA L05: charts and the figure-pack figure share one per-lecture sequence; the cross-reference and the viewer follow it', async ({
+    page,
+    pageErrors,
+  }) => {
+    await page.setViewportSize({ width: 1280, height: 900 })
+    await gotoAndSettle(page, '/mea/L05')
+    const order = await page.evaluate(() =>
+      [...document.querySelectorAll<HTMLElement>('.vp-doc figure.chart:not(.chart--modal), .vp-doc figure.lec-fig')].map((f) => ({
+        id: f.dataset.id ?? f.id,
+        no: f.querySelector('.lec-ff-no')?.textContent?.trim() ?? '',
+      })),
+    )
+    expect(order).toEqual([
+      { id: 'c1', no: '图 5-1' },
+      { id: 'fig-mea-interp', no: '图 5-2' },
+      { id: 'c2', no: '图 5-3' },
+      { id: 'c3', no: '图 5-4' },
+    ])
+    await expect(page.locator('.lec-xref[data-xref-id="mea-interp"]').first()).toHaveText('图 5-2')
+    // the viewer title is the same number and the caption (no type tag, no internal id)
+    await page.locator('figure.chart[data-id="c2"] .chart-enlarge').click({ force: true })
+    await expect(page.locator('.chart-modal .chart-modal__title')).toHaveText(/^图 5-3( |$)/)
+    await page.locator('.chart-modal button[data-m="prev"]').click()
+    await expect(page.locator('.chart-modal .chart-modal__title')).toHaveText(/^图 5-2 /)
+    await page.keyboard.press('Escape')
+    await expect(page.locator('.chart-modal')).toHaveCount(0)
     expect(pageErrors).toEqual([])
   })
 

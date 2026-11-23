@@ -27,8 +27,10 @@ import type { ThemeLayer } from '../tokens/pack'
 import {
   GROUP_DESC_ATTR,
   applyPrefs,
+  defaultBodyFont,
   prefAttrs,
   readPrefs,
+  syncAppearanceSwitch,
   writePrefs,
   type BodyFont,
   type ReaderPrefs,
@@ -119,10 +121,32 @@ const activeSize = computed<ProseSize>(() => {
 
 const sizeIndex = computed(() => PROSE_SIZES.indexOf(activeSize.value))
 
+/** The default body font of the active theme, read from the root once no `data-lec-font` is set (see refreshDefaultFont). */
+const themeDefaultFont = ref<BodyFont>('serif')
+
 const activeFont = computed<BodyFont>(() => {
   const attrs = prefAttrs(draftPrefs.value, THEME_RUNTIME)
-  return attrs['data-lec-font'] === 'sans' ? 'sans' : 'serif'
+  const f = attrs['data-lec-font']
+  if (f === 'sans' || f === 'serif') return f
+  // S6Y F6 (audit-spec #12): no font saved -> the theme's own default, i.e. the font the text is set in now
+  return themeDefaultFont.value
 })
+
+function refreshDefaultFont(): void {
+  if (typeof document === 'undefined') return
+  if (document.documentElement.hasAttribute('data-lec-font')) return
+  themeDefaultFont.value = defaultBodyFont(getComputedStyle(document.documentElement))
+}
+
+/** Theme names are UI text: the two engine themes have i18n names, a third-party pack keeps its theme.json label. */
+const THEME_NAME_KEYS: Record<string, 'settings.themeNameReader' | 'settings.themeNameDatasheet'> = {
+  reader: 'settings.themeNameReader',
+  datasheet: 'settings.themeNameDatasheet',
+}
+function themeLabel(th: { id: string; label: string }): string {
+  const key = THEME_NAME_KEYS[th.id]
+  return key ? t(key) : th.label
+}
 
 const availableTints = computed(() => {
   const readerPack = themesList.find((th) => th.id === 'reader')
@@ -240,6 +264,7 @@ function loadDraftFromCommitted(): void {
   const vState = getByokVerifyState()
   byokVerifyStatus.value = vState.status
   byokVerifyError.value = vState.error
+  refreshDefaultFont()
 }
 
 function previewDraft(): void {
@@ -250,6 +275,7 @@ function previewDraft(): void {
       : null
   applyRootAppearance(draftPrefs.value, draftDark.value, draftThemeLayer.value, ct)
   document.documentElement.setAttribute(GROUP_DESC_ATTR, draftGroupDesc.value ? 'open' : 'closed')
+  refreshDefaultFont()
 }
 
 function selectLanguage(code: LangCode): void {
@@ -281,7 +307,7 @@ function selectAppearance(mode: string): void {
     draftPrefs.value = { ...draftPrefs.value, theme: 'reader', tint: undefined }
   } else if (mode === 'light') {
     draftCustomEnabled.value = false
-    draftPrefs.value = { ...draftPrefs.value, tint: undefined }
+    draftPrefs.value = { ...draftPrefs.value, tint: 'light' }
   } else {
     if (isDatasheet.value) return
     draftCustomEnabled.value = false
@@ -453,8 +479,9 @@ function saveSettings(): void {
 
 function restoreDefaults(): void {
   writePrefs({ theme: null, tint: null, fontSize: null, bodyFont: null })
-  draftDark.value = false
-  isDark.value = false
+  const defDark = THEME_RUNTIME.defaultBase === 'dark'
+  draftDark.value = defDark
+  isDark.value = defDark
   writeCustomTint(null)
   writeReaderThemeLayer(null)
   themeImportMsg.value = ''
@@ -485,10 +512,11 @@ function togglePanel(): void {
 
 function closePanel(restoreFocus = true): void {
   if (!isOpen.value) return
-  const committedDark =
+  const ap =
     typeof window !== 'undefined' && typeof localStorage !== 'undefined'
-      ? localStorage.getItem('vitepress-theme-appearance') === 'dark'
-      : false
+      ? localStorage.getItem('vitepress-theme-appearance')
+      : null
+  const committedDark = ap === 'dark' || (!ap && THEME_RUNTIME.defaultBase === 'dark')
   isDark.value = committedDark
   syncCommittedToRoot()
   isOpen.value = false
@@ -518,15 +546,19 @@ function onByokStatusEvent(): void {
   byokVerifyError.value = st.error
 }
 
-watch(isDark, () => {
+watch(isDark, (dark) => {
   if (!isOpen.value) {
     syncCommittedToRoot()
   }
+  // S6Y F6 (audit-spec #22): keep VitePress' appearance switch in step (aria-checked) after the patch of this change
+  void nextTick(() => syncAppearanceSwitch(dark))
 })
 
 onMounted(() => {
   loadDraftFromCommitted()
   syncCommittedToRoot()
+  // hydration kept the server's aria-checked="false"; write the real state once the page is live
+  void nextTick(() => syncAppearanceSwitch(isDark.value))
   if (typeof document !== 'undefined') {
     document.addEventListener('keydown', onDocKeydown)
     document.addEventListener('pointerdown', onDocPointerDown)
@@ -622,7 +654,7 @@ onUnmounted(() => {
               :data-lec-theme-opt="th.id"
               @click="selectTheme(th.id)"
             >
-              {{ th.label }}
+              {{ themeLabel(th) }}
             </button>
             <label class="rs-pill rs-file-btn">
               {{ t('settings.themeJsonPick') }}
@@ -681,6 +713,17 @@ onUnmounted(() => {
             >
               {{ tint === 'sepia' ? t('settings.tintSepia') : tint === 'green' ? t('settings.tintGreen') : tint }}
             </button>
+            <!-- S6Y decision (2): spec board 02 order 纸白 / 米黄 / 豆沙绿 / 深色 / 自定义 -->
+            <button
+              type="button"
+              class="rs-pill"
+              :class="{ 'is-active': activeTint === 'dark' }"
+              :aria-pressed="activeTint === 'dark'"
+              data-lec-tint-opt="dark"
+              @click="selectAppearance('dark')"
+            >
+              {{ t('settings.tintDark') }}
+            </button>
             <button
               type="button"
               class="rs-pill"
@@ -691,16 +734,6 @@ onUnmounted(() => {
               @click="selectAppearance('custom')"
             >
               {{ t('settings.tintCustom') }}
-            </button>
-            <button
-              type="button"
-              class="rs-pill"
-              :class="{ 'is-active': activeTint === 'dark' }"
-              :aria-pressed="activeTint === 'dark'"
-              data-lec-tint-opt="dark"
-              @click="selectAppearance('dark')"
-            >
-              {{ t('settings.tintDark') }}
             </button>
           </div>
         </section>
@@ -997,7 +1030,8 @@ onUnmounted(() => {
   position: fixed;
   top: calc(var(--vp-nav-height, 64px) + 8px);
   right: 16px;
-  width: min(376px, calc(100vw - 24px));
+  /* S6Y F1: spec board 02 .set-wrap column 360px */
+  width: min(360px, calc(100vw - 24px));
   max-height: calc(100vh - var(--vp-nav-height, 64px) - 24px);
   display: flex;
   flex-direction: column;
@@ -1007,6 +1041,12 @@ onUnmounted(() => {
   border-radius: var(--lec-radius-2);
   z-index: 220;
   font-size: 13px;
+  /* S6Y F1: own line height (spec board controls: 1.6) instead of VitePress' 24px; buttons use `normal` like the board */
+  line-height: 1.6;
+}
+
+.rs-panel button {
+  line-height: normal;
 }
 
 .rs-head {
@@ -1076,12 +1116,15 @@ onUnmounted(() => {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  padding: 4px 10px;
+  /* S6Y F1: spec board 02 .seg button (13px, line normal; board 27 / 29px). The board's buttons have no border of their own
+     (the segment draws it), ours do, so 1px less padding keeps the same height */
+  padding: 4px var(--lec-space-3);
   border-radius: var(--lec-radius-1);
   border: 1px solid var(--lec-border);
   background: var(--lec-surface);
   color: var(--lec-text);
-  font-size: 12px;
+  font-size: 13px;
+  line-height: normal;
   cursor: pointer;
 }
 
@@ -1349,6 +1392,20 @@ onUnmounted(() => {
   .rs-nav-btn {
     gap: 0;
     padding: 0 8px;
+  }
+}
+
+/* S6Y F6 (audit-spec #27, decision 1): on phones the settings and export buttons are the same 36x36 icon buttons */
+@media (max-width: 767px) {
+  .rs-btn-text {
+    display: none;
+  }
+  .rs-nav-btn {
+    width: 36px;
+    height: 36px;
+    padding: 0;
+    gap: 0;
+    justify-content: center;
   }
 }
 </style>

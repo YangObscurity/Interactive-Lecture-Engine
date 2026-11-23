@@ -42,6 +42,103 @@ export const CUSTOM_TINT_MIN_CONTRAST = 4.5
 export const CUSTOM_TINT_TEXT_CONTRAST = 7.0
 export const MAX_THEME_IMPORT_BYTES = 256 * 1024
 
+export interface SkinPalette {
+  bg: string
+  surface: string
+  border: string
+  text: string
+  'text-muted': string
+  accent: string
+  danger: string
+}
+
+export type SkinId = 'reader' | 'datasheet'
+export type ReadingBaseId = 'paper' | 'sepia' | 'green' | 'dark'
+
+/** Exact palettes matching `docs/.vitepress/themes/{reader,datasheet}/theme.json`. */
+export const SKIN_PALETTES: Record<SkinId, { light: SkinPalette; dark: SkinPalette }> = {
+  reader: {
+    light: { bg: '#ffffff', surface: '#f6f7f9', border: '#d5dbe1', text: '#1f2328', 'text-muted': '#57606a', accent: '#2155c4', danger: '#c4302b' },
+    dark: { bg: '#17191e', surface: '#1f232a', border: '#2f353e', text: '#e2e5e9', 'text-muted': '#9aa3ae', accent: '#7ea8ff', danger: '#ff7b72' },
+  },
+  datasheet: {
+    light: { bg: '#f5f6f3', surface: '#ffffff', border: '#cbd2cc', text: '#1c2b3a', 'text-muted': '#52606d', accent: '#0f5b3e', danger: '#b3261e' },
+    dark: { bg: '#0f1d17', surface: '#15281f', border: '#24392f', text: '#e6ece7', 'text-muted': '#9db0a4', accent: '#4fb386', danger: '#f07068' },
+  },
+}
+
+export interface ReadingBaseDef {
+  id: ReadingBaseId
+  nameKey: string
+  hex: string
+  surface: string
+  border: string
+}
+
+/** Order matches spec board §02 & DECISIONS.md: 纸白 / 米黄 / 豆沙绿 / 深色 (+ custom). */
+export const READING_BASES: readonly ReadingBaseDef[] = [
+  { id: 'paper', nameKey: 'dsh.lk.basePaper', hex: '#FFFFFF', surface: '#F6F7F9', border: '#D5DBE1' },
+  { id: 'sepia', nameKey: 'dsh.lk.baseSepia', hex: '#F7F1E1', surface: '#EFE8D4', border: '#D9C9A8' },
+  { id: 'green', nameKey: 'dsh.lk.baseGreen', hex: '#D5EBD7', surface: '#C9E3CC', border: '#A3C7A8' },
+  { id: 'dark', nameKey: 'dsh.lk.baseDark', hex: '#17191E', surface: '#1F232A', border: '#2F353E' },
+] as const
+
+export const BASE_COLORS: Record<ReadingBaseId, { bg: string; surface: string; border: string }> = {
+  paper: { bg: '#FFFFFF', surface: '#F6F7F9', border: '#D5DBE1' },
+  sepia: { bg: '#F7F1E1', surface: '#EFE8D4', border: '#D9C9A8' },
+  green: { bg: '#D5EBD7', surface: '#C9E3CC', border: '#A3C7A8' },
+  dark: { bg: '#17191E', surface: '#1F232A', border: '#2F353E' },
+}
+
+export const DEFAULT_CUSTOM_HEX = '#EAF2E3'
+
+export function isDarkColor(hex: string): boolean {
+  return contrast(hex, '#000000') < contrast(hex, '#FFFFFF')
+}
+
+export function baseBackground(base: string, custom: string): string {
+  if (base === 'custom') return custom
+  if (base in BASE_COLORS) return BASE_COLORS[base as ReadingBaseId].bg
+  return '#FFFFFF'
+}
+
+export function baseSurface(base: string, custom: string): string {
+  if (base === 'custom') return custom
+  if (base in BASE_COLORS) return BASE_COLORS[base as ReadingBaseId].surface
+  return '#F6F7F9'
+}
+
+export interface ContrastCheckRow {
+  name: string
+  color: string
+  min: number
+  ratio: number
+  pass: boolean
+}
+
+export function checkThemeContrast(
+  skin: SkinId,
+  base: string,
+  customHex = '',
+): { ok: boolean; bg: string; surface: string; dark: boolean; rows: ContrastCheckRow[] } | null {
+  const bg = baseBackground(base, customHex)
+  if (!/^#[0-9a-fA-F]{6}$/.test(bg)) return null
+  const isDark = base === 'dark' || (base === 'custom' && isDarkColor(bg))
+  const surface = baseSurface(base, bg)
+  const p = SKIN_PALETTES[skin][isDark ? 'dark' : 'light']
+  const items: Array<[string, string, number]> = [
+    ['text', p.text, 4.5],
+    ['text-muted', p['text-muted'], 4.5],
+    ['accent', p.accent, 4.5],
+    ['danger', p.danger, 3.0],
+  ]
+  const rows: ContrastCheckRow[] = items.map(([name, color, min]) => {
+    const ratio = contrast(bg, color)
+    return { name, color, min, ratio, pass: ratio >= min }
+  })
+  return { ok: rows.every((r) => r.pass), bg, surface, dark: isDark, rows }
+}
+
 function clamp(n: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, n))
 }

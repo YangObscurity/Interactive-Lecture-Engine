@@ -153,6 +153,8 @@ const geo = computed(() => {
   height: 28px;
   min-width: 0;
   color: inherit !important;
+  /* the prototype's pin names are regular; without this the link takes `.vp-doc a { font-weight: 500 }` (S6Y audit-group #5) */
+  font-weight: 400;
   text-decoration: none !important;
 }
 .pin.l > a,

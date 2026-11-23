@@ -1,0 +1,40 @@
+{
+  "version": 1,
+  "group": "wrt",
+  "figures": [
+    {
+      "id": "wrt-pyramid",
+      "file": "wrt-pyramid.svg",
+      "kind": "figure",
+      "width": 480,
+      "height": 230,
+      "caption": {
+        "zh": "倒金字塔：越重要的内容越靠前，读者读到哪一层都能带走结论",
+        "en": "The inverted pyramid: the most important content first, so readers keep the conclusion wherever they stop"
+      },
+      "source": {
+        "paper": "Original Example Diagram",
+        "number": "Fig. 1",
+        "page": 1
+      },
+      "sha256": "742f48c2e307"
+    },
+    {
+      "id": "wrt-caption-anatomy",
+      "file": "wrt-caption-anatomy.svg",
+      "kind": "figure",
+      "width": 480,
+      "height": 240,
+      "caption": {
+        "zh": "一条完整图注的四个部分",
+        "en": "The four parts of a complete figure caption"
+      },
+      "source": {
+        "paper": "Original Example Diagram",
+        "number": "Fig. 2",
+        "page": 1
+      },
+      "sha256": "e6a526112ff3"
+    }
+  ]
+}

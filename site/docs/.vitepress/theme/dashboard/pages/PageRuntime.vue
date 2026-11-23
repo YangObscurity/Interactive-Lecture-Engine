@@ -12,6 +12,7 @@ import DbHead from '../DbHead.vue'
 import DbTabs from '../DbTabs.vue'
 import DbUnavailable from '../DbUnavailable.vue'
 import { dashboardState, isReadOnly, tabOf } from '../useDashboard'
+import { shortDateTime } from '../dashboardData'
 
 defineProps<{ health: AdminHealthResponse | null; healthError: string }>()
 const emit = defineEmits<{ tab: [tab: string] }>()
@@ -67,7 +68,7 @@ const procs = computed(() => {
   return [
     { name: t('dsh.rt.srcDev'), k: 'ok', st: t('dsh.rt.running'), d: typeof location !== 'undefined' ? location.host : '' },
     { name: t('dsh.rt.srcSync'), k: p.contentWatch === 'watching' ? 'ok' : 'off', st: p.contentWatch === 'watching' ? t('dsh.rt.watching') : p.contentWatch === 'in-place' ? t('dsh.rt.inPlace') : t('dsh.rt.watchOff'), d: '' },
-    { name: t('dsh.rt.lastBuild'), k: p.lastBuild ? 'ok' : 'off', st: p.lastBuild ? new Date(p.lastBuild).toLocaleString() : t('dsh.rt.never'), d: 'npm run build' },
+    { name: t('dsh.rt.lastBuild'), k: p.lastBuild ? 'ok' : 'off', st: p.lastBuild ? shortDateTime(p.lastBuild) : t('dsh.rt.never'), d: 'npm run build' },
     { name: 'lecture-api', k: p.lectureApi.up ? 'ok' : 'off', st: p.lectureApi.up ? t('dsh.rt.running') : t('dsh.rt.notRunning'), d: `127.0.0.1:${p.lectureApi.port}` },
   ]
 })

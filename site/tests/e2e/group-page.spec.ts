@@ -12,8 +12,10 @@
 import type { Page } from '@playwright/test'
 import { test, expect } from './fixtures'
 import { useTheme, type Mode, type ThemeId } from './theme-helpers'
+import { DEMO_GROUP_DIRS, demoGroup, lectureId } from './demo'
 
-const GROUPS = ['mea', 'log', 'pln', 'dat'] as const
+/** every group folder of the demo content, in groups.ts order */
+const GROUPS = DEMO_GROUP_DIRS
 const SKINS: ReadonlyArray<readonly [ThemeId, string]> = [
   ['reader', 'default'],
   ['datasheet', 'datasheet'],
@@ -21,11 +23,16 @@ const SKINS: ReadonlyArray<readonly [ThemeId, string]> = [
 const WIRE = { not_started: '未开始', in_progress: '学习中', completed: '已完成' } as const
 
 const lid = (g: string, n: number): string => `${g}-l${String(n).padStart(2, '0')}`
+/** The lecture id of a panel link (`/mea/L02` -> `mea-l02`), '' for anything else. */
+const idOfHref = (h: string | null): string => {
+  const m = /\/([a-z]+)\/L(\d+)$/.exec(h ?? '')
+  return m ? lid(m[1] as string, Number(m[2])) : ''
+}
 
-/** The seeded progress: MEA 1-3 read and 4 reading (6 lectures), DAT 1 read and nothing reading (2 lectures). */
+/** The seeded progress: MEA 1-3 read and 4 reading, DAT 1 read and nothing reading (every lecture of the two groups has a record). */
 const SEED: ReadonlyArray<readonly [string, number, number, boolean]> = [
-  ['mea', 6, 3, true],
-  ['dat', 2, 1, false],
+  ['mea', demoGroup('mea').lectures.length, 3, true],
+  ['dat', demoGroup('dat').lectures.length, 1, false],
 ]
 /** The 已读 cell of a seeded group page: `3 / ` for MEA. */
 const seededRead = (path: string): string | null => {
@@ -74,7 +81,7 @@ for (const [theme, impl] of SKINS) {
     // 1. no horizontal overflow, every group, desktop and phone, with one lecture tracked
     for (const [size, width] of [['desktop', 1280], ['phone', 375]] as const) {
       test(`1. no horizontal overflow in any group at ${width} px (${size}), one lecture tracked`, async ({ page }) => {
-        test.setTimeout(240_000)
+        test.setTimeout(60_000 * GROUPS.length)
         for (const g of GROUPS) {
           await openGroup(page, `/${g}/`, theme, impl, { width })
           await page.locator('.gp-lanes [data-lecture]').first().dblclick()
@@ -136,6 +143,84 @@ for (const [theme, impl] of SKINS) {
       const d = await page.locator('.gp-edges path.e-pre').first().getAttribute('d')
       expect(d?.includes('C'), `reader draws curves, datasheet right angles: ${d}`).toBe(theme === 'reader')
       await expect(page.locator('[data-gp-panel] .gp-p-tag')).toHaveText('正在追踪')
+    })
+
+    // 3b. S6Y: the relation panel's line boxes are the prototype's (the group-page prototype: body `14px/1.6` l.35,
+    // `.panel` 13px l.189, `.p-s li` padding 3px l.208, `.trk` font shorthand l.215, `summary` 12.5px + 2px padding l.218;
+    // measured with getComputedStyle at 1280 and 390 px): the page body is `.vp-doc`, whose prose rules set 2.2 on li/summary
+    for (const width of [1280, 390] as const) {
+      test(`3b. ${width}px: relation panel rows and the "earlier" summary have the prototype's sizes; its 追踪 moves the tracking`, async ({ page }) => {
+        await openGroup(page, '/mea/', theme, impl, { width, height: width === 390 ? 844 : 900 })
+        await chip(page, 'mea-l03').dblclick()
+        await expect(page.locator('.gp-lanes [data-role="self"][data-lecture="mea-l03"]')).toHaveCount(1)
+        const m = await page.evaluate(() => {
+          const p = document.querySelector('[data-gp-panel]')!
+          const li = p.querySelector('[data-gp-list="pre"] li')!
+          const sum = p.querySelector('details summary')!
+          return {
+            liLh: parseFloat(getComputedStyle(li).lineHeight),
+            liH: li.getBoundingClientRect().height,
+            trkH: li.querySelector('.trk')!.getBoundingClientRect().height,
+            sumH: sum.getBoundingClientRect().height,
+            sumLh: parseFloat(getComputedStyle(sum).lineHeight),
+          }
+        })
+        // prototype: reader li 25.5 / .trk 19, datasheet li 26 / .trk 20 (its heading font); li line 13 x 1.6; summary 12.5 x 1.6 + 4
+        const proto = theme === 'reader' ? { liH: 25.5, trkH: 19 } : { liH: 26, trkH: 20 }
+        const near = (a: number, e: number, what: string): void => expect(Math.abs(a - e), `${what}: ${a} vs prototype ${e}`).toBeLessThanOrEqual(1)
+        near(m.liLh, 20.8, 'row line-height')
+        near(m.liH, proto.liH, 'row height')
+        near(m.trkH, proto.trkH, '追踪 button height')
+        near(m.sumLh, 20, 'summary line-height')
+        near(m.sumH, 24, 'summary height')
+        // the panel's own 追踪 (a real click) moves the tracking to that prerequisite
+        await page.locator('[data-gp-panel] [data-gp-list="pre"] li .trk').first().click()
+        await expect(page.locator('.gp-lanes [data-role="self"][data-lecture="mea-l02"]')).toHaveCount(1)
+        await expect(page.locator('.gp-lanes.is-tracking')).toHaveCount(1)
+      })
+    }
+
+    // 3c. S6Y (audit-group #1 #4 #5 #7 #8): the rest of the `.vp-doc` leaks, measured against the group-page prototype
+    test('3c. the folds, the node id, the pin names, the hint and the section heads have the prototype sizes', async ({ page }) => {
+      await openGroup(page, '/mea/', theme, impl)
+      const near = (a: number, e: number, what: string): void => expect(Math.abs(a - e), `${what}: ${a} vs prototype ${e}`).toBeLessThanOrEqual(1)
+      // prototype `.panel .hint`: one block, padding 16px, lines split by <br> (no gap): the paragraphs + 32px
+      const hint = await page.locator('[data-gp-panel] .gp-hint').evaluate((el) => ({
+        h: el.getBoundingClientRect().height,
+        ps: [...el.querySelectorAll('p')].reduce((s, p) => s + p.getBoundingClientRect().height, 0),
+      }))
+      near(hint.h, hint.ps + 32, 'hint height = its lines + padding')
+      // prototype `.sec-head h2`: 21px, the body's 1.6 = 33.6px
+      const h2 = await page.locator('.gp-sec-head h2').first().evaluate((el) => parseFloat(getComputedStyle(el).lineHeight))
+      near(h2, 33.6, 'section head h2 line-height')
+      // prototype datasheet `.pin .pname`: regular weight (the link must not take `.vp-doc a` 500)
+      if (theme === 'datasheet') {
+        const w = await page.locator('[data-gp-map] .pin a .pname').evaluateAll((els) => [...new Set(els.map((e) => getComputedStyle(e).fontWeight))])
+        expect(w, 'pin name font-weight').toEqual(['400'])
+      }
+      await chip(page, 'mea-l03').dblclick()
+      await expect(chip(page, 'mea-l03')).toHaveAttribute('data-role', 'self')
+      // prototype `.p-s details summary` (说明 / 更早的先修 / 更远的后续): margin 0, 12.5px x 1.6, padding 2px 0 = 24px
+      const sums = await page.locator('[data-gp-panel] details > summary').evaluateAll((els) =>
+        els.map((e) => {
+          const cs = getComputedStyle(e)
+          return { h: e.getBoundingClientRect().height, mt: cs.marginTop, mb: cs.marginBottom, lh: parseFloat(cs.lineHeight) }
+        }),
+      )
+      expect(sums.length, 'MEA lecture 3 has 说明, 更早的先修 and 更远的后续').toBe(3)
+      for (const [i, s] of sums.entries()) {
+        expect([s.mt, s.mb], `summary ${i} margins`).toEqual(['0px', '0px'])
+        near(s.lh, 20, `summary ${i} line-height`)
+        near(s.h, 24, `summary ${i} height`)
+      }
+      // prototype `.p-m code`: 11.5px in the text colour, no frame, no background
+      const code = await page.locator('[data-gp-panel] .gp-p-m code').evaluate((el) => {
+        const cs = getComputedStyle(el)
+        return { fs: cs.fontSize, bw: cs.borderTopWidth, bg: cs.backgroundColor, pl: cs.paddingLeft, color: cs.color, text: getComputedStyle(el.closest('.gp-panel') as Element).color }
+      })
+      expect(code.fs, 'node id font-size').toBe('11.5px')
+      expect([code.bw, code.bg, code.pl], 'node id: no frame, no background, no padding').toEqual(['0px', 'rgba(0, 0, 0, 0)', '0px'])
+      expect(code.color, 'node id in the text colour').toBe(code.text)
     })
 
     // 4. cross-group jump
@@ -271,6 +356,232 @@ for (const [theme, impl] of SKINS) {
       await page.keyboard.press('Escape')
       await expect(page.locator('[data-gp-batchbar]')).toHaveCount(0)
     })
+
+    // ---- S6Y (audit-group package B and the user's decisions of 2026-11-23 21:47) ----
+
+    // 12. every in-group 追踪 of the panel moves the lock (real clicks): the direct lists and the 更早 / 更远 folds
+    test('12. the panel 追踪 of a prerequisite, a follow-up and of the 更早 / 更远 folds moves the tracking inside the group', async ({ page }) => {
+      await openGroup(page, '/mea/', theme, impl)
+      const p = page.locator('[data-gp-panel]')
+      const foldOf = (word: string) => p.locator('details').filter({ has: page.locator('summary', { hasText: word }) })
+      const lists = [
+        ['pre', p.locator('[data-gp-list="pre"] li')],
+        ['post', p.locator('[data-gp-list="post"] li')],
+        ['更早', foldOf('更早').locator('li')],
+        ['更远', foldOf('更远').locator('li')],
+      ] as const
+      for (const [what, items] of lists) {
+        await page.keyboard.press('Escape')
+        await chip(page, 'mea-l03').dblclick()
+        await expect(chip(page, 'mea-l03')).toHaveAttribute('data-role', 'self')
+        const item = items.first()
+        if (what === '更早' || what === '更远') await foldOf(what).locator('summary').click()
+        const target = idOfHref(await item.locator('a').getAttribute('href'))
+        expect(target, `${what}: the item links a MEA lecture`).toMatch(/^mea-l\d+$/)
+        await item.locator('button.trk').click()
+        await expect(chip(page, target), `${what}: 追踪 locks ${target}`).toHaveAttribute('data-role', 'self')
+        await expect(chip(page, 'mea-l03')).not.toHaveAttribute('data-role', 'self')
+        await expect(page.locator('[data-gp-panel] .gp-p-tag')).toHaveText('正在追踪')
+        await expect(page.locator('[data-gp-panel] .gp-p-t')).toContainText(`第${Number(target.slice(-2))}讲`)
+        await expect(page).toHaveURL(/\/mea\/$/)
+      }
+    })
+
+    // 13. audit #2: the prototype shows no text while tracking and a fixed toast after a mark; nothing pushes the lecture map
+    test('13. tracking and marking do not move the lecture map: the status line is for screen readers, a mark shows a floating toast', async ({ page }) => {
+      await openGroup(page, '/mea/', theme, impl, { seeded: true })
+      const top = (): Promise<number> => page.locator('.gp-lanes').evaluate((e) => e.getBoundingClientRect().top + window.scrollY)
+      const t0 = await top()
+      await chip(page, 'mea-l05').dblclick()
+      await expect(page.locator('[data-gp-live]')).toContainText('正在追踪')
+      expect(await top(), 'lecture map top after tracking').toBeCloseTo(t0, 0)
+      const live = await page.locator('[data-gp-live]').evaluate((e) => {
+        const r = e.getBoundingClientRect()
+        return { w: r.width, h: r.height, pos: getComputedStyle(e).position }
+      })
+      expect(live.pos, 'the status line is out of the flow').toBe('absolute')
+      expect(live.w <= 1 && live.h <= 1, `the status line is visually hidden: ${live.w}x${live.h}`).toBe(true)
+      await expect(page.locator('[data-gp-toast]'), 'no visible text while tracking (prototype)').toBeHidden()
+      await page.locator('[data-gp-act="mark"]').click()
+      await expect(page.locator('[data-gp-live]')).toContainText('已标为')
+      expect(await top(), 'lecture map top after marking').toBeCloseTo(t0, 0)
+      // prototype `.toast`: position fixed, bottom 24px, centred, gone after 2.6 s
+      const toast = page.locator('[data-gp-toast]')
+      await expect(toast).toBeVisible()
+      await expect(toast).toContainText('已标为')
+      const tb = await toast.evaluate((e) => ({ pos: getComputedStyle(e).position, bottom: window.innerHeight - e.getBoundingClientRect().bottom }))
+      expect(tb.pos).toBe('fixed')
+      expect(Math.abs(tb.bottom - 24), `toast ${tb.bottom}px above the bottom`).toBeLessThanOrEqual(1)
+      await expect(toast).toBeHidden({ timeout: 5000 })
+      expect(await top(), 'lecture map top after the toast and the status line are gone').toBeCloseTo(t0, 0)
+    })
+
+    // 14. audit #3: on a phone the panel sits on top of the map (sticky): a panel 追踪 brings the target below it, and does not
+    // scroll when the target is already in sight (prototype `scrollIntoView({ block: 'nearest' })`)
+    test('14. phone 390 px: a panel 追踪 leaves the target chip in the window and clear of the sticky panel; no scroll when it is in sight', async ({ page }) => {
+      await openGroup(page, '/mea/', theme, impl, { width: 390, height: 844 })
+      const geo = (id: string): Promise<{ top: number; bottom: number; panelBottom: number; vh: number; y: number }> =>
+        page.evaluate((x) => {
+          const c = (document.querySelector(`.gp-lanes [data-lecture="${x}"]`) as HTMLElement).getBoundingClientRect()
+          const p = (document.querySelector('[data-gp-panel]') as HTMLElement).getBoundingClientRect()
+          return { top: c.top, bottom: c.bottom, panelBottom: p.bottom, vh: window.innerHeight, y: window.scrollY }
+        }, id)
+      const clear = (g: { top: number; bottom: number; panelBottom: number; vh: number }): boolean => g.top >= g.panelBottom - 0.5 && g.bottom <= g.vh + 0.5
+      // the lecture at the end of the lanes, tracked with the keyboard, then its prerequisite from the panel
+      const ids = await page.locator('.gp-lanes a[data-lecture]').evaluateAll((els) => els.map((e) => (e as HTMLElement).dataset.lecture as string))
+      const last = ids[ids.length - 1] as string
+      await chip(page, last).focus()
+      await page.keyboard.press('Space')
+      await expect(chip(page, last)).toHaveAttribute('data-role', 'self')
+      const item = page.locator('[data-gp-panel] [data-gp-list="pre"] li').first()
+      const target = idOfHref(await item.locator('a').getAttribute('href'))
+      // the 6 MEA lectures draw a short page on which the browser cannot centre a chip; the owner's long groups can (test 7 does the same)
+      await page.addStyleTag({ content: '.gp-lanes { min-height: 1600px !important; }' })
+      await settle(page)
+      // put the target out of sight above the panel first, so the 追踪 has to scroll
+      await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight))
+      await settle(page)
+      await item.locator('button.trk').click()
+      await expect(chip(page, target)).toHaveAttribute('data-role', 'self')
+      await expect.poll(async () => clear(await geo(target)), { message: `${target} below the panel and in the window` }).toBe(true)
+      // a lecture already in sight below the panel: its 追踪 does not scroll
+      const items = page.locator('[data-gp-panel] [data-gp-list] li')
+      let tried = false
+      for (let i = 0; i < (await items.count()); i++) {
+        const id = idOfHref(await items.nth(i).locator('a').getAttribute('href'))
+        if (!/^mea-/.test(id)) continue
+        const g = await geo(id)
+        if (!clear(g)) continue
+        await items.nth(i).locator('button.trk').click()
+        await expect(chip(page, id)).toHaveAttribute('data-role', 'self')
+        await settle(page)
+        const after = await geo(id)
+        expect(after.y, `${id} was in sight: no scroll`).toBe(g.y)
+        tried = true
+        break
+      }
+      expect(tried, 'one related lecture was in sight below the panel').toBe(true)
+    })
+
+    // 15. decision 2: the pointer moving from a chip into the panel keeps the preview, so its buttons can be clicked
+    test('15. desktop: the preview stays while the pointer moves from a chip into the panel; its 追踪 locks that lecture', async ({ page }) => {
+      await openGroup(page, '/mea/', theme, impl)
+      // the lecture map at the top of the window, so the whole preview (taller than the hint) is in sight
+      await page.evaluate(() => {
+        const s = document.querySelector('[data-gp-section="lanes"]') as HTMLElement
+        window.scrollTo(0, window.scrollY + s.getBoundingClientRect().top - 72)
+      })
+      await settle(page)
+      const c = await chip(page, 'mea-l03').boundingBox()
+      const btn = page.locator('[data-gp-panel] [data-gp-act="track"]')
+      expect(c).not.toBeNull()
+      await page.mouse.move((c?.x ?? 0) + 10, (c?.y ?? 0) + 10)
+      await expect(page.locator('[data-gp-panel] .gp-p-tag')).toHaveText('预览')
+      // through the blank gap between the map and the panel, then onto the panel's 追踪 (one move each: no other chip on the way)
+      const lanes = await page.locator('.gp-lanes').boundingBox()
+      const panel = await page.locator('[data-gp-panel]').boundingBox()
+      const gapX = ((lanes?.x ?? 0) + (lanes?.width ?? 0) + (panel?.x ?? 0)) / 2
+      await page.mouse.move(gapX, (panel?.y ?? 0) + 20)
+      await page.waitForTimeout(60)
+      const b = await btn.boundingBox()
+      await page.mouse.move((b?.x ?? 0) + 6, (b?.y ?? 0) + 6)
+      await expect(page.locator('[data-gp-panel] .gp-p-t')).toContainText('第3讲')
+      await page.mouse.down()
+      await page.mouse.up()
+      await expect(chip(page, 'mea-l03')).toHaveAttribute('data-role', 'self')
+      await expect(page.locator('[data-gp-panel] .gp-p-tag')).toHaveText('正在追踪')
+      // leaving the panel for the page does not drop a lock; without a lock the preview goes back to the hint
+      await page.keyboard.press('Escape')
+      await page.mouse.move((c?.x ?? 0) + 10, (c?.y ?? 0) + 10)
+      await expect(page.locator('[data-gp-panel] .gp-p-tag')).toHaveText('预览')
+      await page.mouse.move((panel?.x ?? 0) + 40, (panel?.y ?? 0) + 40)
+      await expect(page.locator('[data-gp-panel] .gp-p-tag')).toHaveText('预览')
+      await page.mouse.move(4, 4)
+      await expect(page.locator('[data-gp-panel] .gp-hint')).toBeVisible()
+    })
+
+    // 16. decision 3: switching the lock scrolls the panel back to its top (the new lecture's title and actions in sight)
+    test('16. phone: a 追踪 from the bottom of the panel shows the new lecture from the top of the panel', async ({ page }) => {
+      await openGroup(page, '/mea/', theme, impl, { width: 390, height: 844 })
+      await chip(page, 'mea-l03').focus()
+      await page.keyboard.press('Space')
+      await expect(chip(page, 'mea-l03')).toHaveAttribute('data-role', 'self')
+      const panel = page.locator('[data-gp-panel]')
+      const later = page.locator('[data-gp-panel] details:has(> summary:text-matches("更远"))')
+      await later.locator('> summary').click()
+      const scrolled = await panel.evaluate((el) => {
+        el.scrollTop = el.scrollHeight
+        return el.scrollTop
+      })
+      expect(scrolled, 'the panel content is taller than the panel').toBeGreaterThan(0)
+      const item = later.locator('li').first()
+      const target = idOfHref(await item.locator('a').getAttribute('href'))
+      await item.locator('button.trk').click()
+      await expect(chip(page, target)).toHaveAttribute('data-role', 'self')
+      await expect.poll(() => panel.evaluate((el) => el.scrollTop)).toBe(0)
+    })
+
+    // 17. audit #10: the 说明 fold follows the 说明默认展开 setting for every lecture shown, not the last hand toggle
+    test('17. 说明 opened by hand on one lecture is back to the default (closed) on the next one', async ({ page }) => {
+      await openGroup(page, '/mea/', theme, impl)
+      await chip(page, 'mea-l04').dblclick()
+      await page.locator('[data-gp-pref="desc"]').uncheck()
+      const details = page.locator('.gp-p-desc details')
+      await expect(details).toHaveJSProperty('open', false)
+      await details.locator('summary').click()
+      await expect(details).toHaveJSProperty('open', true)
+      await chip(page, 'mea-l03').dblclick()
+      await expect(chip(page, 'mea-l03')).toHaveAttribute('data-role', 'self')
+      await expect(page.locator('.gp-p-desc details')).toHaveJSProperty('open', false)
+    })
+
+    // 18. decision 1 + cross-row corridor: a line on one row or between adjacent rows never runs across a non-endpoint chip
+    for (const width of [1280, 1440, 390] as const) {
+      test(`18. ${width}px: no same-row or adjacent-row line crosses a non-endpoint chip, whichever MEA lecture is tracked`, async ({ page }) => {
+        await openGroup(page, '/mea/', theme, impl, { width, height: width === 390 ? 844 : 900 })
+        const ids = await page.locator('.gp-lanes a[data-lecture]').evaluateAll((els) => els.map((e) => (e as HTMLElement).dataset.lecture as string))
+        for (const id of ids) {
+          await page.keyboard.press('Escape')
+          await chip(page, id).focus()
+          await page.keyboard.press('Space')
+          await expect(chip(page, id)).toHaveAttribute('data-role', 'self')
+          await settle(page)
+          const hits = await page.evaluate(() => {
+            const lanes = document.querySelector('.gp-lanes') as HTMLElement
+            const base = lanes.getBoundingClientRect()
+            const boxes = [...lanes.querySelectorAll<HTMLElement>('a[data-lecture]')].map((a) => {
+              const r = a.getBoundingClientRect()
+              return { id: a.dataset.lecture as string, x: r.left - base.left, y: r.top - base.top, w: r.width, h: r.height }
+            })
+            const near = (b: { x: number; y: number; w: number; h: number }, p: DOMPoint): boolean => p.x >= b.x - 1.5 && p.x <= b.x + b.w + 1.5 && p.y >= b.y - 1.5 && p.y <= b.y + b.h + 1.5
+            const out: string[] = []
+            for (const path of document.querySelectorAll<SVGPathElement>('.gp-edges path.e-pre, .gp-edges path.e-post')) {
+              const len = path.getTotalLength()
+              const a = path.getPointAtLength(0)
+              const z = path.getPointAtLength(len)
+              const ends = boxes.filter((b) => near(b, a) || near(b, z)).map((b) => b.id)
+              const eb = boxes.filter((b) => ends.includes(b.id))
+              if (eb.length !== 2) continue
+              // same row, or adjacent rows (no row of chips strictly between the two endpoints vertically)
+              const topY = Math.min(eb[0]!.y, eb[1]!.y)
+              const botY = Math.max(eb[0]!.y, eb[1]!.y)
+              if (boxes.some((x) => x.y > topY + 2 && x.y < botY - 2)) continue
+              for (let s = 0; s <= len; s += 2) {
+                const p = path.getPointAtLength(s)
+                // inside a chip by more than 2px (the arrow head and the stub touch their own chip only)
+                const b = boxes.find((x) => !ends.includes(x.id) && p.x > x.x + 2 && p.x < x.x + x.w - 2 && p.y > x.y + 2 && p.y < x.y + x.h - 2)
+                if (b) {
+                  out.push(`${ends.join('->')} crosses ${b.id} at ${Math.round(p.x)},${Math.round(p.y)}`)
+                  break
+                }
+              }
+            }
+            return out
+          })
+          expect(hits, `${id} tracked`).toEqual([])
+        }
+      })
+    }
   })
 }
 
@@ -310,7 +621,7 @@ test.describe('group page: content', () => {
     await expect(page.locator('.gp-lane-h')).toContainText('全部讲次')
     await expect(page.locator('[data-gp-panel]')).toContainText('没有先修数据')
     const lanes = await page.locator('.gp-lanes a[data-lecture]').evaluateAll((els) => els.map((e) => (e as HTMLElement).dataset.lecture))
-    expect(lanes).toEqual(['dat-l01', 'dat-l02'])
+    expect(lanes).toEqual(demoGroup('dat').lectures.map((n) => lectureId('dat', n)))
     await chip(page, 'dat-l01').hover()
     await expect(page.locator('[data-gp-panel] .gp-p-tag')).toHaveText('预览')
     await expect(page.locator('[data-gp-list]')).toHaveCount(0)
@@ -321,7 +632,7 @@ test.describe('group page: content', () => {
     await expect(page.locator('.gp-lane')).toHaveCount(1)
     const lanes = await page.locator('.gp-lanes a[data-lecture]').evaluateAll((els) => els.map((e) => (e as HTMLElement).dataset.lecture))
     const map = await page.locator('[data-gp-map] a[data-lecture]').evaluateAll((els) => els.map((e) => (e as HTMLElement).dataset.lecture))
-    expect(lanes).toEqual(['dat-l01', 'dat-l02'])
+    expect(lanes).toEqual(demoGroup('dat').lectures.map((n) => lectureId('dat', n)))
     expect(map).toEqual(lanes)
     await chip(page, 'dat-l01').hover()
     await expect(page.locator('[data-gp-panel] .gp-p-tag')).toHaveText('预览')

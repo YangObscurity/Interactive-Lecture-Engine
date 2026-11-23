@@ -16,7 +16,7 @@ import type { CanvasWorkerInput } from '../../docs/.vitepress/curriculum/canvasT
 import { buildCurriculumFromDisk } from '../../docs/.vitepress/curriculum/node.mts'
 import { splitCurriculum } from '../../docs/.vitepress/curriculum/split'
 import { resolveGroups } from '../../docs/.vitepress/groups-source.mts'
-import { DEMO_ACCESS_JSON, DEMO_ENV, demoContentPaths, setEnv, syncDemoDocs } from './demo-content'
+import { DEMO_ACCESS_JSON, DEMO_ENV, DEMO_GROUP_ORDER, demoContentPaths, demoInlineIds, setEnv, syncDemoDocs } from './demo-content'
 import type { DemoDocs } from './demo-content'
 
 function rng(seed: number): () => number {
@@ -160,8 +160,9 @@ describe('canvas layout worker', () => {
     delete process.env.LECTURE_BUILD_GROUPS
     delete process.env.LECTURE_ACCESS_JSON
     const { GROUPS, cur } = await demoCurriculum()
-    expect(GROUPS.map((g) => g.id)).toEqual(['MEA', 'LOG', 'PLN', 'DAT'])
-    expect(cur.stats.lectures).toBe(14)
+    expect(GROUPS.map((g) => g.id)).toEqual([...DEMO_GROUP_ORDER])
+    expect(cur.stats.lectures).toBe(cur.groups.reduce((n, g) => n + g.lectures.length, 0))
+    expect(cur.stats.lectures).toBeGreaterThanOrEqual(GROUPS.length * 4)
 
     const bundle = buildCanvasFromCurriculum(cur)
     expect(bundle.reader.offMap).toEqual([])
@@ -184,15 +185,16 @@ describe('canvas layout worker', () => {
   }, 30_000)
 
   it('access split: inline canvas excludes restricted ids and per-tier slice covers only inline + own tier', async () => {
-    // the access e2e tiers of the demo: MEA and LOG inline, PLN authenticated, DAT the gateway group staff
+    // the access e2e tiers of the demo: PLN authenticated, DAT the gateway group staff, every other group inline
     delete process.env.LECTURE_BUILD_GROUPS
     process.env.LECTURE_ACCESS_JSON = DEMO_ACCESS_JSON
     const { plan, cur: full } = await demoCurriculum()
+    const inlineIds = demoInlineIds(DEMO_GROUP_ORDER)
 
     const inlineCur = splitCurriculum(full, { tierOfGroup: (id) => plan.tierOfGroup[id] ?? plan.inlineTier, inlineTier: plan.inlineTier }).inline
     const inlineBundle = buildCanvasFromCurriculum(inlineCur)
     const inlineText = JSON.stringify(inlineBundle)
-    expect(inlineBundle.reader.groups.map((g) => g.id)).toEqual(['MEA', 'LOG'])
+    expect(inlineBundle.reader.groups.map((g) => g.id)).toEqual(inlineIds)
     expect(inlineText).not.toContain('PLN')
     expect(inlineText).not.toContain('pln-')
     expect(inlineText).not.toContain('DAT')
@@ -201,12 +203,12 @@ describe('canvas layout worker', () => {
     const authTier = plan.tiers.find((t) => t.groupIds.includes('PLN'))!.id
     const staffTier = plan.tiers.find((t) => t.groupIds.includes('DAT'))!.id
     const authSlice = canvasSliceOf(full, plan, authTier)
-    expect(authSlice.boardWithInline.reader.groups.map((g) => g.id).sort()).toEqual(['LOG', 'MEA', 'PLN'])
+    expect(authSlice.boardWithInline.reader.groups.map((g) => g.id).sort()).toEqual([...inlineIds, 'PLN'].sort())
     expect(JSON.stringify(authSlice)).not.toContain('dat-')
     expect(authSlice.tierOwn.reader.groups.map((g) => g.id)).toEqual(['PLN'])
 
     const staffSlice = canvasSliceOf(full, plan, staffTier)
-    expect(staffSlice.boardWithInline.reader.groups.map((g) => g.id).sort()).toEqual(['DAT', 'LOG', 'MEA'])
+    expect(staffSlice.boardWithInline.reader.groups.map((g) => g.id).sort()).toEqual([...inlineIds, 'DAT'].sort())
     expect(JSON.stringify(staffSlice)).not.toContain('pln-')
     expect(staffSlice.tierOwn.reader.groups.map((g) => g.id)).toEqual(['DAT'])
   }, 30_000)

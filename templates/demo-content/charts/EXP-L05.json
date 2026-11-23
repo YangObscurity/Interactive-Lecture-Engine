@@ -1,0 +1,10 @@
+{
+  "c1": {
+    "type": "echarts",
+    "code": "{\n  \"title\": {\n    \"text\": \"12 盆豆苗第 14 天的苗高（虚线为组平均）\",\n    \"left\": 8\n  },\n  \"tooltip\": {\n    \"trigger\": \"axis\"\n  },\n  \"legend\": {\n    \"bottom\": 0\n  },\n  \"grid\": {\n    \"top\": 72,\n    \"bottom\": 64,\n    \"left\": 56\n  },\n  \"xAxis\": {\n    \"type\": \"category\",\n    \"data\": [\n      \"第1盆\",\n      \"第2盆\",\n      \"第3盆\",\n      \"第4盆\",\n      \"第5盆\",\n      \"第6盆\"\n    ]\n  },\n  \"yAxis\": {\n    \"type\": \"value\",\n    \"name\": \"苗高 / cm\",\n    \"min\": 0\n  },\n  \"series\": [\n    {\n      \"name\": \"每天浇 50 mL\",\n      \"type\": \"bar\",\n      \"itemStyle\": {\n        \"color\": \"#65A30D\"\n      },\n      \"data\": [\n        12.1,\n        13.4,\n        11.8,\n        12.9,\n        13,\n        12.4\n      ],\n      \"markLine\": {\n        \"symbol\": \"none\",\n        \"label\": {\n          \"formatter\": \"平均 {c}\",\n          \"position\": \"insideEndTop\"\n        },\n        \"precision\": 1,\n        \"data\": [\n          {\n            \"type\": \"average\"\n          }\n        ]\n      }\n    },\n    {\n      \"name\": \"隔天浇 100 mL\",\n      \"type\": \"bar\",\n      \"itemStyle\": {\n        \"color\": \"#94A3B8\"\n      },\n      \"data\": [\n        11.2,\n        12,\n        10.6,\n        11.9,\n        11.5,\n        11\n      ],\n      \"markLine\": {\n        \"symbol\": \"none\",\n        \"label\": {\n          \"formatter\": \"平均 {c}\",\n          \"position\": \"insideEndTop\"\n        },\n        \"precision\": 1,\n        \"data\": [\n          {\n            \"type\": \"average\"\n          }\n        ]\n      }\n    }\n  ]\n}"
+  },
+  "c2": {
+    "type": "mermaid",
+    "code": "flowchart TB\n  A[\"观察到差距：每天浇的平均高约 1.2 cm\"] --> B([\"差距比波动大吗？\"])\n  B -->|否| B0[\"只能说：没测出差别\"]\n  B -->|是| C([\"设计排除了其他解释吗？\"])\n  C -->|否| C0[\"只能说：两者相关\"]\n  C -->|是，有对照与随机化| D([\"复现过吗？\"])\n  D -->|否| D0[\"本次条件下的因果证据\"]\n  D -->|是| E[\"更可靠的结论，仍限于实验条件\"]"
+  }
+}

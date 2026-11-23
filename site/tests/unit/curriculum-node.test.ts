@@ -113,7 +113,10 @@ describe('curriculum of the demo site (templates/demo-content synced into a temp
       expect(new Set(ids).size).toBe(ids.length)
       const onDisk = GROUPS.reduce((n, g) => n + fs.readdirSync(path.join(DOCS, g.dir)).filter((f) => /^L\d+\.md$/.test(f)).length, 0)
       expect(ids.length).toBe(onDisk)
-      expect(onDisk).toBe(14)
+      // every lecture file of the demo source (templates/demo-content/lectures/<dir>/Lnn.md) is in the synced docs
+      const inSource = GROUPS.reduce((n, g) => n + fs.readdirSync(path.join(demoContentPaths().lecturesDir, g.dir)).filter((f) => /^L\d+\.md$/.test(f)).length, 0)
+      expect(onDisk).toBe(inSource)
+      expect(onDisk).toBeGreaterThanOrEqual(GROUPS.length * 4)
       const known = new Set(ids)
       for (const [a, b] of root?.edges ?? []) {
         expect(known.has(a)).toBe(true)
@@ -121,10 +124,10 @@ describe('curriculum of the demo site (templates/demo-content synced into a temp
         expect(a).not.toBe(b)
       }
       expect(root?.stats).toEqual({ groups: GROUPS.length, lectures: onDisk, edges: root?.edges.length })
-      // the two categories of the demo, in first-appearance order, with their English names
+      // the three categories of the demo, in first-appearance order, with their English names
       const cats = [...new Map((root?.groups ?? []).map((g) => [g.category, g.catSlot])).entries()]
-      expect(cats).toEqual([['基础', 1], ['应用', 2]])
-      expect([...new Set(build.byLocale.en?.groups.map((g) => g.category))]).toEqual(['Foundations', 'Applications'])
+      expect(cats).toEqual([['基础', 1], ['应用', 2], ['方法', 3]])
+      expect([...new Set(build.byLocale.en?.groups.map((g) => g.category))]).toEqual(['Foundations', 'Applications', 'Methods'])
       // the lecture titles have no "第N讲" prefix left
       expect(root?.groups.flatMap((g) => g.lectures).filter((l) => /^第\s*\d+\s*讲/.test(l.title))).toEqual([])
       // MEA writes `phase:` in the frontmatter of L01 and L04: those start explicit phases running to the next one

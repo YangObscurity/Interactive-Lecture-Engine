@@ -108,14 +108,16 @@ describe('site module options (P3)', () => {
     expect(row('progress.endpoint')).toMatchObject({ module: 'progress', kind: 'site', type: 'path', default: '/api/db' })
     expect(row('progress.notionSync')).toMatchObject({ module: 'progress', kind: 'site', type: 'bool', default: false })
     expect(row('auth.sessionEndpoint')).toMatchObject({ module: 'auth', kind: 'site', type: 'path', default: '/api/auth/session' })
+    expect(row('auth.loginUrl')).toMatchObject({ module: 'auth', kind: 'site', type: 'url', default: '' })
     expect(optionsOf('progress').map(([name]) => name)).toEqual(['endpoint', 'notionSync'])
+    expect(optionsOf('auth').map(([name]) => name)).toEqual(['sessionEndpoint', 'loginUrl'])
     expect(optionsOf('graph')).toEqual([])
   })
 
   it('resolve to their defaults, with the adapter first, and match siteDefaults()', () => {
     const r = resolveModules({ theme: 'reader' })
     expect(r.progress).toEqual({ adapter: 'local', endpoint: '/api/db', notionSync: false })
-    expect(r.auth).toEqual({ adapter: 'none', sessionEndpoint: '/api/auth/session' })
+    expect(r.auth).toEqual({ adapter: 'none', sessionEndpoint: '/api/auth/session', loginUrl: '' })
     expect(Object.keys(r.progress)[0]).toBe('adapter')
     expect(r).toEqual(siteDefaults())
   })
@@ -132,7 +134,7 @@ describe('site module options (P3)', () => {
     const bad = { theme: 'reader', modules: { progress: { adapter: 'rest', sync: true } } } as unknown as LectureConfig
     expect(() => defineLectureConfig(bad)).toThrow(LectureConfigError)
     expect(() => defineLectureConfig(bad)).toThrow('lecture.config.ts: modules.progress.sync is not a setting (expected adapter, endpoint, notionSync)')
-    expect(() => defineLectureConfig({ theme: 'reader', modules: { auth: { endpoint: '/x' } } } as unknown as LectureConfig)).toThrow('(expected adapter, sessionEndpoint)')
+    expect(() => defineLectureConfig({ theme: 'reader', modules: { auth: { endpoint: '/x' } } } as unknown as LectureConfig)).toThrow('(expected adapter, sessionEndpoint, loginUrl)')
   })
 
   it('a value of the wrong type fails with a readable message', () => {
@@ -142,11 +144,21 @@ describe('site module options (P3)', () => {
     expect(() => defineLectureConfig(cfg({ progress: { endpoint: 'api/db' } }))).toThrow('modules.progress.endpoint = "api/db" must be a path starting with "/"')
     expect(() => defineLectureConfig(cfg({ progress: { endpoint: '/api db' } }))).toThrow(/must be a path starting with "\/" and without spaces, e.g. "\/api\/db"/)
     expect(() => defineLectureConfig(cfg({ auth: { sessionEndpoint: 42 } }))).toThrow(/modules.auth.sessionEndpoint = 42 must be a path/)
+    expect(() => defineLectureConfig(cfg({ auth: { loginUrl: 42 } }))).toThrow(/modules.auth.loginUrl = 42 must be a valid path starting with "\/" or an http\(s\) URL without spaces/)
+    expect(() => defineLectureConfig(cfg({ auth: { loginUrl: true } }))).toThrow(/must be a valid path starting with "\/" or an http\(s\) URL without spaces/)
+    expect(() => defineLectureConfig(cfg({ auth: { loginUrl: 'not-a-url' } }))).toThrow(/must be a valid path starting with "\/" or an http\(s\) URL without spaces/)
+    expect(() => defineLectureConfig(cfg({ auth: { loginUrl: 'ftp://auth.example.com' } }))).toThrow(/must be a valid path starting with "\/" or an http\(s\) URL without spaces/)
+    expect(() => defineLectureConfig(cfg({ auth: { loginUrl: '/login with spaces' } }))).toThrow(/must be a valid path starting with "\/" or an http\(s\) URL without spaces/)
+    expect(() => defineLectureConfig(cfg({ auth: { loginUrl: 'https://auth.example.com/ login' } }))).toThrow(/must be a valid path starting with "\/" or an http\(s\) URL without spaces/)
+    expect(() => defineLectureConfig(cfg({ auth: { loginUrl: '//evil.com/login' } }))).toThrow(/must be a valid path starting with "\/" or an http\(s\) URL without spaces/)
     expect(() => defineLectureConfig(cfg({ progress: { adapter: 'sqlite' } }))).toThrow(/local \| rest/)
   })
 
   it('valid options pass validation', () => {
-    expect(() => defineLectureConfig({ theme: 'reader', modules: { progress: { adapter: 'rest', endpoint: '/api/db', notionSync: true }, auth: { sessionEndpoint: '/api/auth/session' } } })).not.toThrow()
+    expect(() => defineLectureConfig({ theme: 'reader', modules: { progress: { adapter: 'rest', endpoint: '/api/db', notionSync: true }, auth: { sessionEndpoint: '/api/auth/session', loginUrl: '/login?rd={rd}' } } })).not.toThrow()
+    expect(() => defineLectureConfig({ theme: 'reader', modules: { auth: { loginUrl: 'https://auth.example.com/?rd={rd}' } } })).not.toThrow()
+    expect(() => defineLectureConfig({ theme: 'reader', modules: { auth: { loginUrl: 'http://127.0.0.1:9091/login?rd={rd}' } } })).not.toThrow()
+    expect(() => defineLectureConfig({ theme: 'reader', modules: { auth: { loginUrl: '' } } })).not.toThrow()
   })
 
   it('the site config resolves with the options filled in', () => {

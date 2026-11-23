@@ -111,14 +111,35 @@ watch(vp.transform, (tr) => emit('commit', tr))
   height: min(78vh, 760px);
   min-height: 420px;
   overflow: hidden;
-  background: var(--lec-bg);
+  /* the map's own surface (S6Y AH #6, home-canvas prototype `.stage { background: var(--canvas) }`): group boxes and
+     HUD chips in --lec-bg float on it; packs without --lec-canvas get --lec-bg from the compiler */
+  background: var(--lec-canvas, var(--lec-bg));
   border-top: 1px solid var(--lec-border);
   border-bottom: 1px solid var(--lec-border);
   touch-action: none;
   cursor: grab;
   user-select: none;
   -webkit-user-select: none;
+  /*
+   * S6Y (AH #5 #13): the home maps sit inside `.vp-doc`, so the lecture text's font (datasheet: the serif body font),
+   * its 17px size, VitePress' fixed `line-height: 24px` and the prose line-height of `.vp-doc p / li / summary` (2.212)
+   * leaked into the HUD, the hint, the legend, the buttons and the panels. The map chrome is UI: the home-canvas
+   * prototype's `.stage` inherits `body { font: 15px/1.6 var(--lec-font) }` (its UI sans-serif), which here is
+   * `--lec-font-heading`. The global prose rules stay as they are.
+   */
+  font-family: var(--lec-font-heading);
+  font-size: 15px;
+  font-weight: 400;
+  line-height: 1.6;
 }
+/*
+ * Undo the `.vp-doc` element rules inside the map. `.vp-doc .lec-map :where(…)` is (0,2,0): above `.vp-doc li` (0,1,1)
+ * and `.vp-doc li + li` (0,1,2), below a component's own scoped rule (`.cv-trace li[data-v-…]`, 0,2,1), which still wins.
+ */
+.vp-doc .lec-map :where(p, li, ul, ol, h5, summary) { line-height: inherit; }
+.vp-doc .lec-map :where(p, li, h5, summary, button) { margin: 0; }
+/* prototype `button { font: inherit }`; inputs too (their size is set by the component) */
+.lec-map :where(button, input, select, textarea) { font-family: inherit; }
 .lec-map.lec-map--dragging { cursor: grabbing; }
 .lec-map.lec-map--active { box-shadow: inset 0 0 0 2px var(--lec-accent); }
 .lec-map:focus-visible { outline: 2px solid var(--lec-accent); outline-offset: -2px; }

@@ -12,6 +12,8 @@ export interface FigureFrameMeta {
   type: string
   index: number
   lectureNo: number
+  /** build-time label (`data-fig-label`, figures/numbering.ts); when present it is shown as is */
+  label?: string
   title: string
   caption: string
 }
@@ -46,8 +48,9 @@ export function mountFigureFrame(fig: HTMLElement, meta: FigureFrameMeta, signal
       const frameProps = computed(() => {
         const lang = currentLang()
         const tagLabel = chartTagLabel(meta.type) || meta.type
-        const figureLabel =
-          meta.lectureNo > 0
+        const figureLabel = meta.label
+          ? meta.label
+          : meta.lectureNo > 0
             ? translate(lang, 'lecture.fig.numbered', { lec: meta.lectureNo, i: meta.index })
             : translate(lang, 'lecture.fig.plain', { i: meta.index })
         return {

@@ -18,6 +18,23 @@
         "page": 1
       },
       "sha256": "5f4340a7c92a"
+    },
+    {
+      "id": "log-venn",
+      "file": "log-venn.svg",
+      "kind": "figure",
+      "width": 520,
+      "height": 260,
+      "caption": {
+        "zh": "骰子点数 A 中的两个子集：偶数 B 与大于 4 的数 C，二者的交集是 {6}",
+        "en": "Two subsets of the die faces A: the even numbers B and the numbers greater than 4 C; they share only {6}"
+      },
+      "source": {
+        "paper": "Original Example Diagram",
+        "number": "Fig. 2",
+        "page": 1
+      },
+      "sha256": "f48a2324efa4"
     }
   ]
 }

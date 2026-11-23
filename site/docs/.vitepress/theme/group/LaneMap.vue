@@ -69,13 +69,15 @@ function redraw(): void {
   const me = props.lockId ? chip(props.lockId) : null
   if (me) {
     const mb = box(me, base)
+    // every chip of the map: a line between two chips of one row goes under the row when other chips sit between them
+    const all = [...el.querySelectorAll<HTMLElement>('[data-lecture]')].map((c) => box(c, base))
     for (const id of props.preIds) {
       const c = chip(id)
-      if (c) out.push({ kind: 'pre', d: edgePath(box(c, base), mb, props.edgeStyle) })
+      if (c) out.push({ kind: 'pre', d: edgePath(box(c, base), mb, props.edgeStyle, all) })
     }
     for (const id of props.postIds) {
       const c = chip(id)
-      if (c) out.push({ kind: 'post', d: edgePath(mb, box(c, base), props.edgeStyle) })
+      if (c) out.push({ kind: 'post', d: edgePath(mb, box(c, base), props.edgeStyle, all) })
     }
   }
   lines.value = out
@@ -110,9 +112,27 @@ onBeforeUnmount(() => {
 })
 watch(() => [props.lockId, props.edgeStyle, props.lanes, props.preIds, props.postIds] as const, schedule, { flush: 'post' })
 
-/** Scroll a lecture's chip into the middle of the window (the chip may be in a lane far below). */
-function reveal(id: string, smooth: boolean): void {
-  chip(id)?.scrollIntoView({ block: 'center', behavior: smooth ? 'smooth' : 'auto' })
+/**
+ * Bring a lecture's chip into the window. `center` (a double click in the group map, an arrival) puts it in the middle; `nearest`
+ * (a 追踪 in the panel, as the prototype's `trackId`) leaves it alone when it is already in sight. Both keep it out from under
+ * the panel when the panel sits above the map (narrow container, sticky): the chip goes to the middle of what the panel leaves.
+ */
+function reveal(id: string, smooth: boolean, block: 'center' | 'nearest' = 'center'): void {
+  const el = chip(id)
+  if (!el || typeof window === 'undefined') return
+  const r = el.getBoundingClientRect()
+  const nav = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--vp-nav-height')) || 64
+  const panel = root.value?.parentElement?.querySelector<HTMLElement>('[data-gp-panel]')
+  const pr = panel?.getBoundingClientRect()
+  // the panel covers the map's column only when it is stacked above it (same column, sticky in the window)
+  const covers = !!pr && pr.width > 0 && pr.left < r.right && pr.right > r.left && getComputedStyle(panel as HTMLElement).position === 'sticky'
+  // in sight now: below the panel as it is; after the scroll the panel is stuck at its sticky top (the chip is below it in the flow)
+  const nowTop = covers ? Math.max(nav, (pr as DOMRect).bottom) + 8 : nav + 8
+  const top = covers ? (parseFloat(getComputedStyle(panel as HTMLElement).top) || nav) + (pr as DOMRect).height + 8 : nav + 8
+  const bottom = window.innerHeight - 8
+  if (block === 'nearest' && r.top >= nowTop && r.bottom <= bottom) return
+  const want = block === 'nearest' ? (r.top < nowTop ? top : bottom - r.height) : top + Math.max(0, (bottom - top - r.height) / 2)
+  window.scrollTo({ top: window.scrollY + r.top - want, behavior: smooth ? 'smooth' : 'auto' })
 }
 defineExpose({ reveal, chip })
 

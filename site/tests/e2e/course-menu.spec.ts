@@ -15,6 +15,7 @@
 import type { Page } from '@playwright/test'
 import { test, expect, gotoAndSettle } from './fixtures'
 import { useTheme, type ThemeId } from './theme-helpers'
+import { DEMO_GROUP_IDS } from './demo'
 
 const SKINS: ReadonlyArray<readonly [ThemeId, string]> = [
   ['reader', 'default'],
@@ -112,7 +113,7 @@ for (const [theme, expectedImpl] of SKINS) {
       // Two columns present: groups on left, lectures on right
       const groupLinks = page.locator('.cm-groups li a')
       const groupCount = await groupLinks.count()
-      expect(groupCount).toBe(4) // the demo content has 4 groups
+      expect(groupCount).toBe(DEMO_GROUP_IDS.length) // one row per group of the demo content
 
       // Initial active group on /pln/L02 is PLN
       const activeGroupLink = page.locator('.cm-groups li a.is-active')

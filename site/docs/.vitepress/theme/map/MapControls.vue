@@ -23,6 +23,8 @@ const { t } = useT()
   min-width: 30px;
   height: 30px;
   padding: 0 10px;
+  /* prototype `button { font: inherit }` (15px of the stage), not the browser's 13.33px control font (AH #13) */
+  font: inherit;
   color: var(--lec-text);
   background: var(--lec-bg);
   border: 1px solid var(--lec-border);

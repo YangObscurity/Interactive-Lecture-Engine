@@ -1,0 +1,6 @@
+{
+  "c1": {
+    "type": "echarts",
+    "code": "{\n  \"title\": {\n    \"text\": \"标准误随样本量变化（s = 4.0 g）\",\n    \"left\": 8\n  },\n  \"tooltip\": {\n    \"trigger\": \"axis\"\n  },\n  \"grid\": {\n    \"top\": 64,\n    \"bottom\": 56,\n    \"left\": 56\n  },\n  \"xAxis\": {\n    \"type\": \"category\",\n    \"name\": \"样本量 n\",\n    \"nameLocation\": \"middle\",\n    \"nameGap\": 32,\n    \"data\": [\n      \"4\",\n      \"9\",\n      \"16\",\n      \"25\",\n      \"36\",\n      \"49\",\n      \"64\",\n      \"81\",\n      \"100\"\n    ]\n  },\n  \"yAxis\": {\n    \"type\": \"value\",\n    \"name\": \"标准误（g）\"\n  },\n  \"series\": [\n    {\n      \"name\": \"SE = s/√n\",\n      \"type\": \"line\",\n      \"data\": [\n        2,\n        1.33,\n        1,\n        0.8,\n        0.67,\n        0.57,\n        0.5,\n        0.44,\n        0.4\n      ]\n    }\n  ]\n}"
+  }
+}

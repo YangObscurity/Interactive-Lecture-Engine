@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="480" height="240" viewBox="0 0 480 240" font-family="sans-serif">
+  <rect x="20" y="14" width="300" height="120" fill="#F8FAFC" stroke="#CBD5E1"/>
+  <line x1="40" y1="120" x2="300" y2="120" stroke="#334155"/>
+  <line x1="40" y1="24" x2="40" y2="120" stroke="#334155"/>
+  <polyline points="70,82.5 125,58.5 180,27.8 235,33 290,79.5" fill="none" stroke="#EA580C" stroke-width="2"/>
+  <polyline points="70,89.3 125,75 180,57 235,60.8 290,85.5" fill="none" stroke="#2563EB" stroke-width="2"/>
+  <text x="20" y="158" font-size="13" font-weight="bold" fill="#1E293B">图 1　单一长队在每个时段都等得更短，高峰时差距最大。</text>
+  <g font-size="12" fill="#334155">
+    <text x="20" y="180">橙线为各窗口分别排队，蓝线为单一长队；</text>
+    <text x="20" y="200">每点为该时段的平均值，两周共 812 人。</text>
+    <text x="20" y="220">纵轴单位：分钟。</text>
+  </g>
+  <g stroke="#475569"><line x1="362" y1="154" x2="368" y2="154"/><line x1="362" y1="176" x2="368" y2="176"/><line x1="362" y1="196" x2="368" y2="196"/><line x1="362" y1="216" x2="368" y2="216"/></g>
+  <g font-size="12" fill="#475569">
+    <text x="372" y="158">① 编号与结论句</text>
+    <text x="372" y="180">② 画了什么</text>
+    <text x="372" y="200">③ 数据与方法</text>
+    <text x="372" y="220">④ 单位与记号</text>
+  </g>
+</svg>

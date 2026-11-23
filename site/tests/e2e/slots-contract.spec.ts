@@ -241,9 +241,11 @@ for (const [theme, impl] of THEMES) {
         document.querySelectorAll('figure.chart .chart-body').forEach((b, i) => ((b as HTMLElement).dataset.keepId = String(i)))
       })
 
-      // 3. QuizHeader above every details.details.custom-block, never inside > :not(summary)
-      const quizDetails = page.locator('.vp-doc details.details.custom-block')
-      const quizCount = await quizDetails.count()
+      // 3. QuizHeader above every top-level details.details.custom-block (a quiz card), never inside > :not(summary);
+      //    a details nested in a card (the `::: details 答案` of a self-test) is part of that card (reading/quizCards.ts)
+      const quizCount = await page
+        .locator('.vp-doc details.details.custom-block')
+        .evaluateAll((els) => els.filter((d) => !d.parentElement?.closest('details.details.custom-block')).length)
       expect(quizCount).toBeGreaterThan(0)
       await expect(page.locator(`.vp-doc [data-slot="QuizHeader"][data-slot-impl="${impl}"]`)).toHaveCount(quizCount)
       expect(await page.locator('.vp-doc details.details [data-slot="QuizHeader"]').count()).toBe(0)

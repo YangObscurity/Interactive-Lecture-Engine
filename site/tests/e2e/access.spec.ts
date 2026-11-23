@@ -2,7 +2,7 @@
  * P3b WP-A2: access tiers in the browser (docs-dev/ACCESS.md).
  *
  * Runs only in the `access` Playwright project, against a dist built by `npm run build:e2e:access`
- * (demo content templates/demo-content, access.e2e.json: MEA and LOG inline, PLN `authenticated`, DAT for the gateway group `staff`), served by tests/e2e/access-server.mjs.
+ * (demo content templates/demo-content, access.e2e.json: PLN `authenticated`, DAT for the gateway group `staff`, every other group inline), served by tests/e2e/access-server.mjs.
  * The authenticating gateway is simulated with `context.route`: a denied path answers 403, everything else goes through.
  *
  *   anonymous  : `/_access/authenticated/**`, `/_access/grp-*` and the pages and page chunks of PLN and DAT are denied
@@ -14,6 +14,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { test, expect, gotoAndSettle } from './fixtures'
 import type { Page } from '@playwright/test'
+import { DEMO_DIR, DEMO_EDGES, DEMO_GROUPS, DEMO_INLINE_IDS, demoGroup } from './demo'
 
 const SITE = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
 const ROOT = path.join(SITE, '.access-e2e')
@@ -27,14 +28,21 @@ interface ManifestTier {
 const manifest = JSON.parse(fs.readFileSync(path.join(ROOT, 'access-manifest.json'), 'utf8')) as { tiers: ManifestTier[] }
 const tierOf = (groupId: string): string => manifest.tiers.find((t) => t.groupIds.includes(groupId))?.id as string
 const TIER = { PLN: tierOf('PLN'), DAT: tierOf('DAT') }
-const DIR = { MEA: 'mea', LOG: 'log', PLN: 'pln', DAT: 'dat' } as const
-type GroupId = keyof typeof DIR
-const ALL: GroupId[] = ['MEA', 'LOG', 'PLN', 'DAT']
+/** group id -> folder, every group of the demo content (groups.ts order) */
+const DIR: ReadonlyMap<string, string> = new Map(DEMO_GROUPS.map((g) => [g.id, g.dir]))
+const dirOf = (g: string): string => {
+  const d = DIR.get(g)
+  if (d === undefined) throw new Error(`demo content has no group ${g}`)
+  return d
+}
+type GroupId = string
+const ALL: GroupId[] = DEMO_GROUPS.map((g) => g.id)
 /** The groups without a restricted tier (access.e2e.json of the demo content). */
-const INLINE: GroupId[] = ['MEA', 'LOG']
+const INLINE: GroupId[] = DEMO_INLINE_IDS
 
 type Who = 'anonymous' | 'signed-in' | 'staff'
-const ALLOWED: Record<Who, GroupId[]> = { anonymous: INLINE, 'signed-in': [...INLINE, 'PLN'], staff: ALL }
+// in groups.ts order, as the home page lists them (S6X: PLN sits between GEO and VIS)
+const ALLOWED: Record<Who, GroupId[]> = { anonymous: INLINE, 'signed-in': ALL.filter((g) => INLINE.includes(g) || g === 'PLN'), staff: ALL }
 
 /** The paths the simulated gateway refuses for each reader. */
 const DENIED: Record<Who, RegExp[]> = {
@@ -50,7 +58,7 @@ interface Slice {
 }
 const slice = (g: 'PLN' | 'DAT') => readJson<Slice>('_access', TIER[g], 'site-data.json')
 const tierGraph = (g: 'PLN' | 'DAT') => readJson<unknown[]>('_access', TIER[g], 'graph.json')
-const lectureFiles = (g: GroupId): string[] => fs.readdirSync(path.join(DIST, DIR[g])).filter((f) => /^L\d+\.html$/.test(f)).sort()
+const lectureFiles = (g: GroupId): string[] => fs.readdirSync(path.join(DIST, dirOf(g))).filter((f) => /^L\d+\.html$/.test(f)).sort()
 
 /** What the page must show for a reader: inline numbers (read from the SSR home page) plus the allowed tiers' slices. */
 function expectedHome(who: Who, inlineHome: { lectures: number; charts: number }) {
@@ -114,6 +122,24 @@ async function searchLinks(page: Page, query: string): Promise<string[]> {
 
 const SEARCH_WORD: Record<'PLN' | 'DAT', string> = { PLN: '关键路径', DAT: '汇总' }
 
+/** `vis-l01` -> its page `/vis/L01`, its group id and its title without the "第N讲 · " prefix (from the demo source) */
+function demoLecture(id: string): { page: string; group: string; title: string } {
+  const [dir, l] = id.split('-l') as [string, string]
+  const n = l.padStart(2, '0')
+  const src = fs.readFileSync(path.join(DEMO_DIR, 'lectures', dir, `L${n}.md`), 'utf8')
+  const title = (/^title:\s*"?(.*?)"?\s*$/m.exec(src)?.[1] ?? '').replace(/^\s*第\s*\d+\s*讲\s*[·:：—-]\s*/, '')
+  return { page: `/${dir}/L${n}`, group: demoGroup(dir).id, title }
+}
+
+/**
+ * The prerequisite edges between a lecture the reader may read and one they may not (S6X: vis/L01 and exp/L04 require
+ * DAT lectures; MEA L04, LOG L02 and EXP L04 lead on to PLN or DAT lectures), as [readable, hidden] lecture ids.
+ */
+function edgesIntoHidden(allowed: readonly string[]): Array<[string, string]> {
+  const can = (id: string): boolean => allowed.includes(demoLecture(id).group)
+  return DEMO_EDGES.flatMap(([a, b]): Array<[string, string]> => (can(a) && !can(b) ? [[a, b]] : can(b) && !can(a) ? [[b, a]] : []))
+}
+
 for (const who of ['anonymous', 'signed-in', 'staff'] as const) {
   test.describe(`gateway: ${who}`, () => {
     const allowed = ALLOWED[who]
@@ -141,7 +167,7 @@ for (const who of ['anonymous', 'signed-in', 'staff'] as const) {
       // ... and no lecture row of a denied group, even with every branch open
       await page.locator('.am-expand button[data-x="all"]').click()
       const atlasLectures = await page.locator('.am-lec').evaluateAll((els) => els.map((e) => e.getAttribute('data-node') ?? ''))
-      const dirs = want.groups.map((g) => DIR[g].split('/').pop())
+      const dirs = want.groups.map((g) => dirOf(g).split('/').pop())
       expect(atlasLectures.length).toBeGreaterThan(0)
       for (const id of atlasLectures) expect(dirs.some((d) => id.startsWith(`${d}-l`)), `${id} belongs to a readable group`).toBe(true)
       await expect.poll(() => statNumbers(page)).toEqual([want.groups.length, want.lectures, want.charts, want.nodes])
@@ -152,12 +178,12 @@ for (const who of ['anonymous', 'signed-in', 'staff'] as const) {
         await cmenu.click()
         const navLinks = page.locator('.cm-groups li a')
         await expect(navLinks).toHaveCount(want.groups.length)
-        expect(await navLinks.evaluateAll((els) => els.map((e) => (e as HTMLAnchorElement).getAttribute('href')))).toEqual(want.groups.map((g) => `/${DIR[g]}/`))
+        expect(await navLinks.evaluateAll((els) => els.map((e) => (e as HTMLAnchorElement).getAttribute('href')))).toEqual(want.groups.map((g) => `/${dirOf(g)}/`))
         await cmenu.click()
       } else {
         const navLinks = page.locator('.VPNavBarMenuGroup .VPMenuLink a')
         await expect(navLinks).toHaveCount(want.groups.length)
-        expect(await navLinks.evaluateAll((els) => els.map((e) => (e as HTMLAnchorElement).getAttribute('href')))).toEqual(want.groups.map((g) => `/${DIR[g]}/`))
+        expect(await navLinks.evaluateAll((els) => els.map((e) => (e as HTMLAnchorElement).getAttribute('href')))).toEqual(want.groups.map((g) => `/${dirOf(g)}/`))
       }
 
       // merged graph: the inline graph plus the graph.json of the allowed tiers, nothing of the others
@@ -174,7 +200,7 @@ for (const who of ['anonymous', 'signed-in', 'staff'] as const) {
       )
       expect(canvasGroups).toEqual([...allowed].sort())
       for (const deniedGroup of ALL.filter((g) => !allowed.includes(g))) {
-        await expect(page.locator(`.cv-node[data-id^="${DIR[deniedGroup]}-"]`)).toHaveCount(0)
+        await expect(page.locator(`.cv-node[data-id^="${dirOf(deniedGroup)}-"]`)).toHaveCount(0)
       }
       const canvases = gw.requested.filter((p) => p.endsWith('/canvas.json')).sort()
       const expectCanvases = allowed.filter((g): g is 'PLN' | 'DAT' => !INLINE.includes(g)).map((g) => `/_access/${TIER[g]}/canvas.json`).sort()
@@ -182,7 +208,7 @@ for (const who of ['anonymous', 'signed-in', 'staff'] as const) {
 
       // sidebar of an allowed lecture page (restricted tiers: it appears when the slice has arrived)
       for (const g of allowed) {
-        await gotoAndSettle(page, `/${DIR[g]}/L01`)
+        await gotoAndSettle(page, `/${dirOf(g)}/L01`)
         const count = lectureFiles(g).length
         await expect(page.locator('.VPSidebar a.link')).toHaveCount(count)
         await expect(page.locator('.VPSidebar .VPSidebarItem.level-0 > .item .text').first()).toContainText(g)
@@ -193,10 +219,10 @@ for (const who of ['anonymous', 'signed-in', 'staff'] as const) {
       await page.waitForSelector('html[data-hydrated="1"]')
       for (const g of ['PLN', 'DAT'] as const) {
         const links = await searchLinks(page, SEARCH_WORD[g])
-        const mine = links.filter((h) => h.startsWith(`/${DIR[g]}/`))
+        const mine = links.filter((h) => h.startsWith(`/${dirOf(g)}/`))
         if (allowed.includes(g)) expect(mine.length, `search for ${SEARCH_WORD[g]} finds ${g}`).toBeGreaterThan(0)
         else expect(mine, `search for ${SEARCH_WORD[g]} must not find ${g}`).toEqual([])
-        for (const other of ['PLN', 'DAT'] as const) if (!allowed.includes(other)) expect(links.filter((h) => h.startsWith(`/${DIR[other]}/`))).toEqual([])
+        for (const other of ['PLN', 'DAT'] as const) if (!allowed.includes(other)) expect(links.filter((h) => h.startsWith(`/${dirOf(other)}/`))).toEqual([])
       }
 
       // nothing outside the allowed tiers was ever delivered
@@ -206,6 +232,35 @@ for (const who of ['anonymous', 'signed-in', 'staff'] as const) {
       expect(hydration).toEqual([])
       expect(pageErrors).toEqual([])
     })
+
+    const hiddenEdges = edgesIntoHidden(allowed)
+    if (hiddenEdges.length > 0) {
+      test('a readable lecture next to a hidden one (prerequisite or follow-up): its page and group page name no hidden title and link nowhere into it', async ({ page, request, pageErrors }) => {
+        const hydration = watchHydration(page)
+        await installGateway(page, who)
+        const visible = [...new Set(hiddenEdges.map(([v]) => v))]
+        expect(visible, 'vis/L01 requires dat/L02').toContain('vis-l01')
+        for (const v of visible) {
+          const me = demoLecture(v)
+          const hidden = hiddenEdges.filter(([x]) => x === v).map(([, h]) => demoLecture(h))
+          const leaks = (html: string): string[] =>
+            hidden.flatMap((h) => [
+              ...(html.includes(escapeHtml(h.title)) || html.includes(h.title) ? [`title of ${h.page} "${h.title}"`] : []),
+              ...(new RegExp(`href="${h.page}(\\.html)?["#?]`).test(html) ? [`link to ${h.page}`] : []),
+            ])
+          for (const url of [me.page, me.page.replace(/L\d+$/, '')]) {
+            const res = await request.get(url)
+            expect(res.status(), url).toBe(200)
+            expect(leaks(await res.text()), `server HTML of ${url}`).toEqual([])
+            await gotoAndSettle(page, url)
+            await page.waitForSelector('html[data-hydrated="1"]')
+            expect(leaks(await page.content()), `page ${url} after hydration`).toEqual([])
+          }
+        }
+        expect(hydration).toEqual([])
+        expect(pageErrors).toEqual([])
+      })
+    }
 
     if (who === 'anonymous') {
       test('denied pages answer 403 and the home page never asks for a denied page chunk', async ({ page, pageErrors }) => {
@@ -349,7 +404,7 @@ test.describe('curriculum slices', () => {
         expect(s.groups[0]?.value.title).toBe(locale === 'root' ? site?.title : EN_TITLE[g])
         expect(s.groups[0]?.value.lectures.length).toBe(lectureFiles(g).length)
         // every edge has an end in this tier, and the lecture ids of the tier follow the lecture folder
-        const mine = (id: string): boolean => id.startsWith(`${DIR[g]}-l`)
+        const mine = (id: string): boolean => id.startsWith(`${dirOf(g)}-l`)
         expect(s.edges.length).toBeGreaterThan(0)
         expect(s.edges.every(([a, b]) => mine(a) || mine(b))).toBe(true)
         expect(s.groups[0]?.value.lectures.every((l) => mine(l.id))).toBe(true)

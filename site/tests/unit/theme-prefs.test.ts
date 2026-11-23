@@ -201,4 +201,28 @@ describe('headScript: first-paint custom tint, theme layer & group-desc default 
       }
     }
   })
+
+  it('respects explicit light override when defaultTint is sepia and keeps headScript in sync with prefAttrs', () => {
+    const rtWithSepia: ThemeRuntime = { ...RT, defaultTheme: 'reader', defaultTint: 'sepia', defaultBase: 'sepia' }
+    localStorage.setItem(PREFS_STORAGE_KEY, JSON.stringify({ theme: 'reader', tint: 'light' }))
+    clearAttrs()
+    new Function(headScript(rtWithSepia))()
+    expect(snapshot()['data-lec-tint']).toBeNull()
+    expect(prefAttrs(readPrefs(), rtWithSepia)['data-lec-tint']).toBeNull()
+
+    // datasheet with defaultTint still omits tint in both headScript and prefAttrs
+    localStorage.setItem(PREFS_STORAGE_KEY, JSON.stringify({ theme: 'datasheet' }))
+    clearAttrs()
+    new Function(headScript(rtWithSepia))()
+    expect(snapshot()['data-lec-tint']).toBeNull()
+    expect(prefAttrs(readPrefs(), rtWithSepia)['data-lec-tint']).toBeNull()
+
+    // defaultBase dark sets html.dark when appearance is unset
+    const rtDark: ThemeRuntime = { ...RT, defaultTheme: 'reader', defaultBase: 'dark' }
+    document.documentElement.classList.remove('dark')
+    localStorage.removeItem(PREFS_STORAGE_KEY)
+    new Function(headScript(rtDark))()
+    expect(document.documentElement.classList.contains('dark')).toBe(true)
+    document.documentElement.classList.remove('dark')
+  })
 })

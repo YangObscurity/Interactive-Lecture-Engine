@@ -1,18 +1,28 @@
 <script setup lang="ts">
 /**
- * PageLook.vue — 外观与模块: the site's default theme (site.config.ts, read-only here) with a live preview on this device,
- * and the site modules with their settings, grouped and folded per module; secrets show only whether they are set.
- * Local author mode writes changed variables of one module to the repository .env in one go.
+ * PageLook.vue — 外观与模块: the site's default theme (skin & reading tints with live WCAG contrast checking
+ * and theme.json persistence in local author mode), live device preview, and the site modules with their
+ * settings, grouped and folded per module; secrets show only whether they are set.
  */
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { useData } from 'vitepress'
 import { THEME_RUNTIME } from 'virtual:lecture-theme'
 import { useT } from '../../../i18n/useT.ts'
+import type { MessageKey } from '../../../i18n/index.ts'
 import { runDevDashboardProbe, saveDevEnvSetting, type DevDashboardStatus, type DevSettingSummary } from '../../api/admin'
-import { validateThemeImportJson } from '../../tokens/customTint'
+import { fetchThemeConfig, saveThemeConfig, type ThemeView } from '../../api/devDashboard'
+import { contrast } from '../../tokens/color'
+import {
+  DEFAULT_CUSTOM_HEX,
+  isDarkColor,
+  READING_BASES,
+  SKIN_PALETTES,
+  validateThemeImportJson,
+} from '../../tokens/customTint'
 import { applyPrefs, prefAttrs, readPrefs, writePrefs, type ReaderPrefs } from '../../tokens/prefs'
 import DbHead from '../DbHead.vue'
 import DbTabs from '../DbTabs.vue'
+import { shortDateTime } from '../dashboardData'
 import { dashboardState, isReadOnly, registerModel, say, tabOf, touchModels, type DashboardPageId } from '../useDashboard'
 
 const props = defineProps<{ status: DevDashboardStatus | null }>()
@@ -20,14 +30,14 @@ const emit = defineEmits<{ tab: [tab: string]; status: [s: DevDashboardStatus]; 
 const { t, lang } = useT()
 const { theme, isDark } = useData<{ lectureModules?: Record<string, Record<string, unknown>> }>()
 
+// ---- Device-level preview (ReaderPrefs in localStorage) ----
 const prefs = ref<ReaderPrefs>({})
 const themeList = THEME_RUNTIME.themes
 const activeTheme = computed(() => prefAttrs(prefs.value, THEME_RUNTIME)['data-lec-theme'] ?? THEME_RUNTIME.defaultTheme)
 const tints = computed(() => themeList.find((th) => th.id === 'reader')?.tints ?? [])
+const TINT_NAME: Record<string, MessageKey> = { light: 'settings.tintLight', sepia: 'settings.tintSepia', green: 'settings.tintGreen', dark: 'settings.tintDark' }
+const tintName = (id: string): string => (TINT_NAME[id] ? t(TINT_NAME[id] as MessageKey) : id)
 const activeTint = computed(() => (isDark.value ? 'dark' : prefAttrs(prefs.value, THEME_RUNTIME)['data-lec-tint'] ?? 'light'))
-const jsonInput = ref('')
-const jsonMsg = ref('')
-const jsonErr = ref(false)
 
 function selectTheme(id: string): void {
   prefs.value = writePrefs({ theme: id })
@@ -38,12 +48,198 @@ function selectTint(tint: string): void {
   prefs.value = writePrefs({ theme: 'reader', tint })
   applyPrefs(document.documentElement, prefs.value, THEME_RUNTIME)
 }
+
+// ---- JSON import validation ----
+const jsonInput = ref('')
+const jsonMsg = ref('')
+const jsonErr = ref(false)
+
 function validateJson(): void {
   const res = validateThemeImportJson(jsonInput.value)
   jsonErr.value = !res.ok
   jsonMsg.value = res.ok ? t('dsh.lk.jsonOk', { n: res.tokenCount }) : 'message' in res ? res.message : 'invalid'
 }
 
+// ---- Site-level theme.json & reading tints (S6Z-3) ----
+const themeConfig = ref<ThemeView | null>(null)
+const draftSkin = ref<'reader' | 'datasheet'>('reader')
+const draftBase = ref<'paper' | 'sepia' | 'green' | 'dark' | 'custom'>('paper')
+const draftCustomHex = ref(DEFAULT_CUSTOM_HEX)
+const savingTheme = ref(false)
+const themeSaveStatus = ref('')
+const themeSavedNote = ref('')
+
+const validHexRe = /^#[0-9a-fA-F]{6}$/
+const isValidHex = computed(() => validHexRe.test(draftCustomHex.value.trim()))
+
+const currentBgHex = computed(() => {
+  if (draftBase.value === 'custom') {
+    return isValidHex.value ? draftCustomHex.value.trim().toUpperCase() : ''
+  }
+  return READING_BASES.find((b) => b.id === draftBase.value)?.hex ?? READING_BASES[0].hex
+})
+
+const currentSurfaceHex = computed(() => {
+  if (draftBase.value === 'custom') {
+    return currentBgHex.value
+  }
+  return READING_BASES.find((b) => b.id === draftBase.value)?.surface ?? READING_BASES[0].surface
+})
+
+const isDarkBase = computed(() => {
+  const bg = currentBgHex.value
+  if (!bg) return false
+  if (draftBase.value === 'dark') return true
+  if (draftBase.value === 'custom') {
+    return isDarkColor(bg)
+  }
+  return false
+})
+
+const activeSkinPalette = computed(() => {
+  const skin = draftSkin.value === 'datasheet' ? 'datasheet' : 'reader'
+  const mode = isDarkBase.value ? 'dark' : 'light'
+  return SKIN_PALETTES[skin]?.[mode] ?? SKIN_PALETTES.reader[mode]
+})
+
+interface ContrastRow {
+  key: string
+  name: string
+  color: string
+  minRatio: number
+  ratio: number
+  pass: boolean
+}
+
+const contrastRows = computed<ContrastRow[] | null>(() => {
+  const bg = currentBgHex.value
+  if (!bg) return null
+  const p = activeSkinPalette.value
+  const checks: Array<{ key: string; nameKey: MessageKey; color: string; min: number }> = [
+    { key: 'text', nameKey: 'dsh.lk.rowText', color: p.text, min: 4.5 },
+    { key: 'text-muted', nameKey: 'dsh.lk.rowMuted', color: p['text-muted'], min: 4.5 },
+    { key: 'accent', nameKey: 'dsh.lk.rowAccent', color: p.accent, min: 4.5 },
+    { key: 'danger', nameKey: 'dsh.lk.rowDanger', color: p.danger, min: 3.0 },
+  ]
+  return checks.map((c) => {
+    const ratio = contrast(bg, c.color)
+    return {
+      key: c.key,
+      name: t(c.nameKey),
+      color: c.color,
+      minRatio: c.min,
+      ratio,
+      pass: ratio >= c.min,
+    }
+  })
+})
+
+const contrastOk = computed(() => {
+  if (draftBase.value === 'custom' && !isValidHex.value) return false
+  const rows = contrastRows.value
+  return !!rows && rows.every((r) => r.pass)
+})
+
+const firstContrastFailure = computed(() => {
+  if (draftBase.value === 'custom' && !isValidHex.value) {
+    return t('dsh.lk.invalidHex')
+  }
+  const failed = contrastRows.value?.find((r) => !r.pass)
+  if (failed) {
+    return t('dsh.lk.contrastFailReason', { item: failed.name, ratio: failed.ratio.toFixed(1), req: failed.minRatio })
+  }
+  return ''
+})
+
+const savedThemeModel = computed(() => {
+  if (!themeConfig.value) return null
+  return {
+    skin: themeConfig.value.skin,
+    base: themeConfig.value.base,
+    custom: (themeConfig.value.custom ?? DEFAULT_CUSTOM_HEX).toUpperCase(),
+  }
+})
+
+const themeDirty = computed(() => {
+  if (!savedThemeModel.value) return false
+  return (
+    draftSkin.value !== savedThemeModel.value.skin ||
+    draftBase.value !== savedThemeModel.value.base ||
+    (draftBase.value === 'custom' && draftCustomHex.value.trim().toUpperCase() !== savedThemeModel.value.custom)
+  )
+})
+
+const currentBorderHex = computed(() => {
+  if (draftBase.value === 'custom') {
+    return isDarkBase.value ? READING_BASES[3].border : READING_BASES[0].border
+  }
+  return READING_BASES.find((b) => b.id === draftBase.value)?.border ?? READING_BASES[0].border
+})
+
+const miniPreviewStyle = computed(() => {
+  const bg = currentBgHex.value || READING_BASES[0].hex
+  const surface = currentSurfaceHex.value || READING_BASES[0].surface
+  const p = SKIN_PALETTES.reader[isDarkBase.value ? 'dark' : 'light']
+  return {
+    '--lec-bg': bg,
+    '--lec-surface': surface,
+    '--lec-text': p.text,
+    '--lec-text-muted': p['text-muted'],
+    '--lec-accent': p.accent,
+    '--lec-danger': p.danger,
+    '--lec-border': currentBorderHex.value,
+  }
+})
+
+function skinCardStyle(skin: string): Record<string, string> {
+  if (skin !== 'datasheet') return miniPreviewStyle.value
+  const p = SKIN_PALETTES.datasheet[isDarkBase.value ? 'dark' : 'light']
+  return {
+    '--lec-bg': p.bg,
+    '--lec-surface': p.surface,
+    '--lec-text': p.text,
+    '--lec-text-muted': p['text-muted'],
+    '--lec-accent': p.accent,
+    '--lec-danger': p.danger,
+    '--lec-border': p.border,
+  }
+}
+
+async function saveTheme(): Promise<boolean> {
+  if (!themeDirty.value || !contrastOk.value || isReadOnly.value) return true
+  savingTheme.value = true
+  themeSaveStatus.value = ''
+  const res = await saveThemeConfig(dashboardState.token, {
+    skin: draftSkin.value,
+    base: draftBase.value,
+    custom: draftBase.value === 'custom' ? draftCustomHex.value.trim().toUpperCase() : undefined,
+  })
+  savingTheme.value = false
+  if ('error' in res) {
+    themeSaveStatus.value = res.error
+    return false
+  }
+  themeConfig.value = res.theme
+  draftSkin.value = res.theme.skin
+  draftBase.value = res.theme.base
+  if (res.theme.custom) draftCustomHex.value = res.theme.custom.toUpperCase()
+  themeSavedNote.value = t('dsh.common.savedAt', { time: shortDateTime(Date.now()) })
+  touchModels()
+  say(t('dsh.lk.savedTheme'))
+  return true
+}
+
+function discardTheme(): void {
+  if (savedThemeModel.value) {
+    draftSkin.value = savedThemeModel.value.skin
+    draftBase.value = savedThemeModel.value.base
+    draftCustomHex.value = savedThemeModel.value.custom
+  }
+  themeSaveStatus.value = ''
+  touchModels()
+}
+
+// ---- Modules & secrets ----
 const modules = computed(() => {
   const m = theme.value?.lectureModules ?? {}
   return Object.entries(m).map(([id, v]) => ({ id, adapter: String((v as { adapter?: unknown; source?: unknown }).adapter ?? (v as { source?: unknown }).source ?? '—') }))
@@ -120,12 +316,46 @@ const statusMark = (s: DevSettingSummary) => (s.error || s.status === ST_INVALID
 const statusText = (s: DevSettingSummary) =>
   s.kind === 'secret' ? (s.secretSet ? t('dsh.lk.secretSet', { n: s.secretLength ?? 0 }) : t('dsh.lk.secretUnset')) : s.status
 
-let unregister: (() => void) | null = null
-onMounted(() => {
+const lookDirtyTabs = computed(() => [
+  ...(themeDirty.value ? ['theme'] : []),
+  ...(anyDirty() ? ['modules'] : []),
+])
+
+let unregisterEnv: (() => void) | null = null
+let unregisterTheme: (() => void) | null = null
+
+onMounted(async () => {
   prefs.value = readPrefs()
-  unregister = registerModel('look-env', { page: 'look', dirty: anyDirty, save: saveAll, discard: discardAll })
+  unregisterEnv = registerModel('look-env', { page: 'look', dirty: anyDirty, save: saveAll, discard: discardAll })
+  unregisterTheme = registerModel('look-theme', { page: 'look', dirty: () => themeDirty.value, save: saveTheme, discard: discardTheme })
+
+  if (dashboardState.mode === 'dev') {
+    const cfg = await fetchThemeConfig()
+    if (cfg) {
+      themeConfig.value = cfg
+      draftSkin.value = cfg.skin
+      draftBase.value = cfg.base
+      if (cfg.custom) draftCustomHex.value = cfg.custom.toUpperCase()
+      touchModels()
+    }
+  } else {
+    const rtSkin = THEME_RUNTIME.defaultTheme === 'datasheet' ? 'datasheet' : 'reader'
+    const rtBase = THEME_RUNTIME.defaultBase ?? THEME_RUNTIME.defaultTint ?? 'paper'
+    const cleanBase = (['paper', 'sepia', 'green', 'dark', 'custom'] as const).includes(rtBase as 'paper' | 'sepia' | 'green' | 'dark' | 'custom')
+      ? (rtBase as 'paper' | 'sepia' | 'green' | 'dark' | 'custom')
+      : 'paper'
+    const rtCustom = THEME_RUNTIME.customTint?.toUpperCase() ?? DEFAULT_CUSTOM_HEX
+    themeConfig.value = { file: 'theme.json', exists: false, skin: rtSkin, base: cleanBase, custom: rtCustom }
+    draftSkin.value = rtSkin
+    draftBase.value = cleanBase
+    draftCustomHex.value = rtCustom
+  }
 })
-onBeforeUnmount(() => unregister?.())
+
+onBeforeUnmount(() => {
+  unregisterEnv?.()
+  unregisterTheme?.()
+})
 </script>
 
 <template>
@@ -138,18 +368,168 @@ onBeforeUnmount(() => unregister?.())
         ['theme', t('dsh.lk.tabTheme')],
         ['modules', t('dsh.lk.tabModules')],
       ]"
-      :dirty-tabs="['modules']"
+      :dirty-tabs="lookDirtyTabs"
       @select="emit('tab', $event)"
     />
 
     <template v-if="tabOf('look') === 'theme'">
+      <!-- Site default skin selector -->
       <section class="db-panel" data-look-default>
-        <header><h3>{{ t('dsh.lk.defaultTitle') }}</h3><span class="db-hm">{{ t('dsh.lk.defaultHint') }}</span></header>
-        <div class="db-frow one">
-          <div class="db-fl">{{ t('dsh.lk.defaultTheme') }}<small><code>site.config.ts › theme</code></small></div>
-          <div class="db-rov"><span class="db-lock" aria-hidden="true"></span>{{ THEME_RUNTIME.defaultTheme }}</div>
+        <header>
+          <h3>{{ t('dsh.lk.defaultTitle') }}</h3>
+          <span class="db-hm">{{ t('dsh.lk.defaultHint') }}</span>
+        </header>
+        <div class="db-skins" role="radiogroup" :aria-label="t('dsh.lk.defaultTitle')">
+          <button
+            v-for="s in (['reader', 'datasheet'] as const)"
+            :key="s"
+            type="button"
+            class="db-skinopt"
+            role="radio"
+            :aria-checked="draftSkin === s"
+            :disabled="isReadOnly"
+            :data-skin="s"
+            @click="!isReadOnly && (draftSkin = s, touchModels())"
+          >
+            <span class="db-sn">
+              <span class="dm" :data-k="draftSkin === s ? 'ok' : 'off'" aria-hidden="true"></span>
+              {{ s }} · {{ s === 'reader' ? t('dsh.lk.readerShape') : t('dsh.lk.datasheetShape') }}
+            </span>
+            <span class="db-pv-mini" :class="`th-${s} m-${isDarkBase ? 'dark' : 'light'}`" :style="skinCardStyle(s)">
+              <span class="pv-bar"><b>{{ t('dsh.lk.pvSiteTitle') }}</b><span>{{ t('dsh.lk.pvSiteSub') }}</span></span>
+              <span class="pv-bd">
+                <span class="pv-h4">{{ t('dsh.lk.pvLectureTitle') }}</span>
+                <span class="pv-tag">{{ t('dsh.lk.pvGroupTag') }}</span>
+                <span class="pv-card"><b>{{ t('dsh.lk.pvCardTitle') }}</b><span class="pv-muted">{{ t('dsh.lk.pvCardDesc') }}</span></span>
+                <span class="pv-link">{{ t('dsh.lk.pvNextLink') }}</span>
+              </span>
+            </span>
+          </button>
         </div>
       </section>
+
+      <!-- Reading base swatches & live WCAG contrast checking -->
+      <section class="db-panel" data-look-bases>
+        <header>
+          <h3>{{ t('dsh.lk.basesTitle') }}</h3>
+          <span class="db-hm">{{ t('dsh.lk.basesHint') }}</span>
+        </header>
+        <div class="db-swatches" role="radiogroup" :aria-label="t('dsh.lk.basesTitle')">
+          <button
+            v-for="b in [...READING_BASES, { id: 'custom' as const, nameKey: 'dsh.lk.baseCustom', hex: draftCustomHex, surface: draftCustomHex, border: READING_BASES[0].border }]"
+            :key="b.id"
+            type="button"
+            class="db-swatch"
+            role="radio"
+            :aria-checked="draftBase === b.id"
+            :disabled="isReadOnly"
+            :data-base="b.id"
+            @click="!isReadOnly && (draftBase = b.id, touchModels())"
+          >
+            <span
+              class="db-sq"
+              :style="{
+                background: b.id === 'custom' && !isValidHex ? READING_BASES[0].hex : b.hex,
+                color: (b.id === 'dark' || (b.id === 'custom' && isDarkBase)) ? SKIN_PALETTES.reader.dark.text : SKIN_PALETTES.reader.light.text,
+              }"
+            >Aa</span>
+            <b>{{ t(b.nameKey as MessageKey) }}</b>
+            <small class="db-mono">{{ b.id === 'custom' ? draftCustomHex : b.hex }}</small>
+          </button>
+        </div>
+
+        <!-- Custom hex input + native color picker -->
+        <div v-if="draftBase === 'custom'" class="db-frow one db-sep">
+          <label for="db-custom-hex" class="db-fl">
+            {{ t('dsh.lk.customHex') }}
+            <small>{{ t('dsh.lk.customHexHint') }}</small>
+          </label>
+          <div class="db-fld db-color-field">
+            <input
+              id="db-custom-hex"
+              v-model="draftCustomHex"
+              class="db-in db-mono"
+              style="max-width: 12em"
+              maxlength="7"
+              spellcheck="false"
+              :disabled="isReadOnly"
+              data-custom-hex-input
+              @input="touchModels()"
+            />
+            <input
+              type="color"
+              class="db-color-picker"
+              :value="isValidHex ? draftCustomHex : DEFAULT_CUSTOM_HEX"
+              :aria-label="t('dsh.lk.pickColor')"
+              :disabled="isReadOnly"
+              @input="draftCustomHex = ($event.target as HTMLInputElement).value.toUpperCase(); touchModels()"
+            />
+            <span v-if="!isValidHex" class="db-err db-small">{{ t('dsh.lk.invalidHex') }}</span>
+          </div>
+        </div>
+
+        <!-- 4-row contrast check table -->
+        <div class="db-tw db-sep" data-look-contrast-table>
+          <table v-if="contrastRows" class="db-t">
+            <thead>
+              <tr>
+                <th>{{ t('dsh.lk.colItem') }}</th>
+                <th>{{ t('dsh.lk.colColor') }}</th>
+                <th class="n">{{ t('dsh.lk.colContrast') }}</th>
+                <th class="n">{{ t('dsh.lk.colReq') }}</th>
+                <th>{{ t('dsh.lk.colResult') }}</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="r in contrastRows" :key="r.key" :data-contrast-row="r.key">
+                <td :data-l="t('dsh.lk.colItem')">{{ r.name }}</td>
+                <td :data-l="t('dsh.lk.colColor')">
+                  <span class="db-mono">
+                    <span class="db-color-swatch-sm" :style="{ background: r.color }" aria-hidden="true"></span>
+                    {{ r.color }}
+                  </span>
+                </td>
+                <td :data-l="t('dsh.lk.colContrast')" class="n db-mono">{{ r.ratio.toFixed(1) }}:1</td>
+                <td :data-l="t('dsh.lk.colReq')" class="n db-mono">≥ {{ r.minRatio }}:1</td>
+                <td :data-l="t('dsh.lk.colResult')">
+                  <span class="db-stat">
+                    <span class="dm" :data-k="r.pass ? 'ok' : 'bad'" aria-hidden="true"></span>
+                    <span :class="r.pass ? 'db-ok' : 'db-err'">{{ r.pass ? t('dsh.lk.pass') : t('dsh.lk.fail') }}</span>
+                  </span>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+          <div v-else class="db-empty">
+            <b>{{ t('dsh.lk.invalidHex') }}</b>
+          </div>
+        </div>
+
+        <!-- Live reader mini-preview card -->
+        <div class="db-pbody db-sep" data-look-mini-preview>
+          <div class="db-muted db-small" style="margin-bottom: 8px">{{ t('dsh.lk.pvHeading') }}</div>
+          <div class="db-pv-mini th-reader" :class="isDarkBase ? 'm-dark' : 'm-light'" :style="miniPreviewStyle">
+            <div class="pv-bar">
+              <b>{{ t('dsh.lk.pvSiteTitle') }}</b>
+              <span>{{ t('dsh.lk.pvSiteSub') }}</span>
+            </div>
+            <div class="pv-bd">
+              <h4 class="pv-h4">{{ t('dsh.lk.pvLectureTitle') }}</h4>
+              <div class="pv-meta">
+                <span class="pv-tag">{{ t('dsh.lk.pvGroupTag') }}</span>
+                <span class="pv-danger-pill">{{ t('dsh.lk.pvDanger') }}</span>
+              </div>
+              <div class="pv-card">
+                <b>{{ t('dsh.lk.pvCardTitle') }}</b>
+                <span class="pv-muted">{{ t('dsh.lk.pvCardDesc') }}</span>
+              </div>
+              <a href="javascript:void(0)" class="pv-link" @click.prevent>{{ t('dsh.lk.pvNextLink') }}</a>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Live preview on this device (preserved for dashboard-s6y.spec.ts) -->
       <section class="db-panel" data-look-preview>
         <header><h3>{{ t('dsh.lk.previewTitle') }}</h3><span class="db-hm">{{ t('dsh.lk.previewHint') }}</span></header>
         <div class="db-pbody db-grid">
@@ -164,10 +544,20 @@ onBeforeUnmount(() => unregister?.())
             <button type="button" class="db-btn sm" :aria-pressed="isDark" @click="isDark = true">{{ t('dsh.lk.dark') }}</button>
           </div>
           <div v-if="tints.length" class="db-btns" role="group" :aria-label="t('dsh.lk.tint')">
-            <button v-for="tint in tints" :key="tint.id" type="button" class="db-btn sm" :aria-pressed="activeTint === tint.id" @click="selectTint(tint.id)">{{ tint.label }}</button>
+            <button
+              v-for="tint in ['light', ...tints]"
+              :key="tint"
+              type="button"
+              class="db-btn sm"
+              :aria-pressed="activeTint === tint"
+              :data-look-tint="tint"
+              @click="selectTint(tint)"
+            >{{ tintName(tint) }}</button>
           </div>
         </div>
       </section>
+
+      <!-- Check custom background JSON -->
       <section class="db-panel" data-look-json>
         <header><h3>{{ t('dsh.lk.jsonTitle') }}</h3><span class="db-hm">{{ t('dsh.lk.jsonHint') }}</span></header>
         <div class="db-pbody db-grid">
@@ -178,6 +568,17 @@ onBeforeUnmount(() => unregister?.())
           </div>
         </div>
       </section>
+
+      <!-- Savebar for Look / Theme -->
+      <div v-if="!isReadOnly" class="db-savebar" data-savebar="look">
+        <span class="db-st" :class="{ 'db-err': !contrastOk || !!themeSaveStatus }" data-look-status>
+          {{ !contrastOk ? firstContrastFailure : (themeSaveStatus || (themeDirty ? t('dsh.common.unsavedChanges') : themeSavedNote || t('dsh.common.allSaved'))) }}
+        </span>
+        <button type="button" class="db-btn" :disabled="!themeDirty" data-look-discard @click="discardTheme">{{ t('dsh.common.discard') }}</button>
+        <button type="button" class="db-btn primary" :disabled="!themeDirty || !contrastOk || savingTheme" data-look-save @click="saveTheme">
+          {{ savingTheme ? t('dsh.common.saving') : t('dsh.lk.saveTheme') }}
+        </button>
+      </div>
     </template>
 
     <template v-else>

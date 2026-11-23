@@ -10,8 +10,12 @@ gateway lets through.
 
 ## 1. Configuration
 
+Tiers can be declared in `lecture.config.ts` / `site.config.ts`, or in `content/access.json` (`site/access.json` in-place).
+
+### 1.1 `lecture.config.ts` Block
+
 ```ts
-// site/lecture.config.ts
+// site/lecture.config.ts or content/site.config.ts
 access: {
   default: 'public' | 'authenticated',        // groups not listed below, home page, non-group pages; default 'public'
   groups: { G05: { read: 'authenticated' }, LR: { read: ['staff', 'ta'] } },  // string[] = gateway user-group names
@@ -24,6 +28,44 @@ access: {
 - This site: `access: { default: 'authenticated', enforcement: 'gateway' }` (no restricted tier, build output unchanged).
 - The block is declared in `site/config/schema.ts` (`SITE_BLOCKS`, zh/en descriptions, also written to `config/schema.json`).
   Validation: `validateLectureConfig` (shape) and the build (group ids), both through `access/tiers.ts`.
+
+### 1.2 `content/access.json` Support & Precedence
+
+When authoring via the Dashboard or managing configuration separately from code:
+- Location: `<contentRoot>/access.json` in content mode (`LECTURE_CONTENT_DIR`), `<siteRoot>/access.json` in in-place mode.
+- Format: JSON conforming to `AccessConfig`:
+  ```json
+  {
+    "default": "public",
+    "enforcement": "gateway",
+    "groups": {
+      "G01": { "read": "public" },
+      "G02": { "read": "authenticated" },
+      "G03": { "read": ["staff"] }
+    }
+  }
+  ```
+- Precedence hierarchy:
+  1. `LECTURE_ACCESS_JSON` environment variable: highest priority (overrides all files; used by `build:access`, `auth:export`, and e2e suites).
+  2. `content/access.json`: if present on disk, loaded cleanly (comments and UTF-8 BOM are stripped), validated via `validateAccessConfig`, and takes precedence over `site.config.ts` / `lecture.config.ts`.
+  3. `site.config.ts` / `lecture.config.ts`: fallback default when `access.json` is not present.
+- Dashboard Local Write:
+  In local author mode (`!isReadOnly && !demo`), the Dashboard (`/dashboard#access`) writes atomically to `access.json` via `POST /__lecture/api/access`. While showing the engine demo content (`demo: true`), writes strictly return 409 `demo_read_only`.
+
+### 1.3 Authentication & Login URL (`modules.auth.loginUrl`)
+
+In addition to `access` tiers, `site/lecture.config.ts` provides `modules.auth.loginUrl` (documented in [CONFIG.md](./CONFIG.md)):
+```ts
+modules: {
+  auth: {
+    adapter: 'trusted-header',
+    sessionEndpoint: '/api/auth/session',
+    loginUrl: 'https://auth.example.com/?rd={rd}', // or relative path '/login?rd={rd}'
+  },
+}
+```
+- **Semantics of `{rd}`**: At runtime, `{rd}` is replaced with `encodeURIComponent(window.location.href)` so unauthenticated readers or admin sign-in redirects (e.g. from `/dashboard`) are routed to the authentication portal and redirected back after authentication.
+- **Validation**: Accepts empty string `""` (defaults to current page reload), same-origin relative paths starting with a single `/` (never `//`), or valid HTTP/HTTPS URLs without spaces.
 
 ## 2. Tiers
 

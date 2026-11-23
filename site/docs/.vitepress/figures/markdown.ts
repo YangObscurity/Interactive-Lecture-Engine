@@ -22,6 +22,14 @@ import {
   resolveGroupForPage,
   type LoadedGroupRegistry,
 } from './registry.ts'
+import {
+  FigureNumbering,
+  annotateChartFigureTag,
+  formatFigureNumberLabel,
+  hasFigureMarkup,
+  lectureNoOfPage,
+  scanFigureMarkup,
+} from './numbering.ts'
 import type {
   FigureBacklink,
   FigureEntry,
@@ -143,12 +151,7 @@ export function splitFigureTarget(rawTarget: string, defaultGroup: string): { gr
   return { group: defaultGroup, id: rawTarget.trim() }
 }
 
-export function formatFigureNumberLabel(kind: FigureKind, num: number, localeKey: string): string {
-  if (localeKey === 'en') {
-    return kind === 'table' ? `Table ${num}` : `Fig. ${num}`
-  }
-  return kind === 'table' ? `表 ${num}` : `图 ${num}`
-}
+export { formatFigureNumberLabel }
 
 export function isTierAccessAllowed(pageTier: string, targetTier: string, inlineTier = 'public'): boolean {
   if (targetTier === inlineTier || targetTier === 'public') return true
@@ -256,47 +259,48 @@ export function createFiguresMarkdownPlugin(opts: FiguresMarkdownOptions) {
       const localeKey = pageLocaleKey(relPath, opts.localeKeys)
 
       const numberByKey = new Map<string, { num: number; kind: FigureKind; entry: FigureEntry; group: string; targetTier: string }>()
-      const counters = { figure: 0, table: 0 }
+      // one shared sequence for charts and figures, one for tables (figures/numbering.ts)
+      const numbering = new FigureNumbering(lectureNoOfPage(relPath), localeKey)
+      const chartNumbers: number[] = []
       const backlinksByKey = new Map<string, FigureBacklink[]>()
 
       const ensureNumbered = (group: string, entry: FigureEntry, targetTier: string): number => {
         const key = `${group}:${entry.id}`
         const existing = numberByKey.get(key)
         if (existing) return existing.num
-        counters[entry.kind] += 1
-        const num = counters[entry.kind]
+        const num = numbering.numberOf(key, entry.kind)
         numberByKey.set(key, { num, kind: entry.kind, entry, group, targetTier })
         return num
       }
 
-      // Pass 1: discover citations & `<LectureFigure>` tags in appearance order to lock numbering and backlinks.
-      for (const tok of state.tokens) {
-        if ((tok.type === 'html_block' || tok.type === 'html_inline') && tok.content.includes('<LectureFigure')) {
-          for (const m of tok.content.matchAll(LECTURE_FIGURE_TAG_RE)) {
-            const parsed = parseLectureFigureTagAttrs(m[1] ?? '')
-            if (!parsed) {
-              throw new Error(`[figures] ${relPath}: malformed <LectureFigure> tag: ${m[0]}`)
-            }
-            for (const rawId of parsed.ids) {
-              const found = lookupEntry(pageGroup, rawId, relPath)
-              ensureNumbered(found.group, found.entry, found.targetTier)
-            }
+      // Pass 1a: number the mounted charts and `<LectureFigure>` tags in the order they appear on the page.
+      const scanMounts = (html: string): void => {
+        for (const hit of scanFigureMarkup(html)) {
+          if (hit.type === 'chart') {
+            chartNumbers.push(numbering.next('figure'))
+            continue
           }
+          const parsed = parseLectureFigureTagAttrs(hit.attrs)
+          if (!parsed) {
+            throw new Error(`[figures] ${relPath}: malformed <LectureFigure> tag: ${hit.text}`)
+          }
+          for (const rawId of parsed.ids) {
+            const found = lookupEntry(pageGroup, rawId, relPath)
+            ensureNumbered(found.group, found.entry, found.targetTier)
+          }
+        }
+      }
+      // cross-references in order; a cited figure that is not mounted on this page is numbered after the mounted ones
+      const xrefTargets: Array<{ group: string; entry: FigureEntry; targetTier: string }> = []
+      for (const tok of state.tokens) {
+        if ((tok.type === 'html_block' || tok.type === 'html_inline') && hasFigureMarkup(tok.content)) {
+          scanMounts(tok.content)
         } else if (tok.type === 'inline' && tok.children) {
           for (let i = 0; i < tok.children.length; i++) {
             const child = tok.children[i]
             if (!child) continue
-            if (child.type === 'html_inline' && child.content.includes('<LectureFigure')) {
-              for (const m of child.content.matchAll(LECTURE_FIGURE_TAG_RE)) {
-                const parsed = parseLectureFigureTagAttrs(m[1] ?? '')
-                if (!parsed) {
-                  throw new Error(`[figures] ${relPath}: malformed <LectureFigure> tag: ${m[0]}`)
-                }
-                for (const rawId of parsed.ids) {
-                  const found = lookupEntry(pageGroup, rawId, relPath)
-                  ensureNumbered(found.group, found.entry, found.targetTier)
-                }
-              }
+            if (child.type === 'html_inline' && hasFigureMarkup(child.content)) {
+              scanMounts(child.content)
             } else if (child.type === 'link_open') {
               const href = String(child.attrGet('href') ?? '')
               const xref = parseXrefScheme(href)
@@ -307,7 +311,7 @@ export function createFiguresMarkdownPlugin(opts: FiguresMarkdownOptions) {
                   `[figures] ${relPath}: "${href}" expects kind="${xref.scheme}" but "${found.entry.id}" is "${found.entry.kind}"`,
                 )
               }
-              ensureNumbered(found.group, found.entry, found.targetTier)
+              xrefTargets.push(found)
               const key = `${found.group}:${found.entry.id}`
               const list = backlinksByKey.get(key) ?? []
               const idx = list.length + 1
@@ -317,8 +321,10 @@ export function createFiguresMarkdownPlugin(opts: FiguresMarkdownOptions) {
           }
         }
       }
+      // Pass 1b: cited but not mounted here (e.g. `[](fig:other-group/id)`)
+      for (const found of xrefTargets) ensureNumbered(found.group, found.entry, found.targetTier)
 
-      if (numberByKey.size === 0) return
+      if (numberByKey.size === 0 && chartNumbers.length === 0) return
 
       // Normalize single backlink marker to `↩` and multi backlink markers to `↩1`, `↩2`, ...
       for (const [, list] of backlinksByKey) {
@@ -346,7 +352,7 @@ export function createFiguresMarkdownPlugin(opts: FiguresMarkdownOptions) {
           width: e.width,
           height: e.height,
           num: rec.num,
-          label: formatFigureNumberLabel(e.kind, rec.num, localeKey),
+          label: numbering.label(e.kind, rec.num),
           caption: localizeFigureCaption(e, localeKey),
           sourceText: formatFigureSource(e, localeKey),
           paper: e.source.paper,
@@ -358,33 +364,51 @@ export function createFiguresMarkdownPlugin(opts: FiguresMarkdownOptions) {
         }
       }
 
-      const rewriteLectureFigureHtml = (html: string): string =>
-        html.replace(LECTURE_FIGURE_TAG_RE, (_full, attrs: string) => {
-          const parsed = parseLectureFigureTagAttrs(attrs)!
-          const items = parsed.ids.map((id) => toResolvedItem(pageGroup || '', id))
-          const isGallery = items.length > 1
-          const size: FigureSize = parsed.size ?? (isGallery ? 'full' : 'thumb')
-          const float: FigureFloat = parsed.float ?? (isGallery || size !== 'thumb' ? 'none' : 'right')
-          const propsPayload: ResolvedFigureMountProps = {
-            group: pageGroup || '',
-            size,
-            float,
-            items,
+      const rewriteLectureFigureTag = (attrs: string): string => {
+        const parsed = parseLectureFigureTagAttrs(attrs)!
+        const items = parsed.ids.map((id) => toResolvedItem(pageGroup || '', id))
+        const isGallery = items.length > 1
+        const size: FigureSize = parsed.size ?? (isGallery ? 'full' : 'thumb')
+        const float: FigureFloat = parsed.float ?? (isGallery || size !== 'thumb' ? 'none' : 'right')
+        const propsPayload: ResolvedFigureMountProps = {
+          group: pageGroup || '',
+          size,
+          float,
+          items,
+        }
+        return `<LectureFigure encoded="${encodeFigurePayload(propsPayload)}" />`
+      }
+      // chart figures are consumed in the same order pass 1a numbered them
+      let chartCursor = 0
+      const rewriteFigureHtml = (html: string): string => {
+        const hits = scanFigureMarkup(html)
+        if (hits.length === 0) return html
+        let out = ''
+        let last = 0
+        for (const hit of hits) {
+          out += html.slice(last, hit.index)
+          if (hit.type === 'chart') {
+            const num = chartNumbers[chartCursor++] ?? 0
+            out += num > 0 ? annotateChartFigureTag(hit.text, num, numbering.lectureNo, numbering.label('figure', num)) : hit.text
+          } else {
+            out += rewriteLectureFigureTag(hit.attrs)
           }
-          return `<LectureFigure encoded="${encodeFigurePayload(propsPayload)}" />`
-        })
+          last = hit.index + hit.text.length
+        }
+        return out + html.slice(last)
+      }
 
-      // Pass 2: rewrite `<LectureFigure>` tags and `[...](fig:id)` / `[...](tab:id)` links.
+      // Pass 2: rewrite `<LectureFigure>` tags, chart figures and `[...](fig:id)` / `[...](tab:id)` links.
       const seenOccurrence = new Map<string, number>()
       for (const tok of state.tokens) {
-        if ((tok.type === 'html_block' || tok.type === 'html_inline') && tok.content.includes('<LectureFigure')) {
-          tok.content = rewriteLectureFigureHtml(tok.content)
+        if ((tok.type === 'html_block' || tok.type === 'html_inline') && hasFigureMarkup(tok.content)) {
+          tok.content = rewriteFigureHtml(tok.content)
         } else if (tok.type === 'inline' && tok.children) {
           const nextChildren: MarkdownItTokenLike[] = []
           for (let i = 0; i < tok.children.length; i++) {
             const child = tok.children[i]!
-            if (child.type === 'html_inline' && child.content.includes('<LectureFigure')) {
-              child.content = rewriteLectureFigureHtml(child.content)
+            if (child.type === 'html_inline' && hasFigureMarkup(child.content)) {
+              child.content = rewriteFigureHtml(child.content)
               nextChildren.push(child)
               continue
             }
@@ -398,7 +422,7 @@ export function createFiguresMarkdownPlugin(opts: FiguresMarkdownOptions) {
                 const occ = (seenOccurrence.get(key) ?? 0) + 1
                 seenOccurrence.set(key, occ)
 
-                const label = formatFigureNumberLabel(rec.kind, rec.num, localeKey)
+                const label = numbering.label(rec.kind, rec.num)
                 const preview: FigureHoverPreviewPayload = {
                   id: rec.entry.id,
                   kind: rec.kind,

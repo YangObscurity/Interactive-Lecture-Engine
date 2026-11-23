@@ -1,0 +1,40 @@
+{
+  "version": 1,
+  "group": "vis",
+  "figures": [
+    {
+      "id": "vis-contrast",
+      "file": "vis-contrast.svg",
+      "kind": "figure",
+      "width": 560,
+      "height": 240,
+      "caption": {
+        "zh": "颜色对比：浅黄字在白底上几乎看不见；红与绿只差色相，部分读者分不清",
+        "en": "Colour contrast: pale yellow text on white almost vanishes; red and green differ only in hue and some readers cannot tell them apart"
+      },
+      "source": {
+        "paper": "Original Example Diagram",
+        "number": "Fig. 1",
+        "page": 1
+      },
+      "sha256": "fedba8e25fa0"
+    },
+    {
+      "id": "vis-area-trap",
+      "file": "vis-area-trap.svg",
+      "kind": "figure",
+      "width": 560,
+      "height": 260,
+      "caption": {
+        "zh": "同样是 2 倍：只放大高度时看起来是 2 倍，边长一起放大时面积成了 4 倍",
+        "en": "The same factor of two: scaling only the height looks like 2x, scaling both sides makes the area 4x"
+      },
+      "source": {
+        "paper": "Original Example Diagram",
+        "number": "Fig. 2",
+        "page": 1
+      },
+      "sha256": "56056d8f8137"
+    }
+  ]
+}

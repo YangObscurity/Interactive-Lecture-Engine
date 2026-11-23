@@ -24,3 +24,5 @@ related: []
 两个命题共有四种组合，所以 P 且 Q 的真值表有四行。（出处：<span class="cite" data-cite="https://example.com/demo/concepts/truth-table" title="https://example.com/demo/concepts/truth-table">示例出处</span>）
 
 排程里的[关键路径](concept:critical-path)也可以用列表把所有情况摆出来。
+
+命题里出现“所有”“存在”时，先看清它的[量词](concept:quantifier)；要推翻一个“所有……都……”的命题，一个[反例](concept:counterexample)就够了。

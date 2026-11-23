@@ -20,16 +20,18 @@ import { loadLectureConfig } from '../content/config.mts'
 import { resolveContent } from '../content/paths.mts'
 import { resolveI18n } from '../lecture-config.mts'
 import { resolveGroups } from '../groups-source.mts'
+import { validateAccessConfig } from '../access/tiers.ts'
 import { resolveBuildAccess } from '../access/build.mts'
 import { formatAutheliaYaml, resolveAuthPlan } from '../access/authExport.ts'
 import { buildFigureAuditAndGallery } from '../figures/gallery.ts'
 import { PROMPT_LIMITS, validateCompanionPrompts, type CompanionPromptsFile } from '../prompts/companion.ts'
 import { loadAndValidateSitePrompts, writeSitePromptsFile } from '../prompts/load.mts'
 import { formatDoctorText, runDoctor } from '../../../scripts/config/doctor.mts'
-import { loadSources, updateEnvText } from '../../../scripts/config/env.mts'
+import { loadSources, resolveAll, updateEnvText } from '../../../scripts/config/env.mts'
 import { loadSiteTexts, saveSiteTexts, validateSiteTexts } from '../site-texts.mts'
 import { loadAiContract } from '../prompts/loadContract.mts'
 import { invalidateSearchViteCache } from '../search/vitePlugin.mts'
+import { invalidateLectureThemeServer } from './lectureThemePlugin.mts'
 import {
   buildDevHoverPayload,
   buildLectureContextForDraft,
@@ -43,6 +45,7 @@ import {
   resolveConceptContentPaths,
 } from '../concepts/devWorkflow.mts'
 import {
+  addMcpServer,
   commitContentFile,
   gitLogDir,
   gitLogFile,
@@ -52,8 +55,11 @@ import {
   probeLectureApi,
   readContentSnippet,
   readServerLimits,
+  readThemeView,
   readToolsView,
+  removeMcpServer,
   runContentCheckProcess,
+  saveThemeConfig,
   writeToolSwitches,
   CHECK_CATEGORY_IDS,
   checkOnlyFromBody,
@@ -64,6 +70,7 @@ import {
 } from './dashboardDevExtras.mts'
 import { captureViteLogger, readDevLogs } from './devLogs.mts'
 import { contentWatchState } from './contentWatchPlugin.mts'
+import { notePromptsSelfWrite } from './companionPromptsPlugin.mts'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const SITE_DIR = path.resolve(__dirname, '../../..')
@@ -191,24 +198,43 @@ async function buildDevStatus(csrfToken: string, probe: boolean) {
     }),
   )
 
+  // Authelia rules need the site's host (`--domain`); here it comes from SITE_URL like the build's. Without it the
+  // page explains how to set it (autheliaPreviewNote) instead of showing the exporter's exception (audit-dashboard #9).
   let autheliaPreview = ''
+  let autheliaPreviewNote: { code: 'no_domain' | 'error'; detail?: string } | null = null
+  const siteUrl = resolveAll(loadSources({ repoRoot: REPO_ROOT }), SETTINGS.filter((s) => s.key === 'SITE_URL'))[0]?.value
+  let domain = ''
   try {
-    const lectureConfig = loadLectureConfig()
-    const { GROUPS } = await resolveGroups()
-    const i18n = resolveI18n(lectureConfig)
-    const localeKeys = LANG_CODES.filter((l) => l !== i18n.root && i18n.locales.includes(l)).map(localeKeyOf)
-    const plan = resolveAuthPlan(lectureConfig.access, GROUPS)
-    autheliaPreview = formatAutheliaYaml({ plan, groups: GROUPS, localeKeys })
-  } catch (err) {
-    autheliaPreview = `# Unable to generate preview: ${err instanceof Error ? err.message : String(err)}`
+    domain = siteUrl ? new URL(String(siteUrl)).hostname : ''
+  } catch {
+    domain = ''
   }
+  if (!domain) autheliaPreviewNote = { code: 'no_domain' }
+  else
+    try {
+      const paths = resolveContent()
+      const lectureConfig = loadLectureConfig({ paths })
+      const { GROUPS } = await resolveGroups()
+      const i18n = resolveI18n(lectureConfig)
+      const localeKeys = LANG_CODES.filter((l) => l !== i18n.root && i18n.locales.includes(l)).map(localeKeyOf)
+      const plan = resolveAuthPlan(lectureConfig.access, GROUPS)
+      autheliaPreview = formatAutheliaYaml({ plan, groups: GROUPS, localeKeys, domain })
+    } catch (err) {
+      autheliaPreviewNote = { code: 'error', detail: err instanceof Error ? err.message : String(err) }
+    }
 
-  // The access block as the Dashboard page "groups and lectures" shows it (read only: the block lives in site.config.ts).
+  // The access block as the Dashboard page "groups and lectures" shows it (local editable or read only).
   let access: {
     default: string
     enforcement: string
     groups: Array<{ id: string; read: 'public' | 'authenticated' | string[]; own: boolean }>
     configFile: string
+    accessFile?: {
+      path: string
+      exists: boolean
+      savedAt: string | null
+    }
+    rawAccess?: Record<string, unknown>
   } | null = null
   try {
     const paths = resolveContent()
@@ -216,10 +242,19 @@ async function buildDevStatus(csrfToken: string, probe: boolean) {
     const { GROUPS } = await resolveGroups()
     const a = cfg.access ?? {}
     const def = a.default ?? 'public'
+    const accessExists = fs.existsSync(paths.accessFile)
+    const accessSavedAt = accessExists ? fs.statSync(paths.accessFile).mtime.toISOString() : null
+    const accessRel = path.relative(REPO_ROOT, paths.accessFile).replace(/\\/g, '/')
     access = {
       default: def,
       enforcement: a.enforcement ?? 'none',
-      configFile: path.relative(REPO_ROOT, paths.siteConfig).replace(/\\/g, '/'),
+      configFile: accessExists ? accessRel : path.relative(REPO_ROOT, paths.siteConfig).replace(/\\/g, '/'),
+      accessFile: {
+        path: accessRel,
+        exists: accessExists,
+        savedAt: accessSavedAt,
+      },
+      rawAccess: a as Record<string, unknown>,
       groups: GROUPS.map((g) => {
         const own = a.groups?.[g.id]
         return { id: g.id, read: own ? own.read : def, own: Boolean(own) }
@@ -231,6 +266,7 @@ async function buildDevStatus(csrfToken: string, probe: boolean) {
 
   return {
     mode: 'dev' as const,
+    demo: resolveContent().demo === true,
     csrfToken,
     ok: report.ok,
     errors: report.errors,
@@ -245,6 +281,7 @@ async function buildDevStatus(csrfToken: string, probe: boolean) {
       errors: t.errors,
     })),
     autheliaPreview,
+    autheliaPreviewNote,
     access,
     nodeVersion: process.version,
   }
@@ -257,9 +294,12 @@ async function buildDevStatus(csrfToken: string, probe: boolean) {
  * probe and the machine-local `.env` (repository root, not the content folder) keep working.
  */
 export const DEMO_WRITE_ENDPOINTS: readonly string[] = [
+  '/theme',
   '/tools',
+  '/tools/servers',
   '/prompts',
   '/texts',
+  '/access',
   '/concepts/draft',
   '/concepts/confirm',
   '/concepts/discard',
@@ -282,6 +322,7 @@ export function createDashboardDevHandler(opts?: {
   token?: string
   allowNonLoopbackForTests?: boolean
   promptsFilePath?: string
+  accessFilePath?: string
   /** Folder holding `site-texts.json` (tests use a temporary one; default: the active content root). */
   siteDir?: string
   docsRoot?: string
@@ -296,11 +337,13 @@ export function createDashboardDevHandler(opts?: {
    * active content is the demo, and the handler was not pointed at a folder of its own for that file (tests).
    */
   const writesIntoDemo = (subpath: string): boolean => {
-    if (!DEMO_WRITE_ENDPOINTS.includes(subpath)) return false
+    const isDemoEndpoint = DEMO_WRITE_ENDPOINTS.some((ep) => subpath === ep || subpath.startsWith(`${ep}/`))
+    if (!isDemoEndpoint) return false
     if (opts?.demo !== undefined) return opts.demo
     if (resolveContent().demo !== true) return false
     if (subpath === '/texts') return !siteDir
     if (subpath === '/prompts') return !opts?.promptsFilePath
+    if (subpath === '/access') return !opts?.accessFilePath
     if (subpath.startsWith('/concepts/')) return !opts?.docsRoot && !opts?.conceptsDir
     return true
   }
@@ -515,6 +558,13 @@ export function createDashboardDevHandler(opts?: {
       return
     }
 
+    if (method === 'GET' && subpath === '/theme') {
+      const paths = resolveContent()
+      const cfg = loadLectureConfig({ paths })
+      sendJson(res, 200, { ok: true, theme: readThemeView(paths, cfg.theme === 'datasheet' ? 'datasheet' : 'reader') })
+      return
+    }
+
     const reqToken = String(req.headers['x-lecture-dev-token'] || '')
     if (!reqToken || reqToken !== token) {
       sendJson(res, 403, { ok: false, error: 'invalid_dev_token' })
@@ -522,7 +572,7 @@ export function createDashboardDevHandler(opts?: {
     }
 
     // S6 decision B: the demo content ships with the engine and is read only, like new:group / new:lecture.
-    if (method === 'POST' && writesIntoDemo(subpath)) {
+    if ((method === 'POST' || method === 'DELETE') && writesIntoDemo(subpath)) {
       sendJson(res, 409, demoReadOnlyBody(resolveContent().root))
       return
     }
@@ -615,6 +665,57 @@ export function createDashboardDevHandler(opts?: {
       return
     }
 
+    if (method === 'POST' && subpath === '/theme') {
+      let body: Record<string, unknown>
+      try {
+        body = await readJsonBody(req)
+      } catch (err) {
+        sendJson(res, 400, { ok: false, error: err instanceof Error ? err.message : 'invalid_body' })
+        return
+      }
+      const paths = resolveContent()
+      const r = saveThemeConfig(paths, body)
+      if ('error' in r) {
+        sendJson(res, 400, { ok: false, error: r.error, ...(r.reason ? { reason: r.reason } : {}) })
+        return
+      }
+      opts?.onFilesChanged?.([paths.themeFile])
+      sendJson(res, 200, { ok: true, theme: r.theme })
+      return
+    }
+
+    if (method === 'POST' && subpath === '/tools/servers') {
+      let body: Record<string, unknown>
+      try {
+        body = await readJsonBody(req)
+      } catch (err) {
+        sendJson(res, 400, { ok: false, error: err instanceof Error ? err.message : 'invalid_body' })
+        return
+      }
+      const paths = resolveContent()
+      const r = addMcpServer(paths, body)
+      if ('error' in r) {
+        sendJson(res, 400, { ok: false, error: r.error, ...(r.field ? { field: r.field } : {}) })
+        return
+      }
+      opts?.onFilesChanged?.([paths.aiToolsFile])
+      sendJson(res, 200, { ok: true, server: r.server, tools: readToolsView(paths) })
+      return
+    }
+
+    if (method === 'DELETE' && subpath.startsWith('/tools/servers/')) {
+      const serverId = decodeURIComponent(subpath.slice('/tools/servers/'.length))
+      const paths = resolveContent()
+      const r = removeMcpServer(paths, serverId)
+      if ('error' in r) {
+        sendJson(res, 400, { ok: false, error: r.error })
+        return
+      }
+      opts?.onFilesChanged?.([paths.aiToolsFile])
+      sendJson(res, 200, { ok: true, tools: readToolsView(paths) })
+      return
+    }
+
     if (method === 'POST' && subpath === '/tools') {
       let body: Record<string, unknown>
       try {
@@ -626,12 +727,13 @@ export function createDashboardDevHandler(opts?: {
       const paths = resolveContent()
       const r = writeToolSwitches(paths, {
         ...(typeof body.engine === 'object' && body.engine !== null ? { engine: body.engine as Record<string, boolean> } : {}),
-        ...(typeof body.servers === 'object' && body.servers !== null ? { servers: body.servers as NonNullable<ToolSwitches['servers']> } : {}),
+        ...(body.servers !== undefined ? { servers: body.servers as NonNullable<ToolSwitches['servers']> } : {}),
       })
       if (!r.ok) {
         sendJson(res, 400, r)
         return
       }
+      opts?.onFilesChanged?.([paths.aiToolsFile])
       sendJson(res, 200, { ok: true, ...readToolsView(paths) })
       return
     }
@@ -704,6 +806,8 @@ export function createDashboardDevHandler(opts?: {
       }
 
       writeSitePromptsFile(current.filePath, checked.value)
+      // the page that saved already has the file: its own write must not trigger the watcher's full reload
+      notePromptsSelfWrite(current.filePath, fs.readFileSync(current.filePath, 'utf8'))
       const saved: CompanionPromptsFile = checked.value
       // A save message (version history) commits this one file, only when the content folder is its own repository.
       const message = typeof body.message === 'string' ? body.message.trim() : ''
@@ -734,6 +838,101 @@ export function createDashboardDevHandler(opts?: {
       }
       saveSiteTexts(validated.texts, { siteDir })
       sendJson(res, 200, { ok: true, texts: validated.texts })
+      return
+    }
+
+    if (method === 'POST' && subpath === '/access') {
+      let body: Record<string, unknown>
+      try {
+        body = await readJsonBody(req)
+      } catch (err) {
+        sendJson(res, 400, { ok: false, error: err instanceof Error ? err.message : 'invalid_body' })
+        return
+      }
+      const incoming = (body.access ?? body) as unknown
+      const { GROUPS } = await resolveGroups()
+      const groupIds = GROUPS.map((g) => g.id)
+      let validated: ReturnType<typeof validateAccessConfig>
+      try {
+        validated = validateAccessConfig(incoming, groupIds, 'access.json')
+      } catch (err) {
+        sendJson(res, 400, { ok: false, error: 'validation_failed', message: err instanceof Error ? err.message : String(err) })
+        return
+      }
+      const paths = resolveContent()
+      const targetFile = opts?.accessFilePath ?? paths.accessFile
+      const tmpFile = `${targetFile}.tmp.${Date.now()}`
+      try {
+        fs.mkdirSync(path.dirname(targetFile), { recursive: true })
+        fs.writeFileSync(tmpFile, JSON.stringify(validated, null, 2) + '\n', 'utf8')
+        fs.renameSync(tmpFile, targetFile)
+      } catch (err) {
+        try {
+          if (fs.existsSync(tmpFile)) fs.unlinkSync(tmpFile)
+        } catch {
+          // ignore cleanup failure
+        }
+        sendJson(res, 500, { ok: false, error: 'write_failed', message: err instanceof Error ? err.message : String(err) })
+        return
+      }
+      opts?.onFilesChanged?.([targetFile])
+      const savedAt = fs.statSync(targetFile).mtime.toISOString()
+      const status = opts?.accessFilePath ? null : await buildDevStatus(token, false)
+      sendJson(res, 200, {
+        ok: true,
+        access: validated,
+        accessFile: {
+          path: path.relative(REPO_ROOT, targetFile).replace(/\\/g, '/'),
+          exists: true,
+          savedAt,
+        },
+        ...(status ? { status, autheliaPreview: status.autheliaPreview, autheliaPreviewNote: status.autheliaPreviewNote } : {}),
+      })
+      return
+    }
+
+    if (method === 'POST' && subpath === '/access/preview') {
+      let body: Record<string, unknown>
+      try {
+        body = await readJsonBody(req)
+      } catch (err) {
+        sendJson(res, 400, { ok: false, error: err instanceof Error ? err.message : 'invalid_body' })
+        return
+      }
+      const incoming = (body.access ?? body) as unknown
+      const { GROUPS } = await resolveGroups()
+      const groupIds = GROUPS.map((g) => g.id)
+      let validated: ReturnType<typeof validateAccessConfig>
+      try {
+        validated = validateAccessConfig(incoming, groupIds, 'access.json')
+      } catch (err) {
+        sendJson(res, 400, { ok: false, error: 'validation_failed', message: err instanceof Error ? err.message : String(err) })
+        return
+      }
+      const paths = resolveContent()
+      let domain = ''
+      try {
+        const siteUrl = resolveAll(loadSources({ repoRoot: REPO_ROOT }), SETTINGS.filter((s) => s.key === 'SITE_URL'))[0]?.value
+        domain = siteUrl ? new URL(String(siteUrl)).hostname : ''
+      } catch {
+        domain = ''
+      }
+      let autheliaPreview = ''
+      let autheliaPreviewNote: { code: string; detail?: string } | null = null
+      if (!domain) {
+        autheliaPreviewNote = { code: 'no_domain' }
+      } else {
+        try {
+          const lectureConfig = loadLectureConfig({ paths })
+          const i18n = resolveI18n(lectureConfig)
+          const localeKeys = LANG_CODES.filter((l) => l !== i18n.root && i18n.locales.includes(l)).map(localeKeyOf)
+          const plan = resolveAuthPlan(validated, GROUPS)
+          autheliaPreview = formatAutheliaYaml({ plan, groups: GROUPS, localeKeys, domain })
+        } catch (err) {
+          autheliaPreviewNote = { code: 'error', detail: err instanceof Error ? err.message : String(err) }
+        }
+      }
+      sendJson(res, 200, { ok: true, autheliaPreview, autheliaPreviewNote })
       return
     }
 
@@ -940,6 +1139,9 @@ export function dashboardDevPlugin(): Plugin {
         const mods = viteServer.moduleGraph.getModulesByFile(abs)
         if (mods) {
           for (const mod of mods) viteServer.moduleGraph.invalidateModule(mod)
+        }
+        if (path.basename(abs) === 'theme.json') {
+          invalidateLectureThemeServer()
         }
       }
     },

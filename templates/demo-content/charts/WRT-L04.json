@@ -1,0 +1,10 @@
+{
+  "c1": {
+    "type": "mermaid",
+    "code": "flowchart TB\n  D[\"初稿\"] --> R1[\"第一轮：结论与结构\"]\n  R1 --> R2[\"第二轮：段落与图表\"]\n  R2 --> R3[\"第三轮：字句与格式\"]\n  R3 --> F[\"请人审读\"]\n  F -->|有意见| L[\"修改记录：已改或暂不采纳\"]\n  L -->|回到第一轮| R1\n  F -->|没有大问题| Done[\"定稿\"]"
+  },
+  "c2": {
+    "type": "echarts",
+    "code": "{\n  \"title\": {\n    \"text\": \"三稿中各类问题的数量\",\n    \"left\": 8\n  },\n  \"tooltip\": {\n    \"trigger\": \"axis\"\n  },\n  \"legend\": {\n    \"bottom\": 0\n  },\n  \"grid\": {\n    \"top\": 72,\n    \"bottom\": 64,\n    \"left\": 56\n  },\n  \"xAxis\": {\n    \"type\": \"category\",\n    \"data\": [\n      \"第一稿\",\n      \"第二稿\",\n      \"第三稿\"\n    ]\n  },\n  \"yAxis\": {\n    \"type\": \"value\",\n    \"name\": \"问题数 / 条\",\n    \"min\": 0\n  },\n  \"series\": [\n    {\n      \"name\": \"结论与结构\",\n      \"type\": \"bar\",\n      \"stack\": \"all\",\n      \"itemStyle\": {\n        \"color\": \"#475569\"\n      },\n      \"data\": [\n        6,\n        1,\n        0\n      ]\n    },\n    {\n      \"name\": \"段落与图表\",\n      \"type\": \"bar\",\n      \"stack\": \"all\",\n      \"itemStyle\": {\n        \"color\": \"#0EA5E9\"\n      },\n      \"data\": [\n        5,\n        3,\n        1\n      ]\n    },\n    {\n      \"name\": \"字句与格式\",\n      \"type\": \"bar\",\n      \"stack\": \"all\",\n      \"itemStyle\": {\n        \"color\": \"#F59E0B\"\n      },\n      \"data\": [\n        9,\n        5,\n        2\n      ]\n    }\n  ]\n}"
+  }
+}

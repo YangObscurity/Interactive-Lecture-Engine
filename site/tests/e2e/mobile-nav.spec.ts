@@ -30,14 +30,16 @@ for (const [label, path] of PAGES) {
     expect(box.x).toBeGreaterThanOrEqual(0)
     expect(box.x + box.width).toBeLessThanOrEqual(390)
 
-    for (const sel of ['.lecture-export-btn', '.reading-mode-nav-btn']) {
+    // S6Y decision (1) 2026-11-23: phones hide the wide-reading toggle; export and settings are the same 36x36 icon buttons
+    await expect(page.locator('.reading-mode-nav-btn')).toBeHidden()
+    for (const sel of ['.lecture-export-btn', '[data-lec-settings-btn]']) {
       const btn = page.locator(sel)
       if ((await btn.count()) === 0) continue
       const b = await btn.boundingBox()
       expect(b, sel).not.toBeNull()
       if (!b) continue
-      expect(b.width, `${sel} width`).toBeGreaterThanOrEqual(40)
-      expect(b.height, `${sel} height`).toBeGreaterThanOrEqual(40)
+      expect(Math.round(b.width), `${sel} width`).toBe(36)
+      expect(Math.round(b.height), `${sel} height`).toBe(36)
     }
 
     await hamburger.click()

@@ -24,11 +24,11 @@ import { LectureConfigError, defineLectureConfig, validateLectureConfig } from '
 import { loadLectureConfig } from '../../docs/.vitepress/content/config.mts'
 import { readAccessEnv, resolveAccessWithoutGroups, resolveBuildAccess } from '../../docs/.vitepress/access/build.mts'
 import { SITE_BLOCKS, toJSON } from '../../config/schema'
-import { DEMO_ACCESS_JSON, demoContentPaths } from './demo-content'
+import { DEMO_ACCESS_JSON, DEMO_GROUP_ORDER, demoContentPaths } from './demo-content'
 
 // S6: the demo content's site config (templates/demo-content), never the owner's own
 const siteConfig = loadLectureConfig({ paths: demoContentPaths() })
-const DEMO_IDS = ['MEA', 'LOG', 'PLN', 'DAT']
+const DEMO_IDS = [...DEMO_GROUP_ORDER]
 
 const IDS = ['G01', 'G02', 'G03', 'XR']
 

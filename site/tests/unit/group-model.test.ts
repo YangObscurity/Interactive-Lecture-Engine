@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   anchor,
+  between,
   byOrder,
   closure,
   edgePath,
@@ -139,6 +140,67 @@ describe('edges', () => {
     expect(o.startsWith('M50 30L50 40L')).toBe(true)
     expect(o.endsWith('L250 100')).toBe(true)
     expect(o).not.toContain('C')
+  })
+  // S6Y decision 2026-11-23 21:47: two chips of one row with a chip between them are joined under the row, not across the chip
+  describe('one row, not neighbours', () => {
+    const mid = { x: 110, y: 0, w: 100, h: 30 }
+    const c = { x: 220, y: 0, w: 100, h: 30 }
+    it('between() finds the chips of the row between the two ends only', () => {
+      expect(between(a, c, [a, mid, c])).toEqual([mid])
+      expect(between(a, mid, [a, mid, c])).toEqual([])
+      expect(between(c, a, [a, mid, c, { x: 110, y: 36, w: 100, h: 30 }])).toEqual([mid])
+    })
+    it('neighbours keep the side-to-side line; with a chip between, both styles leave from the bottom edges', () => {
+      expect(edgePath(a, mid, 'curve', [a, mid, c])).toMatch(/^M100 15C/)
+      expect(edgePath(a, c, 'orthogonal', [a, mid, c])).toBe('M50 30L50 40L270 40L270 30')
+      expect(edgePath(a, c, 'curve', [a, mid, c])).toBe('M50 30C50 43.5 270 43.5 270 30')
+      // without the other chips (the old call) the line is the prototype's side-to-side one
+      expect(edgePath(a, c, 'orthogonal')).toMatch(/^M100 15L110 15/)
+    })
+    it('the line stays in the gap above the next row of chips (half the gap)', () => {
+      const next = { x: 0, y: 36, w: 320, h: 30 }
+      expect(edgePath(a, c, 'orthogonal', [a, mid, c, next])).toBe('M50 30L50 33L270 33L270 30')
+      expect(edgePath(c, a, 'curve', [a, mid, c, next])).toBe('M270 30C270 34 50 34 50 30')
+    })
+  })
+  describe('adjacent rows', () => {
+    it('keeps curve control points and sampled points strictly between the two row anchors even for wide horizontal spans', () => {
+      const cases = [
+        [a, { x: 400, y: 36, w: 100, h: 30 }], // 6px gap (same lane wrap), wide horizontal span
+        [a, { x: 500, y: 70, w: 100, h: 30 }], // 40px gap (adjacent lane), wide horizontal span
+        [{ x: 400, y: 36, w: 100, h: 30 }, a], // bottom-to-top direction
+        [a, { x: 0, y: 40, w: 100, h: 30 }], // small horizontal span with 10px gap
+      ] as const
+      for (const [from, to] of cases) {
+        const d = edgePath(from, to, 'curve')
+        const m = /^M([\d.-]+) ([\d.-]+)C([\d.-]+) ([\d.-]+) ([\d.-]+) ([\d.-]+) ([\d.-]+) ([\d.-]+)$/.exec(d)
+        expect(m, d).not.toBeNull()
+        const [, , y0, , y1, , y2, , y3] = m!.map(Number) as [number, number, number, number, number, number, number, number, number]
+        const minY = Math.min(y0, y3)
+        const maxY = Math.max(y0, y3)
+        expect(y1).toBeGreaterThan(minY)
+        expect(y1).toBeLessThan(maxY)
+        expect(y2).toBeGreaterThan(minY)
+        expect(y2).toBeLessThan(maxY)
+        for (let i = 1; i < 50; i++) {
+          const t = i / 50
+          const u = 1 - t
+          const y = u ** 3 * y0 + 3 * u ** 2 * t * y1 + 3 * u * t ** 2 * y2 + t ** 3 * y3
+          expect(y).toBeGreaterThan(minY)
+          expect(y).toBeLessThan(maxY)
+        }
+      }
+    })
+    it('keeps orthogonal stubs inside the vertical corridor on tightly wrapped rows (gap < 20px)', () => {
+      const b = { x: 400, y: 36, w: 100, h: 30 } // 6px gap
+      const o = edgePath(a, b, 'orthogonal')
+      const ys = [...o.matchAll(/[ML][\d.-]+ ([\d.-]+)/g)].map((m) => Number(m[1]))
+      expect(ys.length).toBeGreaterThan(2)
+      for (const y of ys) {
+        expect(y).toBeGreaterThanOrEqual(30)
+        expect(y).toBeLessThanOrEqual(36)
+      }
+    })
   })
 })
 

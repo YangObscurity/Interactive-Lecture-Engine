@@ -148,6 +148,8 @@ defineEmits<{
   border-radius: var(--lec-radius-2, 8px);
   padding: 8px 10px 10px;
   font-size: 13px;
+  /* the prototype's body `15px/1.6`; without it the panel takes VitePress's `body { line-height: 24px }` */
+  line-height: 1.6;
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   gap: 4px;
@@ -155,6 +157,11 @@ defineEmits<{
   color: var(--lec-text);
 }
 .cv-trace > *, .cv-trace li { min-width: 0; }
+/* the home page body is `.vp-doc`: its prose rules (`li`/`p` line-height = --lec-prose-line-height, `h5` 24px, `li + li`
+   margin) must not reach the panel's rows, buttons, headings and hints (S6Y: rows and "trace" buttons were taller than
+   the prototype) */
+.cv-trace li, .cv-trace p, .cv-trace h5 { line-height: inherit; }
+.cv-trace li { margin: 0; }
 .cv-trace header { display: flex; justify-content: space-between; align-items: center; }
 .cv-trace .k { font-size: 12px; color: var(--lec-text-muted); }
 .cv-trace .x {

@@ -102,6 +102,24 @@ for (const f of [...themeFiles, ...packCss]) {
   if (!exempt && r.colours > 0) counts[rel(f)] = r.colours
 }
 
+// ------------------------------------------------------------------ shipped packs: map surface (S6Y AH #6)
+// `--lec-canvas` is optional in the contract (a third-party pack without it keeps --lec-bg behind the maps), but the
+// packs shipped with the engine give the map stage its own colour in light and dark (home-canvas prototype `--canvas`).
+const SHIPPED_MODE_TOKENS = ['canvas']
+const packGaps = []
+for (const f of walk(PACKS_DIR, (p) => path.basename(p) === 'theme.json')) {
+  let pack
+  try {
+    pack = JSON.parse(fs.readFileSync(f, 'utf8'))
+  } catch (e) {
+    fail(2, `[theme-contract] unreadable ${rel(f)}: ${e.message}`)
+  }
+  for (const mode of ['light', 'dark']) {
+    for (const t of SHIPPED_MODE_TOKENS) if (!pack?.modes?.[mode]?.[t]) packGaps.push(`${rel(f)}: modes.${mode}.${t} (--lec-${t})`)
+  }
+}
+if (packGaps.length) console.error(`[theme-contract] shipped packs without the map tokens:\n  ${packGaps.join('\n  ')}`)
+
 let baseline = {}
 const hasBaseline = fs.existsSync(BASELINE)
 if (hasBaseline) {
@@ -138,7 +156,7 @@ if (update) {
 if (unknown.length) console.error(`[theme-contract] unknown --lec-* names (not in theme/tokens/contract.ts):\n  ${unknown.join('\n  ')}`)
 if (worse.length && !update) console.error(`[theme-contract] raw colour literals above baseline:\n  ${worse.join('\n  ')}\n  use --lec-* tokens (spec board §00) instead.`)
 if (better.length && !update) console.log(`[theme-contract] improved (run with --update to ratchet the baseline down):\n  ${better.join('\n  ')}`)
-if (unknown.length || (worse.length && !update)) process.exit(1)
+if (unknown.length || packGaps.length || (worse.length && !update)) process.exit(1)
 console.log(
   `[theme-contract] PASS — ${themeFiles.length + packCss.length} files, ${contract.size} contract names, ` +
     `${total} legacy colour literal(s) (baseline ${update ? total : baseTotal})`,

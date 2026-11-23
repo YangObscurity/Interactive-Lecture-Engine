@@ -6,7 +6,7 @@
  * in others. Every item is a real link to the lecture with its own "track" button; a cross-group item goes to its group page.
  * The page keeps the panel in the window (sticky) and moves it above the map on a narrow container (group.css).
  */
-import { computed } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import { withBase } from 'vitepress'
 import { useT } from '../../i18n/useT.ts'
 import { byOrder, closure } from './model'
@@ -36,6 +36,16 @@ const emit = defineEmits<{
 }>()
 
 const { t } = useT()
+
+// decision 2026-11-23 21:47: a new tracked lecture is shown from the top of the panel (its title and actions), not at the
+// scroll position the previous one was left at
+const root = ref<HTMLElement | null>(null)
+watch(
+  () => (props.locked ? (props.shown?.id ?? null) : null),
+  (id, prev) => {
+    if (id !== null && id !== prev) void nextTick(() => root.value?.scrollTo({ top: 0 }))
+  },
+)
 
 const info = computed<LecInfo | null>(() => (props.shown ? (props.index.lec.get(props.shown.id) ?? null) : null))
 const order = computed(() => byOrder(props.index))
@@ -84,7 +94,7 @@ const readiness = computed(() => {
 </script>
 
 <template>
-  <aside class="gp-panel" :aria-label="t('group.panel.label')" data-gp-panel>
+  <aside ref="root" class="gp-panel" :aria-label="t('group.panel.label')" data-gp-panel>
     <div v-if="!shown" class="gp-hint">
       <template v-if="hasGraph">
         <p>
@@ -133,7 +143,8 @@ const readiness = computed(() => {
       </div>
 
       <section v-if="info?.desc" class="gp-p-s gp-p-desc">
-        <details :open="descOpen">
+        <!-- keyed by lecture: each lecture opens at the 说明默认展开 setting, not at the last hand toggle (S6Y audit-group #10) -->
+        <details :key="shown.id" :open="descOpen">
           <summary>{{ t('group.panel.desc') }}</summary>
           <p :lang="notionLang || undefined" data-gp-desc>{{ info.desc }}</p>
         </details>

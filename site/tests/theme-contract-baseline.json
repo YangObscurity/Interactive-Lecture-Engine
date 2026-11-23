@@ -1,8 +1,8 @@
 {
   "note": "Raw colour literals allowed in legacy theme files. May only go down (scripts/check_theme_contract.mjs).",
-  "total": 118,
+  "total": 114,
   "files": {
     "docs/.vitepress/theme/components/LectureExportButton.vue": 30,
-    "docs/.vitepress/theme/custom.css": 88
+    "docs/.vitepress/theme/custom.css": 84
   }
 }

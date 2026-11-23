@@ -1,0 +1,10 @@
+{
+  "c1": {
+    "type": "mermaid",
+    "code": "flowchart LR\n  A[\"背景<br/>读者已经知道什么\"] --> B[\"发现<br/>数据里出现了什么变化\"]\n  B --> C[\"证据<br/>一张图只证明一件事\"]\n  C --> D[\"结论<br/>用一句话说清楚\"]\n  D --> E[\"行动<br/>建议下一步做什么\"]"
+  },
+  "c2": {
+    "type": "echarts",
+    "code": "{\n  \"title\": {\n    \"text\": \"新的取号方式让平均等待时间缩短了约三分之一\",\n    \"subtext\": \"某服务窗口每周平均等待时间（示意数据）\",\n    \"left\": 8\n  },\n  \"tooltip\": {\n    \"trigger\": \"axis\"\n  },\n  \"grid\": {\n    \"left\": 56,\n    \"right\": 24,\n    \"top\": 92,\n    \"bottom\": 60\n  },\n  \"xAxis\": {\n    \"type\": \"category\",\n    \"data\": [\n      \"第1周\",\n      \"第2周\",\n      \"第3周\",\n      \"第4周\",\n      \"第5周\",\n      \"第6周\",\n      \"第7周\",\n      \"第8周\",\n      \"第9周\",\n      \"第10周\"\n    ],\n    \"name\": \"周\",\n    \"nameLocation\": \"middle\",\n    \"nameGap\": 30\n  },\n  \"yAxis\": {\n    \"type\": \"value\",\n    \"name\": \"等待时间（min）\",\n    \"min\": 0,\n    \"nameTextStyle\": {\n      \"align\": \"left\"\n    }\n  },\n  \"series\": [\n    {\n      \"name\": \"平均等待\",\n      \"type\": \"line\",\n      \"data\": [\n        24,\n        25,\n        23,\n        26,\n        24,\n        17,\n        16,\n        17,\n        15,\n        16\n      ],\n      \"itemStyle\": {\n        \"color\": \"#DB2777\"\n      },\n      \"markLine\": {\n        \"symbol\": \"none\",\n        \"label\": {\n          \"formatter\": \"第6周起用新的取号方式\"\n        },\n        \"lineStyle\": {\n          \"type\": \"dashed\",\n          \"color\": \"#475569\"\n        },\n        \"data\": [\n          {\n            \"xAxis\": \"第6周\"\n          }\n        ]\n      }\n    }\n  ]\n}"
+  }
+}

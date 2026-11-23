@@ -146,6 +146,8 @@ const batch = ref(false)
 const selected = ref<ReadonlySet<string>>(new Set())
 const pulse = ref<ReadonlySet<string>>(new Set())
 const live = ref('')
+const toast = ref('')
+const toastOn = ref(false)
 const descOpen = ref(typeof document !== 'undefined' ? document.documentElement.getAttribute('data-lec-desc') !== 'closed' : true)
 const laneMap = ref<InstanceType<typeof LaneMap> | null>(null)
 const edgeStyle = useEdgeStyle()
@@ -169,7 +171,15 @@ function setLive(text: string): void {
   clearTimeout(liveTimer)
   liveTimer = setTimeout(() => (live.value = ''), 8000)
 }
+/** The visible note after a mark (prototype `toast`: fixed at the bottom, 2.6 s); the status line is for screen readers only. */
+function showToast(text: string): void {
+  toast.value = text
+  toastOn.value = true
+  clearTimeout(toastTimer)
+  toastTimer = setTimeout(() => (toastOn.value = false), 2600)
+}
 let liveTimer: ReturnType<typeof setTimeout> | undefined
+let toastTimer: ReturnType<typeof setTimeout> | undefined
 let pulseTimer: ReturnType<typeof setTimeout> | undefined
 
 function lock(id: string | null, announce = false): void {
@@ -185,7 +195,8 @@ function lock(id: string | null, announce = false): void {
 function track(id: string): void {
   if (inGroup(id)) {
     lock(id, true)
-    void nextTick(() => laneMap.value?.reveal(id, false))
+    // the prototype's trackId: `nearest`, so a lecture already in sight does not move (and on a phone it is kept below the panel)
+    void nextTick(() => laneMap.value?.reveal(id, false, 'nearest'))
     return
   }
   // another group: its page, with the lecture locked there
@@ -229,7 +240,9 @@ function writeStatus(ids: readonly string[], status: LecStatus): void {
   })
   const head = t('group.live.marked', { status: statusText(status) })
   const shownNames = names.slice(0, 5).join(t('card.tagsSeparator')) + (names.length > 5 ? t('group.live.more', { n: names.length }) : '')
-  setLive(names.length ? head + t('group.live.nowReady', { names: shownNames }) : head)
+  const text = names.length ? head + t('group.live.nowReady', { names: shownNames }) : head
+  setLive(text)
+  showToast(text)
 }
 
 function mark(id: string, status: LecStatus): void {
@@ -263,7 +276,28 @@ function onLaneSpace(id: string): void {
 }
 function onPeek(id: string | null): void {
   if (lockId.value !== null || batch.value) return
-  peekId.value = id
+  clearTimeout(peekTimer)
+  if (id !== null) {
+    peekId.value = id
+    return
+  }
+  // the pointer left the map: keep the preview for a moment, so it can cross the gap into the panel and use its buttons
+  if (inPanel) return
+  peekTimer = setTimeout(() => {
+    if (!inPanel) peekId.value = null
+  }, PEEK_GRACE)
+}
+/** Decision 2026-11-23 21:47: the preview stays while the pointer is in the panel; it goes when the pointer leaves the panel. */
+const PEEK_GRACE = 250
+let peekTimer: ReturnType<typeof setTimeout> | undefined
+let inPanel = false
+function onPanelEnter(): void {
+  inPanel = true
+  clearTimeout(peekTimer)
+}
+function onPanelLeave(): void {
+  inPanel = false
+  onPeek(null)
 }
 function onBlank(): void {
   if (lockId.value !== null && !batch.value) lock(null)
@@ -364,6 +398,8 @@ onBeforeUnmount(() => {
   window.removeEventListener('hashchange', onHashChange)
   window.removeEventListener('lecture:group-desc-changed', onGroupDescChanged)
   clearTimeout(liveTimer)
+  clearTimeout(toastTimer)
+  clearTimeout(peekTimer)
   clearTimeout(pulseTimer)
 })
 </script>
@@ -466,8 +502,14 @@ onBeforeUnmount(() => {
           @untrack="lock(null)"
           @mark="mark"
           @update:desc-open="setDescOpen"
+          @mouseenter="onPanelEnter"
+          @mouseleave="onPanelLeave"
         />
       </div>
     </section>
+    <!-- the visible note after a mark (prototype `.toast`); screen readers get the same text from the status line above -->
+    <Teleport v-if="gpReady" to="body">
+      <div class="gp-toast" :class="{ on: toastOn }" aria-hidden="true" data-gp-toast>{{ toast }}</div>
+    </Teleport>
   </div>
 </template>

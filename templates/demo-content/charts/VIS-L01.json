@@ -1,0 +1,14 @@
+{
+  "c1": {
+    "type": "echarts",
+    "code": "{\n  \"title\": {\n    \"text\": \"好图：排好序的条形图\",\n    \"subtext\": \"一周内各类反馈的数量（条）\",\n    \"left\": 8\n  },\n  \"tooltip\": {\n    \"trigger\": \"axis\"\n  },\n  \"grid\": {\n    \"left\": 64,\n    \"right\": 40,\n    \"top\": 92,\n    \"bottom\": 60\n  },\n  \"xAxis\": {\n    \"type\": \"value\",\n    \"name\": \"数量（条）\",\n    \"min\": 0,\n    \"nameLocation\": \"middle\",\n    \"nameGap\": 30\n  },\n  \"yAxis\": {\n    \"type\": \"category\",\n    \"data\": [\n      \"其他\",\n      \"包装\",\n      \"客服\",\n      \"价格\",\n      \"配送\",\n      \"质量\"\n    ]\n  },\n  \"series\": [\n    {\n      \"name\": \"反馈数\",\n      \"type\": \"bar\",\n      \"data\": [\n        6,\n        12,\n        18,\n        35,\n        37,\n        42\n      ],\n      \"label\": {\n        \"show\": true,\n        \"position\": \"right\"\n      },\n      \"itemStyle\": {\n        \"color\": \"#DB2777\"\n      }\n    }\n  ]\n}"
+  },
+  "c2": {
+    "type": "echarts",
+    "code": "{\n  \"title\": {\n    \"text\": \"坏图：同一组数据画成饼图\",\n    \"subtext\": \"配送、价格、质量三块几乎一样大，谁多谁少看不出来\",\n    \"left\": 8\n  },\n  \"tooltip\": {\n    \"trigger\": \"item\"\n  },\n  \"legend\": {\n    \"bottom\": 0\n  },\n  \"series\": [\n    {\n      \"name\": \"反馈数\",\n      \"type\": \"pie\",\n      \"radius\": [\n        \"0%\",\n        \"55%\"\n      ],\n      \"center\": [\n        \"50%\",\n        \"55%\"\n      ],\n      \"label\": {\n        \"formatter\": \"{b}\"\n      },\n      \"data\": [\n        {\n          \"name\": \"质量\",\n          \"value\": 42\n        },\n        {\n          \"name\": \"配送\",\n          \"value\": 37\n        },\n        {\n          \"name\": \"价格\",\n          \"value\": 35\n        },\n        {\n          \"name\": \"客服\",\n          \"value\": 18\n        },\n        {\n          \"name\": \"包装\",\n          \"value\": 12\n        },\n        {\n          \"name\": \"其他\",\n          \"value\": 6\n        }\n      ]\n    }\n  ]\n}"
+  },
+  "c3": {
+    "type": "mermaid",
+    "code": "flowchart TB\n  Q{你想让读者看出什么} --> A[比较几个类别的大小]\n  Q --> B[随时间的变化]\n  Q --> C[整体由哪些部分组成]\n  Q --> D[数值怎样分布]\n  Q --> E[两个量有没有关系]\n  A --> A1[排好序的条形图]\n  B --> B1[折线图]\n  C --> C1[\"堆叠条形图<br/>部分很少时可用饼图\"]\n  D --> D1[直方图]\n  E --> E1[散点图]"
+  }
+}

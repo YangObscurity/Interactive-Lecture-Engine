@@ -19,7 +19,7 @@ defineProps<LectureTitleBlockProps>()
       <tbody>
         <tr v-if="nodeId || difficulty > 0">
           <th scope="row">{{ labels.node }}</th>
-          <td><code v-if="nodeId">{{ nodeId }}</code><span v-else class="lec-tb-none">{{ labels.none }}</span></td>
+          <td><code v-if="nodeId" :style="{ '--tb-id-ch': nodeId.length }">{{ nodeId }}</code><span v-else class="lec-tb-none">{{ labels.none }}</span></td>
           <th scope="row">{{ labels.difficulty }}</th>
           <td>
             <span v-if="difficulty > 0" class="lec-tb-stars" :aria-label="labels.starsAria">
@@ -48,10 +48,12 @@ defineProps<LectureTitleBlockProps>()
 </template>
 
 <style scoped>
+/* S6Y F1: own line height (spec board controls: 1.6) instead of VitePress' 24px, see the engine default */
 .lec-tb--ds {
   display: grid;
   gap: var(--lec-space-3);
   margin: 0 0 var(--lec-space-5);
+  line-height: 1.6;
 }
 .lec-tb-top {
   display: flex;
@@ -83,11 +85,13 @@ defineProps<LectureTitleBlockProps>()
   border: var(--lec-line-hair) solid var(--lec-border);
   background: var(--lec-surface);
   color: var(--lec-text);
+  /* the boxed code must not raise the line above the group name (tb-top 30px = 20 + 8 + 2, spec board 06) */
+  line-height: 1.4;
 }
 .lec-tb-h1 {
   margin: 0;
   font-family: var(--lec-font-heading);
-  font-size: 34px;
+  font-size: 40px;
   font-weight: var(--lec-heading-weight);
   line-height: 1.2;
   color: var(--lec-text);
@@ -130,7 +134,10 @@ defineProps<LectureTitleBlockProps>()
 .lec-tb-spec code {
   font-family: var(--lec-font-mono);
   font-size: 12.5px;
-  /* a long node id breaks instead of widening the table past a narrow phone screen */
+  /* a long node id breaks instead of widening the table past a narrow phone screen; an ordinary id keeps its own width
+     (min-width = its length in ch, capped at 40vw) so the table does not squeeze it onto two lines (audit-spec #2) */
+  display: inline-block;
+  min-width: min(calc(var(--tb-id-ch, 0) * 1ch), 40vw);
   overflow-wrap: anywhere;
 }
 .lec-tb-spec a {
@@ -173,7 +180,12 @@ defineProps<LectureTitleBlockProps>()
 }
 @media (max-width: 560px) {
   .lec-tb-h1 {
-    font-size: 27px;
+    font-size: 28px;
+  }
+  /* spec board 16 (.phone .tb-spec th, td) */
+  .lec-tb-spec th,
+  .lec-tb-spec td {
+    padding: 5px var(--lec-space-2);
   }
 }
 </style>

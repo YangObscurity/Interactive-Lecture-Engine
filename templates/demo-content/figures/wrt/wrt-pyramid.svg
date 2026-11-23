@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="480" height="230" viewBox="0 0 480 230" font-family="sans-serif">
+  <polygon points="30,20 350,20 299.5,80 80.5,80" fill="#475569"/>
+  <polygon points="80.5,80 299.5,80 244.7,145 135.3,145" fill="#64748B"/>
+  <polygon points="135.3,145 244.7,145 190,210" fill="#94A3B8"/>
+  <g fill="#FFFFFF" text-anchor="middle">
+    <text x="190" y="56" font-size="16">结论与建议</text>
+    <text x="190" y="118" font-size="14">主要理由</text>
+    <text x="190" y="172" font-size="11">方法与细节</text>
+  </g>
+  <g stroke="#94A3B8" stroke-dasharray="4 3">
+    <line x1="330" y1="50" x2="366" y2="50"/>
+    <line x1="280" y1="113" x2="366" y2="113"/>
+    <line x1="230" y1="170" x2="366" y2="170"/>
+  </g>
+  <g font-size="13" fill="#334155">
+    <text x="372" y="55">所有读者</text>
+    <text x="372" y="118">部分读者</text>
+    <text x="372" y="175">少数读者</text>
+  </g>
+</svg>

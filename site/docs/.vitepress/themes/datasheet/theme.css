@@ -22,13 +22,13 @@
   opacity: 0.6;
 }
 
-/* the place of the title block before a restricted tier's data arrives (see LectureTitleHost.vue) */
+/* the place of the title block before a restricted tier's data arrives (see LectureTitleHost.vue); S6Y F1 heights (225) */
 [data-lec-theme='datasheet'] .lec-tb-ph {
-  min-height: 237px;
+  min-height: 225px;
 }
 @media (max-width: 560px) {
   [data-lec-theme='datasheet'] .lec-tb-ph {
-    min-height: 300px;
+    min-height: 225px;
   }
 }
 

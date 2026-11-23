@@ -405,6 +405,8 @@ function derive(values: ModeValues, dark: boolean): Record<ModeToken, string> {
   v.chip ??= v.text
   v['chip-text'] ??= v.bg
   v['chip-edge'] ??= v.text
+  // the map stage (S6Y AH #6): a pack without its own canvas keeps the page background behind the maps
+  v.canvas ??= v.bg
   for (const k of ['accent', 'danger', 'warning'] as const) {
     const tint = `${k}-tint` as const
     v[tint] ??= rgba(v[k], TINT_ALPHA[k][dark ? 'dark' : 'light'])
@@ -431,6 +433,8 @@ export function resolveTheme(src: ThemeSource, base?: ThemeSource): ParseResult<
     const isBase = (BASE_MODES as readonly string[]).includes(mode)
     if (!isBase) tints.push(mode)
     const merged: ModeValues = isBase ? { ...own } : { ...light, ...own }
+    // a tint changes the page background: the light canvas (grey) would not sit on it; derive it from the tint's bg
+    if (!isBase && own.canvas === undefined) delete merged.canvas
     const missing = REQUIRED_MODE_TOKENS.filter((t) => merged[t] === undefined)
     for (const t of missing) {
       issues.push({ severity: 'error', code: 'missing-token', theme: src.id, mode, token: t, message: `theme "${src.id}" mode "${mode}": missing required token --lec-${t}` })

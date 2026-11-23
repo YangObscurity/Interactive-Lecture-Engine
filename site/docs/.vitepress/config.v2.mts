@@ -38,7 +38,7 @@ const lectureConfig = loadLectureConfig({ paths: contentPaths })
 const themesDir = path.join(here, 'themes')
 
 /** Throws (failing dev/build) when a theme pack or override is invalid. */
-const themeBuild = buildThemes(lectureConfig, { themesDir })
+const themeBuild = buildThemes(lectureConfig, { themesDir, themeFile: contentPaths.themeFile })
 
 /** Inline first-paint script: the remembered home map mode as `data-home-map` on `<html>` (theme/core/homeMapMode.ts). */
 export function v2HomeMapHead(): HeadConfig {
@@ -91,7 +91,7 @@ function noMockInProdBuildPlugin(): PluginOption {
 
 export const v2VitePlugins: PluginOption[] = [
   noMockInProdBuildPlugin(),
-  lectureThemePlugin({ config: lectureConfig, themesDir, initial: themeBuild }),
+  lectureThemePlugin({ config: lectureConfig, themesDir, themeFile: contentPaths.themeFile, initial: themeBuild }),
   companionPromptsPlugin(),
   figuresDevPlugin(),
   dashboardDevPlugin(),

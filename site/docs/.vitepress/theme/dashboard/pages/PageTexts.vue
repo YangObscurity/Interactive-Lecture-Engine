@@ -178,11 +178,13 @@ const rules = computed(() => {
               :placeholder="SITE_TEXT_HINTS[loc][f]"
               :aria-label="`${t(FIELD_KEYS[f].label)} (${loc})`"
               :data-texts-input="`${loc}.${f}`"
+              :aria-invalid="form[loc][f].length > FIELD_LIMITS[f] ? 'true' : undefined"
               @input="setField(loc, f, ($event.target as HTMLInputElement).value)"
             />
             <span class="db-meta" :data-texts-rule="`${loc}.${f}`">
               <span v-if="!form[loc][f].trim() && REQUIRED_FIELDS.includes(f)" class="db-err"><span class="dm" data-k="bad" aria-hidden="true"></span>{{ t('dsh.common.requiredEmpty') }}</span>
               <span v-else-if="!form[loc][f].trim()" class="db-muted"><span class="dm" data-k="off" aria-hidden="true"></span>{{ t('dsh.common.notFilled') }} · {{ t(FIELD_KEYS[f].rule) }}</span>
+              <span v-if="form[loc][f].length > FIELD_LIMITS[f]" class="db-err" data-texts-over><span class="dm" data-k="bad" aria-hidden="true"></span>{{ t('dsh.common.overLimit') }}</span>
               <span class="pe-count" :class="{ 'db-err': form[loc][f].length > FIELD_LIMITS[f] }">{{ form[loc][f].length }} / {{ FIELD_LIMITS[f] }}</span>
             </span>
           </template>

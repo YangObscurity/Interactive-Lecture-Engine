@@ -93,13 +93,13 @@ for (const theme of SKINS) {
         await page.mouse.move(b.x + b.width - 4, b.y + b.height - 4, { steps: 8 })
         await page.mouse.up()
         expect(await page.evaluate(() => (window.getSelection()?.toString() ?? '').trim()), 'text selected by dragging over a chart').toBe('')
-        // a press and release on the image of a Mermaid / WaveDrom figure is a click and opens the viewer: close it, the icon opens it below
+        // a press and release on the image of a figure (ECharts included since S6Y audit-spec #9) is a click and opens the viewer: close it, the icon opens it below
         if ((await page.locator('.chart-modal').count()) > 0) {
           await page.keyboard.press('Escape')
           await expect(page.locator('.chart-modal')).toHaveCount(0)
         }
         // the viewer: same, and a drag only pans (the selection stays empty)
-        // (the icon, not the image: a click on an ECharts image belongs to ECharts)
+        // (opened from the icon here)
         await body.hover()
         await page.locator('figure.chart').first().locator('.chart-enlarge').click()
         await expect(page.locator('.chart-modal')).toHaveCount(1)

@@ -283,6 +283,8 @@ watch(
   color: var(--lec-text);
   font-family: var(--lec-font-body);
   font-size: 13.5px;
+  /* S6Y F1: own line height (spec board 04.1: 1.6) instead of VitePress' 24px */
+  line-height: 1.6;
   min-height: 0;
   box-shadow: none;
 }
@@ -459,6 +461,8 @@ watch(
   font-family: var(--lec-font-mono);
   font-weight: 400;
   font-size: 11px;
+  /* S6Y F1: a mono key cap inside the serif hint line must not raise it (spec board 04.1 hint 36.2) */
+  line-height: 1.2;
   border: var(--lec-line-hair) solid var(--lec-border);
   border-radius: var(--lec-radius-1);
   padding: 0 4px;

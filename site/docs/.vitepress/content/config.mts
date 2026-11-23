@@ -5,6 +5,7 @@
 import fs from 'node:fs'
 import { LectureConfigError, validateLectureConfig } from '../lecture-config.mts'
 import type { LectureConfig } from '../lecture-config.mts'
+import { AccessConfigError, validateAccessConfig } from '../access/tiers.ts'
 import { resolveContent, type ContentPaths, type ResolveContentOptions } from './paths.mts'
 import { loadTsModuleSync } from './ts-loader.mts'
 
@@ -12,6 +13,18 @@ export interface LoadedLectureConfig {
   config: LectureConfig
   file: string
   source: 'content' | 'default'
+  accessFile?: string
+}
+
+/**
+ * Strips UTF-8 BOM and single-line/multi-line comments from JSON string while preserving strings.
+ */
+export function stripJsonCommentsAndBom(raw: string): string {
+  const noBom = raw.replace(/^\uFEFF/, '').replace(/\uFEFF/g, '')
+  return noBom.replace(
+    /("(?:[^"\\]|\\.)*")|(\/\*[\s\S]*?\*\/|\/\/[^\r\n]*)/g,
+    (match, strGroup) => (strGroup !== undefined ? strGroup : '')
+  )
 }
 
 export function resolveSiteConfigFile(paths: ContentPaths = resolveContent()): { file: string; source: 'content' | 'default' } {
@@ -49,7 +62,35 @@ export function loadLectureConfigInfo(options: ResolveContentOptions & { paths?:
   if (!exported || typeof exported !== 'object' || Array.isArray(exported)) {
     throw new LectureConfigError(`lecture.config.ts: ${file} must default-export a configuration object`)
   }
-  return { config: validateLectureConfig(exported as LectureConfig), file, source }
+  let config = validateLectureConfig(exported as LectureConfig)
+
+  let loadedAccessFile: string | undefined
+  if (paths.accessFile && fs.existsSync(paths.accessFile)) {
+    loadedAccessFile = paths.accessFile
+    let raw: string
+    try {
+      raw = fs.readFileSync(paths.accessFile, 'utf8')
+    } catch (err) {
+      throw new LectureConfigError(`access.json: unable to read ${paths.accessFile}: ${(err as Error).message}`, { cause: err })
+    }
+    let parsed: unknown
+    try {
+      parsed = JSON.parse(stripJsonCommentsAndBom(raw))
+    } catch (err) {
+      throw new LectureConfigError(`access.json: ${paths.accessFile} is not valid JSON: ${(err as Error).message}`, { cause: err })
+    }
+    try {
+      const access = validateAccessConfig(parsed, undefined, paths.accessFile)
+      config = { ...config, access }
+    } catch (err) {
+      if (err instanceof AccessConfigError) {
+        throw new LectureConfigError(err.message, { cause: err })
+      }
+      throw err
+    }
+  }
+
+  return { config, file, source, ...(loadedAccessFile ? { accessFile: loadedAccessFile } : {}) }
 }
 
 /** Load and validate the active site config (see `loadLectureConfigInfo`). */

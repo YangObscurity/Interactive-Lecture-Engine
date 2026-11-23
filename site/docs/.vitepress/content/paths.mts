@@ -36,6 +36,8 @@ export interface ContentPaths {
   vpRoot: string
   siteConfig: string
   defaultSiteConfig: string
+  /** Access configuration file: `<root>/access.json` in content mode, `<siteRoot>/access.json` in-place. */
+  accessFile: string
   /** Site texts file (F10): `<root>/site-texts.json` in content mode, `site/site-texts.json` in-place. */
   siteTexts: string
   /** Engine template read when `siteTexts` does not exist. */
@@ -54,6 +56,8 @@ export interface ContentPaths {
   aiToolsFile: string
   /** Engine template for AI tools config (`site/ai-tools.example.json`). */
   aiToolsExample: string
+  /** Site-level theme override file: `<root>/theme.json` in content mode, `site/theme.json` in-place. */
+  themeFile: string
   /** `<repo>/content` when it exists but is not a content root (no `site.config.ts`, no `groups.ts`); else null. */
   ignoredContentDir: string | null
   themeDir: string
@@ -85,6 +89,7 @@ export function siteFilesIn(siteRoot: string): {
   promptsExample: string
   aiToolsFile: string
   aiToolsExample: string
+  themeFile: string
 } {
   return {
     siteTexts: path.join(siteRoot, 'site-texts.json'),
@@ -93,6 +98,7 @@ export function siteFilesIn(siteRoot: string): {
     promptsExample: path.join(siteRoot, 'prompts', 'companion.example.json'),
     aiToolsFile: path.join(siteRoot, 'ai-tools.json'),
     aiToolsExample: path.join(siteRoot, 'ai-tools.example.json'),
+    themeFile: path.join(siteRoot, 'theme.json'),
   }
 }
 
@@ -123,6 +129,7 @@ function buildContentModePaths(
     vpRoot,
     siteConfig: path.join(root, 'site.config.ts'),
     defaultSiteConfig,
+    accessFile: path.join(root, 'access.json'),
     siteTexts: path.join(root, 'site-texts.json'),
     siteTextsExample: engineFiles.siteTextsExample,
     groups: path.join(root, 'groups.ts'),
@@ -141,6 +148,7 @@ function buildContentModePaths(
     promptsExample: engineFiles.promptsExample,
     aiToolsFile: path.join(root, 'ai-tools.json'),
     aiToolsExample: engineFiles.aiToolsExample,
+    themeFile: path.join(root, 'theme.json'),
     ignoredContentDir: null,
     themeDir: path.join(root, 'theme'),
     publicDir: path.join(root, 'public'),
@@ -214,6 +222,7 @@ export function resolveContent(options: ResolveContentOptions = {}): ContentPath
     vpRoot,
     siteConfig: defaultSiteConfig,
     defaultSiteConfig,
+    accessFile: path.join(siteRoot, 'access.json'),
     ...siteFilesIn(siteRoot),
     groups: path.join(vpRoot, 'groups.mts'),
     lecturesDir: docsRoot,

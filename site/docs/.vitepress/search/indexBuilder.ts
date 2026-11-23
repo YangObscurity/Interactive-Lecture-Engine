@@ -27,6 +27,7 @@ import {
   type TitleIndexGroup,
 } from './format.ts'
 import { extractSearchablePage } from './markdown.ts'
+import { createFigureKindLookup, defaultFiguresDir, resolveFigureXrefsForSearch, type FigureKindLookup } from './figureLabels.ts'
 
 export interface SearchGroupMeta {
   id: string
@@ -47,6 +48,12 @@ export interface BuildSearchOptions {
   localizedGroupTitles?: Readonly<Record<string, Readonly<Record<string, string>>>>
   maxTitleBytes?: number
   maxShardBytes?: number
+  /**
+   * Figure-pack registries, to number `[](fig:id)` / `[](tab:id)` like the page does (search/figureLabels.ts). Defaults to
+   * the content's figures directory (`resolveContent().figuresDir`); `figureKindOf` overrides the lookup (tests).
+   */
+  figuresDir?: string
+  figureKindOf?: FigureKindLookup
 }
 
 export interface LocaleSearchStats {
@@ -315,6 +322,9 @@ export function buildSearchArtifacts(opts: BuildSearchOptions): SearchBuildResul
   }
 
   const inlineTier = opts.accessPlan?.inlineTier ?? 'public'
+  const figureKindOf = opts.figureKindOf ?? createFigureKindLookup(opts.figuresDir ?? defaultFiguresDir())
+  const withFigureLabels = (md: string, relPath: string, locale: string, pageGroup: string | null): string =>
+    resolveFigureXrefsForSearch(md, { relPath, pageGroup, localeKey: locale === 'root' ? '' : locale, kindOf: figureKindOf })
 
   for (const relPath of allFiles) {
     if (isExcluded(relPath, excludes)) continue
@@ -390,7 +400,7 @@ export function buildSearchArtifacts(opts: BuildSearchOptions): SearchBuildResul
       groupMeta = { id: 'SITE', dir: '', title: 'Site', catSlot: 2 }
     }
 
-    const md = fs.readFileSync(path.join(opts.docsRoot, relPath), 'utf8')
+    const md = withFigureLabels(fs.readFileSync(path.join(opts.docsRoot, relPath), 'utf8'), relPath, locale, owner?.dir ?? null)
     const { lectureNo, code } = parseLectureCode(pathNoLocale, groupId)
     const fallbackTitle = code || pathNoLocale.replace(/\.md$/, '')
     const extracted = extractSearchablePage(md, fallbackTitle)
