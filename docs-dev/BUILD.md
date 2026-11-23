@@ -123,6 +123,11 @@ private site repository and in the engine repository, which has no `content/` at
   `npm run build:e2e`, then `npx playwright test tests/e2e/visual-v2.spec.ts tests/e2e/atlas.spec.ts tests/e2e/canvas.spec.ts tests/e2e/group-page.spec.ts tests/e2e/slots-contract.spec.ts --project prod --grep "@visual" --update-snapshots`.
   A failing visual test without such a change is a regression (the diff is in `site/test-results/`), not a reason to
   update.
+- CI (`.github/workflows/v2-ci.yml`, the same file in a private site repository and in the engine repository) runs
+  `static` (typecheck, lint, unit tests), `build-and-gates` (`npm run build`, `check:content` and the three dist checks;
+  the V1 lecture scripts only where `content/groups.ts` exists) and `e2e` (`build:e2e`, the `prod` project with
+  `--grep-invert @visual`, `test:e2e:access`) on pushes and pull requests to `main` and `v2`. The screenshot baselines
+  were recorded in Chrome on Windows, so CI on Linux leaves the `@visual` tests out; run them locally as above.
 - `npm run screenshots:readme` (`scripts/readme_screenshots.mjs`) writes the README pictures to `<repo>/docs/screenshots/`:
   home atlas (reader light and datasheet dark), the MEA group page, a lecture with a chart and a formula, the
   dependency canvas, a concept hover card, the AI companion with one canned exchange, the Dashboard overview and a
