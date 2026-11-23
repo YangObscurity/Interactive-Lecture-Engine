@@ -48,7 +48,8 @@ for (const theme of SKINS) {
           await expect(folds).toHaveCount(0)
         }
         await expect(page.locator('figure.chart button:not(.chart-enlarge)')).toHaveCount(0)
-        const text = await page.locator('figure.chart').evaluateAll((els) => els.map((e) => (e as HTMLElement).innerText + ' ' + e.innerHTML.replace(/<[^>]*>/g, '')).join('\n'))
+        // the rendered text and the text nodes (an entity written as text shows up in either, e.g. `&#38;` or `&amp;#38;`)
+        const text = await page.locator('figure.chart').evaluateAll((els) => els.map((e) => (e as HTMLElement).innerText + ' ' + (e.textContent ?? '')).join('\n'))
         expect(text, 'literal HTML entity text on a figure').not.toMatch(/&#\d+;?|&amp;#/)
         await expect(page.locator('figure.chart .chart-enlarge')).toHaveCount(n)
         const first = figs.first()

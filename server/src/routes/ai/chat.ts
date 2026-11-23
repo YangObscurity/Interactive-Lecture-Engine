@@ -12,6 +12,7 @@ import type { Context } from 'hono'
 import type { AppEnv } from '../../app.js'
 import type { AppConfig } from '../../config/schema.js'
 import { HttpError, badRequest, payloadTooLarge, rateLimited } from '../../http/errors.js'
+import { trimTrailingSlashes } from '../../http/url.js'
 import { mintToolTicket } from '../../tools/ticket.js'
 import { type AiCallRecord, type AiRuntime, getRequestUserId, hashUserId, writeAiAccessLog } from './runtime.js'
 import { dataFrame, DifyFrameScanner, errorFrame, FrameBoundary, type SseErrorCode } from './sse.js'
@@ -333,7 +334,7 @@ async function runNativeOpenAiStream(params: {
   const model: LanguageModel = rt.modelFactory
     ? rt.modelFactory(config)
     : createOpenAI({
-        baseURL: config.openaiApiBase.replace(/\/+$/, ''),
+        baseURL: trimTrailingSlashes(config.openaiApiBase),
         apiKey: config.openaiApiKey ?? '',
         fetch: createObservedFetch(() => {
           upstreamOpened = true
@@ -700,7 +701,7 @@ export function createChatHandler(config: AppConfig, rt: AiRuntime) {
         userId,
         record,
         clientSignal: c.req.raw.signal,
-        url: `${config.difyApiBase.replace(/\/+$/, '')}/chat-messages`,
+        url: `${trimTrailingSlashes(config.difyApiBase)}/chat-messages`,
         headers: {
           Authorization: `Bearer ${config.difyApiKey ?? ''}`,
           'Content-Type': 'application/json',

@@ -121,7 +121,11 @@ test.describe('code syntax colours', () => {
     // only Shiki's own declarations are left on code tokens
     const styles = await page.evaluate((sel) =>
       Array.from(document.querySelectorAll(sel), (s) => s.getAttribute('style') ?? ''), COMPANION_TOKENS)
-    for (const s of styles) expect(s).toMatch(/^(--shiki-(light|dark)(-font-(style|weight))?:[^;]+;?)+$/)
+    for (const s of styles) {
+      const decls = s.split(';').filter(Boolean)
+      expect(decls.length, s).toBeGreaterThan(0)
+      for (const d of decls) expect(d, s).toMatch(/^--shiki-(?:light|dark)(?:-font-(?:style|weight))?:[^;]+$/)
+    }
     // the copy button still carries the plain code
     await expect(blocks.first().locator('.ai-code-copy-btn')).toHaveAttribute('data-code', /def mean/)
   })

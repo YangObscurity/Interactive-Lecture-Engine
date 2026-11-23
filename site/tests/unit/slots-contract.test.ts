@@ -319,6 +319,15 @@ describe('virtual:lecture-components', () => {
   const datasheetFile = path.join(THEMES_DIR, 'datasheet/components/SidebarStatus.vue').replace(/\\/g, '/')
   const defaultFile = path.join(SITE, 'docs/.vitepress/theme/slots/default/SidebarStatus.vue').replace(/\\/g, '/')
   const packFile = path.join(SITE, EXAMPLE_REL, 'components/SidebarStatus.vue').replace(/\\/g, '/')
+  /** The file of the lazy SidebarStatus entry for `impl` in the generated module, read back from it (not rebuilt as code). */
+  const lazyFileOf = (src: string, impl: string): string | null => {
+    const head = `"SidebarStatus": { impl: "${impl}", load: () => import(`
+    const tail = ').then((m) => m.default) }'
+    const at = src.indexOf(head)
+    if (at < 0) return null
+    const end = src.indexOf(tail, at + head.length)
+    return end < 0 ? null : (JSON.parse(src.slice(at + head.length, end)) as string)
+  }
 
   it('default theme with components: statically imported; the fallback of the other theme is the lazy engine default', () => {
     const src = componentsModuleSource(build({ theme: 'datasheet', themes: ['reader'] }))
@@ -328,7 +337,7 @@ describe('virtual:lecture-components', () => {
     // datasheet reuses the static binding, never a second dynamic import of the same file
     expect(src).toContain('"SidebarStatus": { impl: "datasheet", load: () => Promise.resolve(__static0) }')
     // reader declares no components: engine default, loaded on demand
-    expect(src).toContain(`"SidebarStatus": { impl: "default", load: () => import(${JSON.stringify(defaultFile)}).then((m) => m.default) }`)
+    expect(lazyFileOf(src, 'default')).toBe(defaultFile)
     // one static import per slot of the datasheet pack: SidebarStatus, six atlas slots, GroupCard, GroupMap
     expect(src.match(/import __static/g)).toHaveLength(SLOT_NAMES.length)
   })
@@ -337,7 +346,7 @@ describe('virtual:lecture-components', () => {
     const src = componentsModuleSource(build({ theme: 'reader', themes: ['datasheet'] }))
     expect(src).toContain(`import __static0 from ${JSON.stringify(defaultFile)}`)
     expect(src).toContain('"SidebarStatus": { impl: "default", load: () => Promise.resolve(__static0) }')
-    expect(src).toContain(`"SidebarStatus": { impl: "datasheet", load: () => import(${JSON.stringify(datasheetFile)}).then((m) => m.default) }`)
+    expect(lazyFileOf(src, 'datasheet')).toBe(datasheetFile)
   })
 
   it('a theme that covers no slot maps every slot to the engine default', () => {
@@ -348,7 +357,7 @@ describe('virtual:lecture-components', () => {
 
   it('the example pack is a lazy implementation next to a default theme without components', () => {
     const src = componentsModuleSource(build({ theme: 'reader', themes: ['minimal-slot'], themePacks: [EXAMPLE_REL] }))
-    expect(src).toContain(`"SidebarStatus": { impl: "minimal-slot", load: () => import(${JSON.stringify(packFile)}).then((m) => m.default) }`)
+    expect(lazyFileOf(src, 'minimal-slot')).toBe(packFile)
   })
 
   it('has an entry for every slot of every enabled theme', () => {

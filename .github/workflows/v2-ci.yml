@@ -12,6 +12,10 @@ concurrency:
   group: v2-ci-${{ github.ref }}
   cancel-in-progress: true
 
+# the jobs only read the repository (artifacts go through the runner's own token)
+permissions:
+  contents: read
+
 defaults:
   run:
     working-directory: site

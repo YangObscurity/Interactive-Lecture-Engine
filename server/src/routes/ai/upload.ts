@@ -2,6 +2,7 @@ import type { Context } from 'hono'
 import type { AppEnv } from '../../app.js'
 import type { AppConfig } from '../../config/schema.js'
 import { HttpError, rateLimited } from '../../http/errors.js'
+import { trimTrailingSlashes } from '../../http/url.js'
 import { type AiCallRecord, getRequestUserId, type AiRuntime } from './runtime.js'
 
 type Signature = 'pdf' | 'png' | 'jpeg' | 'gif' | 'webp' | 'zip' | 'ole' | 'text'
@@ -150,7 +151,7 @@ export function createUploadHandler(config: AppConfig, rt: AiRuntime) {
       outgoingFormData.append('file', file, fileName)
       outgoingFormData.append('user', userId)
 
-      const url = `${config.difyApiBase.replace(/\/+$/, '')}/files/upload`
+      const url = `${trimTrailingSlashes(config.difyApiBase)}/files/upload`
       let upstreamRes: Response
       try {
         upstreamRes = await fetch(url, {

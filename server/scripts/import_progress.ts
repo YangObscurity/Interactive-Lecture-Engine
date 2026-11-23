@@ -260,7 +260,8 @@ export async function runProgressImport(
   const nodes = parseGraphNodes(rawJson)
 
   log(`[import_progress] Source file: ${filePath} (${nodes.length} total node(s))`)
-  log(`[import_progress] Target user: "${userId}"`)
+  // the reader id is not echoed: it may come from IMPORT_PROGRESS_USER_ID and logs get shared (CodeQL js/clear-text-logging)
+  log(`[import_progress] Target user: ${options.userId ? '--user-id' : 'IMPORT_PROGRESS_USER_ID'} (${userId.length} characters)`)
   log(`[import_progress] Mode: ${apply ? 'APPLY (writing to database)' : 'DRY-RUN (read-only preview)'}`)
 
   const db: Db = createDb(dbUrl)

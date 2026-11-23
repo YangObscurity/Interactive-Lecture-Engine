@@ -1,4 +1,5 @@
 import type { Db, DbClient } from '../db/types.js'
+import { trimTrailingSlashes } from './url.js'
 
 export const IDEMPOTENCY_TTL_MS = 24 * 60 * 60 * 1000 // 24 hours
 
@@ -26,7 +27,7 @@ export function canonicalJson(value: unknown): string {
  * Deterministic request fingerprint: `${METHOD} ${normalizedPath} ${canonicalJson(body)}`.
  */
 export function computeFingerprint(method: string, path: string, body: unknown): string {
-  const normPath = path.length > 1 ? path.replace(/\/+$/, '') : path
+  const normPath = path.length > 1 ? trimTrailingSlashes(path) : path
   return `${method.toUpperCase()} ${normPath} ${canonicalJson(body ?? {})}`
 }
 

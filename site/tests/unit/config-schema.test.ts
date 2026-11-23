@@ -60,7 +60,8 @@ describe('config schema invariants', () => {
         for (const ip of v.match(/\b\d{1,3}(?:\.\d{1,3}){3}\b/g) ?? []) expect(ip, s.key).toBe('127.0.0.1')
         for (const host of v.match(/\b(?:[a-z0-9-]+\.)+[a-z]{2,}\b/gi) ?? []) {
           if (/^\d/.test(host) || /\.(py|json|md|ts|mts)$/i.test(host)) continue
-          expect(host.toLowerCase().endsWith('example.com'), `${s.key}: ${host}`).toBe(true)
+          const h = host.toLowerCase()
+          expect(h === 'example.com' || h.endsWith('.example.com'), `${s.key}: ${host}`).toBe(true)
         }
       }
     }
