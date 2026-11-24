@@ -42,13 +42,13 @@ afterEach(() => {
 })
 
 describe('CONFIG_SCHEMA invariants', () => {
-  it('defines all 42 settings with unique names, Chinese descriptions, and safe secret defaults', () => {
-    expect(CONFIG_SCHEMA).toHaveLength(42)
+  it('defines all 50 settings with unique names, Chinese descriptions, and safe secret defaults', () => {
+    expect(CONFIG_SCHEMA).toHaveLength(50)
 
     const names = new Set(CONFIG_SCHEMA.map((s) => s.name))
     const configKeys = new Set(CONFIG_SCHEMA.map((s) => s.configKey))
-    expect(names.size).toBe(42)
-    expect(configKeys.size).toBe(42)
+    expect(names.size).toBe(50)
+    expect(configKeys.size).toBe(50)
 
     for (const spec of CONFIG_SCHEMA) {
       expect(spec.description.length).toBeGreaterThan(0)
@@ -265,6 +265,14 @@ describe('loadConfig defaults, precedence, and validation', () => {
       authGroupSeparator: ',',
       authRoleMap: {},
       logoutUrl: null,
+      authCookieName: 'lec_session',
+      authCookieSecure: 'auto',
+      sessionTtlHours: 12,
+      rememberMeDays: 30,
+      authMethodsEnabled: 'password,passkey,gateway',
+      webauthnRpId: '',
+      webauthnRpName: 'Interactive Lecture Engine',
+      webauthnOrigin: '',
       dbAutoMigrate: false,
       notionHealthUrl: null,
       allowNonLoopback: false,

@@ -1,7 +1,8 @@
 import { isIP } from 'node:net'
 import { formatEnvValue } from './env.js'
 
-export type AuthAdapter = 'none' | 'trusted-header'
+export type AuthAdapter = 'none' | 'trusted-header' | 'local' | 'hybrid'
+export type AuthCookieSecure = 'auto' | 'true' | 'false'
 export type AuthHeaderPreset = 'authelia' | 'authentik' | 'oauth2-proxy' | 'custom'
 export type LogLevel = 'debug' | 'info' | 'warn' | 'error'
 export type Role = 'reader' | 'author' | 'admin'
@@ -65,6 +66,14 @@ export interface AppConfig {
   authGroupSeparator: string
   authRoleMap: Record<string, Role[]>
   logoutUrl: string | null
+  authCookieName: string
+  authCookieSecure: AuthCookieSecure
+  sessionTtlHours: number
+  rememberMeDays: number
+  authMethodsEnabled: string
+  webauthnRpId: string
+  webauthnRpName: string
+  webauthnOrigin: string
   dbAutoMigrate: boolean
   notionHealthUrl: string | null
   allowNonLoopback: boolean
@@ -333,6 +342,60 @@ export function validateRoleMap(raw: string): string | null {
   return parseRoleMap(raw).error
 }
 
+export function validateCookieName(raw: string): string | null {
+  const v = raw.trim()
+  if (!v) return 'Cookie 名称不能为空'
+  if (!HTTP_HEADER_NAME_RE.test(v)) {
+    return 'Cookie 名称只能包含合法 token 字符'
+  }
+  return null
+}
+
+export function validateAuthMethods(raw: string): string | null {
+  const v = raw.trim()
+  if (!v) return '启用的认证方法列表不能为空'
+  if (CONTROL_CHAR_RE.test(v)) return '认证方法列表不能包含控制字符'
+  return null
+}
+
+export function validateOptionalHostOrEmpty(raw: string): string | null {
+  const v = raw.trim()
+  if (!v) return null
+  if (CONTROL_CHAR_RE.test(v) || /[\s/\\?#]/.test(v)) {
+    return 'WebAuthn RP ID 不能包含空白、路径分隔符或控制字符'
+  }
+  return null
+}
+
+export function validateOptionalString(raw: string): string | null {
+  if (CONTROL_CHAR_RE.test(raw)) return '不能包含控制字符'
+  return null
+}
+
+export function validateOptionalOrigin(raw: string): string | null {
+  const v = raw.trim()
+  if (!v) return null
+  const entries = v
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean)
+  if (entries.length === 0) return 'WebAuthn Origin URL 格式无效'
+  for (const entry of entries) {
+    try {
+      const u = new URL(entry)
+      if (u.protocol !== 'http:' && u.protocol !== 'https:') {
+        return 'WebAuthn Origin 必须为 http:// 或 https:// 协议'
+      }
+      if (u.origin !== entry) {
+        return 'WebAuthn Origin 不能包含路径、查询参数或尾斜杠'
+      }
+    } catch {
+      return 'WebAuthn Origin URL 格式无效'
+    }
+  }
+  return null
+}
+
 function makeEnumValidator(values: readonly string[], caseInsensitive = false): (raw: string) => string | null {
   return (raw: string) => {
     const v = caseInsensitive ? raw.trim().toLowerCase() : raw.trim()
@@ -395,13 +458,13 @@ export const CONFIG_SCHEMA: readonly SettingSpec[] = [
     configKey: 'authAdapter',
     group: 'auth',
     type: 'enum',
-    values: ['none', 'trusted-header'],
+    values: ['none', 'trusted-header', 'local', 'hybrid'],
     default: 'none',
     required: false,
     secret: false,
-    description: '身份认证适配器（none：全部请求视为 anonymous；trusted-header：从前置认证网关头读取）',
+    description: '身份认证适配器（none：全部请求视为 anonymous；trusted-header：从前置认证网关头读取；local：本地密码/通行密钥认证；hybrid：前置网关与本地认证混合）',
     example: 'none',
-    validator: makeEnumValidator(['none', 'trusted-header']),
+    validator: makeEnumValidator(['none', 'trusted-header', 'local', 'hybrid']),
   },
   {
     name: 'AUTH_HEADER_PRESET',
@@ -494,6 +557,103 @@ export const CONFIG_SCHEMA: readonly SettingSpec[] = [
     description: '认证网关登出跳转地址（可选，http:// 或 https://）',
     example: 'https://auth.example.com/logout',
     validator: validateHttpUrl,
+  },
+  {
+    name: 'AUTH_COOKIE_NAME',
+    configKey: 'authCookieName',
+    group: 'auth',
+    type: 'string',
+    default: 'lec_session',
+    required: false,
+    secret: false,
+    description: '身份凭证 Cookie 名称',
+    example: 'lec_session',
+    validator: validateCookieName,
+  },
+  {
+    name: 'AUTH_COOKIE_SECURE',
+    configKey: 'authCookieSecure',
+    group: 'auth',
+    type: 'enum',
+    values: ['auto', 'true', 'false'],
+    default: 'auto',
+    required: false,
+    secret: false,
+    description: '身份凭证 Cookie Secure 属性策略（auto / true / false）',
+    example: 'auto',
+    validator: makeEnumValidator(['auto', 'true', 'false']),
+  },
+  {
+    name: 'SESSION_TTL_HOURS',
+    configKey: 'sessionTtlHours',
+    group: 'auth',
+    type: 'int',
+    default: 12,
+    required: false,
+    secret: false,
+    description: '浏览器临时会话有效期（小时，1–8760）',
+    example: '12',
+    validator: makeIntRangeValidator('临时会话有效期', 1, 8760),
+  },
+  {
+    name: 'REMEMBER_ME_DAYS',
+    configKey: 'rememberMeDays',
+    group: 'auth',
+    type: 'int',
+    default: 30,
+    required: false,
+    secret: false,
+    description: '记住我持久会话有效期（天，1–365）',
+    example: '30',
+    validator: makeIntRangeValidator('持久会话有效期', 1, 365),
+  },
+  {
+    name: 'AUTH_METHODS_ENABLED',
+    configKey: 'authMethodsEnabled',
+    group: 'auth',
+    type: 'string',
+    default: 'password,passkey,gateway',
+    required: false,
+    secret: false,
+    description: '启用的认证方法列表（逗号分隔：password,passkey,gateway 等）',
+    example: 'password,passkey,gateway',
+    validator: validateAuthMethods,
+  },
+  {
+    name: 'WEBAUTHN_RP_ID',
+    configKey: 'webauthnRpId',
+    group: 'auth',
+    type: 'string',
+    default: '',
+    required: false,
+    secret: false,
+    description: 'WebAuthn Relying Party ID（域名，留空时从请求 Host 推断）',
+    example: 'lecture.example.com',
+    validator: validateOptionalHostOrEmpty,
+  },
+  {
+    name: 'WEBAUTHN_RP_NAME',
+    configKey: 'webauthnRpName',
+    group: 'auth',
+    type: 'string',
+    default: 'Interactive Lecture Engine',
+    required: false,
+    secret: false,
+    description: 'WebAuthn Relying Party 显示名称',
+    example: 'Interactive Lecture Engine',
+    validator: validateOptionalString,
+  },
+  {
+    name: 'WEBAUTHN_ORIGIN',
+    configKey: 'webauthnOrigin',
+    group: 'auth',
+    type: 'string',
+    default: '',
+    required: false,
+    secret: false,
+    description: 'WebAuthn 期望 Origin（如 https://lecture.example.com，留空时从请求 Host 推断）',
+    example: 'https://lecture.example.com',
+    validator: validateOptionalOrigin,
   },
   {
     name: 'DB_AUTO_MIGRATE',

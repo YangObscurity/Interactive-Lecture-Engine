@@ -9,7 +9,7 @@ import {
 } from '../../src/auth/index.js'
 import type { AppConfig } from '../../src/config/schema.js'
 
-function makeMockConfig(overrides: Partial<AppConfig> = {}): AppConfig {
+function makeMockConfig<T extends Partial<AppConfig>>(overrides: T = {} as T): AppConfig & T {
   return {
     databaseUrl: 'postgres://localhost:5432/test',
     databaseUrlDirect: null,
@@ -57,6 +57,14 @@ function makeMockConfig(overrides: Partial<AppConfig> = {}): AppConfig {
     aiToolMaxSteps: 5,
     aiMcpToken: null,
     aiMcpTicketSecret: null,
+    authCookieName: 'lec_session',
+    authCookieSecure: 'auto',
+    sessionTtlHours: 12,
+    rememberMeDays: 30,
+    authMethodsEnabled: 'password,passkey,gateway',
+    webauthnRpId: '',
+    webauthnRpName: 'Interactive Lecture Engine',
+    webauthnOrigin: '',
     ...overrides,
   }
 }

@@ -524,6 +524,7 @@ export interface ServerPromptStore {
   get(): CompanionPromptsFile | null
   require(): CompanionPromptsFile
   filePath(): string | null
+  reload(prompts?: CompanionPromptsFile): void
 }
 
 export function createServerPromptStore(
@@ -533,8 +534,23 @@ export function createServerPromptStore(
   const resolvedPath = resolveServerPromptsPath(config.aiPromptsFile, options)
   let cachedMtimeMs = -1
   let cachedPrompts: CompanionPromptsFile | null = null
+  let overridePrompts: CompanionPromptsFile | null = null
 
   const refreshIfNeeded = (): CompanionPromptsFile | null => {
+    if (overridePrompts !== null) {
+      if (resolvedPath && existsSync(resolvedPath) && cachedMtimeMs >= 0) {
+        const stat = statSync(resolvedPath)
+        if (stat.mtimeMs > cachedMtimeMs) {
+          const loaded = loadPromptsFileFromDisk(resolvedPath)
+          overridePrompts = null
+          cachedPrompts = loaded
+          cachedMtimeMs = stat.mtimeMs
+          return loaded
+        }
+      }
+      return overridePrompts
+    }
+
     if (!resolvedPath) return null
     if (!existsSync(resolvedPath)) {
       if (config.aiPromptsFile || config.aiProvider !== 'off') {
@@ -569,6 +585,18 @@ export function createServerPromptStore(
     },
     filePath() {
       return resolvedPath
+    },
+    reload(prompts?: CompanionPromptsFile) {
+      if (prompts !== undefined) {
+        overridePrompts = prompts
+        cachedPrompts = prompts
+        cachedMtimeMs = resolvedPath && existsSync(resolvedPath) ? statSync(resolvedPath).mtimeMs : -1
+      } else {
+        overridePrompts = null
+        cachedMtimeMs = -1
+        cachedPrompts = null
+        refreshIfNeeded()
+      }
     },
   }
 }

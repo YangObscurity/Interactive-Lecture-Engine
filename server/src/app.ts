@@ -5,6 +5,7 @@ import { createAuthMiddleware, type AuthResult, type WireSession, type WireSessi
 import type { AppConfig } from './config/schema.js'
 import type { Db } from './db/types.js'
 import { handleAppError, rateLimited } from './http/errors.js'
+import { serverLogBuffer } from './http/logBuffer.js'
 import { type Clock, WriteRateLimiter } from './http/rateLimit.js'
 import { createAdminRouter } from './routes/admin/index.js'
 import { createAiRouter } from './routes/ai/index.js'
@@ -17,6 +18,8 @@ import { createReviewChecklistsRouter } from './routes/reviewChecklists.js'
 import { createSessionRouter } from './routes/session.js'
 import { createSessionsRouter } from './routes/sessions.js'
 import { createToolsRouter } from './routes/tools.js'
+import { createAuthRouter } from './routes/auth.js'
+import { createMeRouter } from './routes/me.js'
 import type { McpClientFactory } from './tools/index.js'
 
 export interface AppVariables {
@@ -26,6 +29,12 @@ export interface AppVariables {
   userId: string | null
   user: WireSessionUser | null
   aiCall: AiCallRecord | null
+  authSource: 'none' | 'gateway' | 'cookie'
+  authMethod: string
+  sessionId: string | null
+  rememberMe: boolean
+  canAccessAdmin: boolean
+  canAccessAuthor: boolean
 }
 
 export type AppEnv = {
@@ -60,13 +69,38 @@ export function createApp(config: AppConfig, db: Db, options: AppOptions = {}): 
   })
   appCloseHandlers.set(app, () => aiRuntime.mcpManager.closeAll())
   const writeLimiter = new WriteRateLimiter(config.writeRatePerMinute, now)
+  const authLimiter = new WriteRateLimiter(config.writeRatePerMinute, now)
 
-  // 1. Global Date Header & Read Cache-Control (Outermost middleware)
+  // 1. Global Date Header, Read Cache-Control & Structured Audit Ring Logging (Outermost middleware)
   app.use('*', async (c, next) => {
+    const startMs = now()
     await next()
     c.header('Date', new Date().toUTCString())
     if (c.req.method === 'GET' || c.req.method === 'HEAD') {
       c.header('Cache-Control', 'no-store')
+    }
+    const status = c.res.status
+    const path = c.req.path
+    if (path.startsWith('/api/auth') || path.startsWith('/api/admin') || status >= 400) {
+      const level = status >= 500 ? 'error' : status >= 400 ? 'warn' : 'info'
+      const category = status >= 500
+        ? 'error'
+        : path.startsWith('/api/auth')
+          ? 'auth'
+          : path.startsWith('/api/admin')
+            ? 'admin'
+            : 'http'
+      serverLogBuffer.add({
+        level,
+        category,
+        message: `${c.req.method} ${path} -> ${status} (${Math.max(0, now() - startMs)}ms)`,
+        details: {
+          method: c.req.method,
+          path,
+          status,
+          userId: c.get('effectiveUserId') ?? 'anonymous',
+        },
+      })
     }
   })
 
@@ -110,7 +144,7 @@ export function createApp(config: AppConfig, db: Db, options: AppOptions = {}): 
   })
 
   // 3. Auth context extraction
-  app.use('*', createAuthMiddleware(config))
+  app.use('*', createAuthMiddleware(config, db))
 
   // 4. Route Tier Access Guards
   const requireUser: MiddlewareHandler<AppEnv> = async (c, next) => {
@@ -121,13 +155,14 @@ export function createApp(config: AppConfig, db: Db, options: AppOptions = {}): 
     await next()
   }
 
-  const requireAdmin: MiddlewareHandler<AppEnv> = async (c, next) => {
+  const requireAdminOrAuthor: MiddlewareHandler<AppEnv> = async (c, next) => {
     const effectiveUserId = c.get('effectiveUserId')
     if (!effectiveUserId) {
       return c.json({ error: 'unauthenticated' }, 401)
     }
     const session = c.get('session')
-    if (!session || !session.roles.includes('admin')) {
+    const roles = session?.roles ?? []
+    if (!roles.includes('admin') && !roles.includes('author')) {
       return c.json({ error: 'forbidden' }, 403)
     }
     await next()
@@ -150,6 +185,28 @@ export function createApp(config: AppConfig, db: Db, options: AppOptions = {}): 
   }
 
   // Tier guards
+  const requireAuthenticatedMe: MiddlewareHandler<AppEnv> = async (c, next) => {
+    const effectiveUserId = c.get('effectiveUserId')
+    const authSource = c.get('authSource')
+    if (!effectiveUserId || effectiveUserId === 'anonymous' || authSource === 'none') {
+      return c.json({ error: 'unauthenticated' }, 401)
+    }
+    await next()
+  }
+
+  const limitAuthWrites: MiddlewareHandler<AppEnv> = async (c, next) => {
+    const forwarded = c.req.header('x-forwarded-for')?.split(',')[0]?.trim()
+    const clientIp = forwarded || c.req.header('x-real-ip')?.trim() || 'auth-client'
+    const decision = authLimiter.check(`auth:${clientIp}`)
+    if (!decision.ok) {
+      throw rateLimited(decision.kind ?? 'auth_rate', decision.retryAfterSec)
+    }
+    await next()
+  }
+
+  app.use('/api/auth/login', limitAuthWrites)
+  app.use('/api/auth/bootstrap', limitAuthWrites)
+  app.use('/api/auth/methods/passkey/*', limitAuthWrites)
   app.use('/api/db', requireUser)
   app.use('/api/db/*', requireUser)
   app.use('/api/progress', requireUser)
@@ -164,15 +221,23 @@ export function createApp(config: AppConfig, db: Db, options: AppOptions = {}): 
   app.use('/api/db/*', limitWrites)
   app.use('/api/progress', limitWrites)
   app.use('/api/progress/*', limitWrites)
-  app.use('/api/admin', requireAdmin)
-  app.use('/api/admin/*', requireAdmin)
+  app.use('/api/me', requireAuthenticatedMe)
+  app.use('/api/me/*', requireAuthenticatedMe)
+  app.use('/api/me', limitWrites)
+  app.use('/api/me/*', limitWrites)
+  app.use('/api/admin', requireAdminOrAuthor)
+  app.use('/api/admin/*', requireAdminOrAuthor)
 
   // 5. Mount Route Handlers
   // Tier 1: Public Routes
   app.get('/api/health', createHealthHandler(config, db, { ai: aiRuntime.recorder, now }))
   app.route('/api/auth/session', createSessionRouter())
+  app.route('/api/auth', createAuthRouter(config, db))
 
   // Tier 2: User Routes
+  const meRouter = createMeRouter(config, db)
+  app.route('/api/me', meRouter)
+
   const progressRouter = createProgressRouter(db)
   app.route('/api/db/progress', progressRouter)
   app.route('/api/progress', progressRouter)

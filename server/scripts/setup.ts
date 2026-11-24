@@ -410,7 +410,7 @@ export async function runSetupCli(
 
     // 5. AUTH_ADAPTER
     let authAdapter = 'none'
-    const validateAuthAdapter = makeEnumValidator(['none', 'trusted-header'])
+    const validateAuthAdapter = makeEnumValidator(['none', 'trusted-header', 'local', 'hybrid'])
     if (isNonInteractive) {
       authAdapter = getEnvVal('AUTH_ADAPTER') ?? 'none'
       const valErr = validateAuthAdapter(authAdapter)
@@ -425,7 +425,7 @@ export async function runSetupCli(
           rl,
           mutableOutput,
           targetOutput,
-          `身份认证适配器 (AUTH_ADAPTER: none / trusted-header) [${current}]: `,
+          `身份认证适配器 (AUTH_ADAPTER: none / trusted-header / local / hybrid) [${current}]: `,
           false,
         )
         const candidate = raw.trim() || current

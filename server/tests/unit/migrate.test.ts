@@ -139,7 +139,7 @@ describe('createDb & PGliteDb', () => {
 
     const db2 = trackDb(createDb(`pglite:${nestedDir}`))
     const status = await getMigrationStatus(db2)
-    expect(status.applied).toHaveLength(2)
+    expect(status.applied).toHaveLength(3)
     expect(status.pending).toHaveLength(0)
 
     const rows = await db2.query<{ lecture_id: string; status: string }>(
@@ -199,14 +199,20 @@ describe('migrations & runner', () => {
 
     const status = await getMigrationStatus(db)
     expect(status.applied).toEqual([])
-    expect(status.pending.map((m) => m.filename)).toEqual(['0001_init.sql', '0002_ai_checklists.sql'])
+    expect(status.pending.map((m) => m.filename)).toEqual([
+      '0001_init.sql',
+      '0002_ai_checklists.sql',
+      '0003_auth_and_admin_settings.sql',
+    ])
 
     const dry = await runMigrations(db, { dryRun: true })
     expect(dry.applied).toEqual([])
     expect(dry.dryRunSql).toContain('0001_init.sql')
     expect(dry.dryRunSql).toContain('0002_ai_checklists.sql')
+    expect(dry.dryRunSql).toContain('0003_auth_and_admin_settings.sql')
     expect(dry.dryRunSql).toContain('CREATE TABLE IF NOT EXISTS progress')
     expect(dry.dryRunSql).toContain('CREATE TABLE IF NOT EXISTS ai_sessions')
+    expect(dry.dryRunSql).toContain('CREATE TABLE IF NOT EXISTS auth_users')
 
     // Neither schema_migrations nor progress was created
     const tables = await db.query<{ sm: string | null; pr: string | null }>(
@@ -220,13 +226,18 @@ describe('migrations & runner', () => {
     const logs: string[] = []
 
     const first = await runMigrations(db, { log: (m) => logs.push(m) })
-    expect(first.applied).toEqual(['0001_init.sql', '0002_ai_checklists.sql'])
+    expect(first.applied).toEqual([
+      '0001_init.sql',
+      '0002_ai_checklists.sql',
+      '0003_auth_and_admin_settings.sql',
+    ])
     expect(logs.some((l) => l.includes('pg_advisory_lock') && l.includes('PGlite'))).toBe(true)
 
     const statusAfter = await getMigrationStatus(db)
-    expect(statusAfter.applied).toHaveLength(2)
+    expect(statusAfter.applied).toHaveLength(3)
     expect(statusAfter.applied[0]?.name).toBe('0001_init.sql')
     expect(statusAfter.applied[1]?.name).toBe('0002_ai_checklists.sql')
+    expect(statusAfter.applied[2]?.name).toBe('0003_auth_and_admin_settings.sql')
     expect(statusAfter.applied[0]?.appliedAt).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/)
     expect(statusAfter.pending).toEqual([])
 
@@ -308,7 +319,7 @@ describe('scripts/db.ts CLI', () => {
       error: (m) => errOut.push(m),
     })
     expect(statusBefore).toBe(0)
-    expect(out.join('\n')).toContain('Pending migrations: 2')
+    expect(out.join('\n')).toContain('Pending migrations: 3')
 
     out.length = 0
     const migCode = await runDbCli(['migrate'], {
