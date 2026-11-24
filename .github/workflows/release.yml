@@ -68,8 +68,8 @@ jobs:
             DRAFT="$INPUT_DRAFT"
           fi
 
-          if ! printf '%s' "$TAG" | grep -Eq '^v[0-9]+\.[0-9]+(\.[0-9]+)*(-[0-9A-Za-z.-]+)?$'; then
-            echo "::error::Invalid release tag '$TAG' (expected e.g. v2.0.0 or v2026.11.24)"
+          if [[ "$TAG" == *$'\n'* || "$TAG" == *$'\r'* ]] || ! [[ "$TAG" =~ ^v[0-9]+\.[0-9]+(\.[0-9]+)*(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::Invalid release tag '$TAG' (expected single-line semver or calver e.g. v2.0.0 or v2026.11.24)"
             exit 1
           fi
 
@@ -78,9 +78,18 @@ jobs:
             exit 1
           fi
 
-          if [ "$EVENT_NAME" != "push" ] && gh api "repos/${GH_REPO}/git/ref/tags/${TAG}" >/dev/null 2>&1; then
-            echo "::error::Git tag '$TAG' already exists; push the tag or choose a new version"
-            exit 1
+          if [ "$EVENT_NAME" != "push" ]; then
+            set +e
+            tag_err="$(gh api "repos/${GH_REPO}/git/ref/tags/${TAG}" 2>&1)"
+            tag_rc=$?
+            set -e
+            if [ "$tag_rc" -eq 0 ]; then
+              echo "::error::Git tag '$TAG' already exists; push the tag or choose a new version"
+              exit 1
+            elif ! printf '%s' "$tag_err" | grep -q '404'; then
+              echo "::error::Failed to verify git tag availability for '$TAG': $tag_err"
+              exit 1
+            fi
           fi
 
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
@@ -117,9 +126,10 @@ jobs:
           trap 'rm -rf "$STAGE"' EXIT
 
           API_DIR="$STAGE/lecture-api-${TAG}"
-          mkdir -p "$API_DIR"
-          cp -a server/dist server/migrations server/scripts server/deploy "$API_DIR/"
+          mkdir -p "$API_DIR" "$API_DIR/prompts"
+          cp -a server/dist server/src server/migrations server/scripts server/deploy "$API_DIR/"
           cp -a server/package.json server/package-lock.json server/tsconfig.json server/tsconfig.typecheck.json server/.env.example server/README.md "$API_DIR/"
+          cp -a site/prompts/companion.example.json "$API_DIR/prompts/"
           tar czf "release-assets/lecture-api-${TAG}.tar.gz" -C "$STAGE" "lecture-api-${TAG}"
 
           TPL_DIR="$STAGE/content-template-${TAG}"
@@ -147,6 +157,7 @@ jobs:
       - name: Build and validate standalone demo static site
         working-directory: site
         run: |
+          test ! -e ../content
           npm ci
           npm run check:content
           npm run build
@@ -194,23 +205,77 @@ jobs:
         run: |
           set -euo pipefail
           cd dist-assets
-          sha256sum ./*.tar.gz > SHA256SUMS.txt
+
+          expected_archives=(
+            "lecture-api-${TAG}.tar.gz"
+            "interactive-lecture-engine-demo-dist-${TAG}.tar.gz"
+            "content-template-${TAG}.tar.gz"
+          )
+          for archive in "${expected_archives[@]}"; do
+            if [ ! -f "$archive" ]; then
+              echo "::error::Missing expected release archive '$archive'"
+              exit 1
+            fi
+          done
+
+          sha256sum "${expected_archives[@]}" > SHA256SUMS.txt
+
+          resolve_tag_commit() {
+            local ref_json obj_type obj_sha tag_json rc=0
+            ref_json="$(gh api "repos/${GH_REPO}/git/ref/tags/${TAG}" 2>&1)" || rc=$?
+            if [ "$rc" -ne 0 ]; then
+              if printf '%s' "$ref_json" | grep -q 'HTTP 404'; then
+                return 1
+              fi
+              echo "::error::Failed to query git ref refs/tags/${TAG}: ${ref_json}" >&2
+              return 2
+            fi
+            obj_type="$(printf '%s' "$ref_json" | jq -r '.object.type // ""')" || return 2
+            obj_sha="$(printf '%s' "$ref_json" | jq -r '.object.sha // ""')" || return 2
+            if [ "$obj_type" = "tag" ]; then
+              tag_json="$(gh api "repos/${GH_REPO}/git/tags/${obj_sha}" 2>&1)" || {
+                echo "::error::Failed to dereference annotated tag '${obj_sha}': ${tag_json}" >&2
+                return 2
+              }
+              obj_sha="$(printf '%s' "$tag_json" | jq -r '.object.sha // ""')" || return 2
+            fi
+            if [ -z "$obj_sha" ]; then
+              echo "::error::Empty commit SHA resolved for refs/tags/${TAG}" >&2
+              return 2
+            fi
+            printf '%s' "$obj_sha"
+          }
+
+          pre_tag_sha=""
+          pre_tag_rc=0
+          pre_tag_sha="$(resolve_tag_commit)" || pre_tag_rc=$?
+          if [ "$pre_tag_rc" -eq 2 ]; then
+            exit 1
+          elif [ "$pre_tag_rc" -eq 0 ]; then
+            if [ "$pre_tag_sha" != "$TARGET_SHA" ]; then
+              echo "::error::Git tag '$TAG' points to '$pre_tag_sha', expected built commit '$TARGET_SHA'"
+              exit 1
+            fi
+          elif [ "$EVENT_NAME" = "push" ]; then
+            echo "::error::Push release requires existing git tag '$TAG' pointing to '$TARGET_SHA'"
+            exit 1
+          fi
 
           NOTES="$(printf '%s\n' \
             "Prebuilt deployment archives for **${TAG}** (no private \`content/\` included)." \
             "" \
-            "- \`lecture-api-${TAG}.tar.gz\`: compiled Hono backend (\`dist/\`, \`migrations/\`, \`scripts/\`, \`deploy/\`, \`package*.json\`); run \`npm ci --omit=dev && node dist/index.js\` (or \`npm ci\` to run \`db:migrate\`/\`db:backup\` scripts)." \
+            "- \`lecture-api-${TAG}.tar.gz\`: compiled Hono backend (\`dist/\`, \`src/\`, \`migrations/\`, \`scripts/\`, \`deploy/\`, \`prompts/companion.example.json\`, \`package*.json\`); run \`npm ci --omit=dev && node dist/index.js\` (or \`npm ci\` to run \`db:migrate\`/\`db:backup\`/\`setup\` scripts)." \
             "- \`interactive-lecture-engine-demo-dist-${TAG}.tar.gz\`: standalone static demo site built from \`templates/demo-content\`." \
             "- \`content-template-${TAG}.tar.gz\`: clean \`templates/\` starter bundle." \
             "- \`SHA256SUMS.txt\`: SHA-256 checksums for all archives.")"
 
-          ARGS=(release create "$TAG" ./*.tar.gz SHA256SUMS.txt
+          ARGS=(release create "$TAG" "${expected_archives[@]}" SHA256SUMS.txt
             --repo "$GH_REPO"
             --title "Interactive Lecture Engine ${TAG}"
             --generate-notes
             --notes "$NOTES")
 
-          if [ "$EVENT_NAME" = "push" ]; then
+          if [ "$pre_tag_rc" -eq 0 ]; then
             ARGS+=(--verify-tag)
           else
             ARGS+=(--target "$TARGET_SHA")
@@ -223,3 +288,18 @@ jobs:
           fi
 
           gh "${ARGS[@]}"
+
+          post_tag_sha=""
+          post_tag_rc=0
+          post_tag_sha="$(resolve_tag_commit)" || post_tag_rc=$?
+          if [ "$post_tag_rc" -eq 2 ]; then
+            exit 1
+          elif [ "$post_tag_rc" -eq 0 ]; then
+            if [ "$post_tag_sha" != "$TARGET_SHA" ]; then
+              echo "::error::Post-publish tag '$TAG' resolved to '$post_tag_sha' instead of built commit '$TARGET_SHA'"
+              exit 1
+            fi
+          elif [ "$DRAFT" != "true" ]; then
+            echo "::error::Post-publish tag '$TAG' not found after creating non-draft release"
+            exit 1
+          fi
