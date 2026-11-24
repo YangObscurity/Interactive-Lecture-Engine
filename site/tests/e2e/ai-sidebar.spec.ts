@@ -31,7 +31,10 @@ test.describe('P6 / WP-F2: reader settings panel & AI companion', () => {
     await page.locator('[data-lec-size-inc]').click()
     await expect(page.locator('[data-lec-size-value]')).toHaveText('20px')
     await page.locator('[data-lec-font-opt="sans"]').click()
-    await page.locator('[data-lec-group-desc]').uncheck()
+    const groupDescSwitch = page.locator('[data-lec-group-desc]')
+    await expect(groupDescSwitch).toHaveAttribute('role', 'switch')
+    await expect.poll(() => groupDescSwitch.evaluate((el) => getComputedStyle(el).appearance)).toBe('none')
+    await groupDescSwitch.uncheck()
     await page.locator('[data-lec-settings-save]').click()
 
     await expect(page.locator('html')).toHaveAttribute('data-lec-theme', 'reader')

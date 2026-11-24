@@ -805,19 +805,11 @@ html.is-group-page {
   font-weight: 600;
 }
 .gp .gp-p-desc p {
-  margin: var(--lec-space-1) 0 var(--lec-space-2);
+  margin: var(--lec-space-1) 0 0;
   font-family: var(--lec-font-body);
   font-size: 13.5px;
   line-height: 1.8;
   color: var(--lec-text);
-}
-.gp-p-pref {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 12px;
-  color: var(--lec-text-muted);
-  cursor: pointer;
 }
 
 /* narrow container: the panel moves above the map and shrinks */

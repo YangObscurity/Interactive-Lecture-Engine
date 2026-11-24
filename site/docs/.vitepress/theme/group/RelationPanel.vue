@@ -32,7 +32,6 @@ const emit = defineEmits<{
   track: [id: string]
   untrack: []
   mark: [id: string, status: LecStatus]
-  'update:descOpen': [open: boolean]
 }>()
 
 const { t } = useT()
@@ -148,10 +147,6 @@ const readiness = computed(() => {
           <summary>{{ t('group.panel.desc') }}</summary>
           <p :lang="notionLang || undefined" data-gp-desc>{{ info.desc }}</p>
         </details>
-        <label class="gp-p-pref">
-          <input type="checkbox" :checked="descOpen" data-gp-pref="desc" @change="emit('update:descOpen', ($event.target as HTMLInputElement).checked)" />
-          {{ t('group.panel.descDefault') }}
-        </label>
       </section>
 
       <template v-if="hasGraph">

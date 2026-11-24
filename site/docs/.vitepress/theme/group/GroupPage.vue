@@ -21,7 +21,7 @@ import { groupOfDir } from '../progress/types'
 import { showMessageToast } from '../components/ai/toast'
 import { groupResume } from '../reading/readingProgress'
 import { localePrefix, localizedLecture } from '../core/langLinks'
-import { getRaw, setRaw } from '../core/storage'
+import { getRaw } from '../core/storage'
 import { useClickRule } from '../map'
 import { packageName, pad2 } from '../map/atlas/model.ts'
 import { LecSlot } from '../slots'
@@ -360,14 +360,6 @@ function arrive(hash: string): void {
   setTimeout(() => laneMap.value?.reveal(id, false), 80)
 }
 
-function setDescOpen(open: boolean): void {
-  descOpen.value = open
-  setRaw('groupDesc', open ? '1' : '0')
-  if (typeof document !== 'undefined') {
-    document.documentElement.setAttribute('data-lec-desc', open ? 'open' : 'closed')
-  }
-}
-
 const onHashChange = (): void => arrive(window.location.hash)
 const onGroupDescChanged = (e: Event): void => {
   const open = (e as CustomEvent<{ open?: boolean }>).detail?.open
@@ -501,7 +493,6 @@ onBeforeUnmount(() => {
           @track="track"
           @untrack="lock(null)"
           @mark="mark"
-          @update:desc-open="setDescOpen"
           @mouseenter="onPanelEnter"
           @mouseleave="onPanelLeave"
         />

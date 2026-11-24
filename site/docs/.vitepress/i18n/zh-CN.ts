@@ -156,7 +156,6 @@ export const zhCN = {
   'group.panel.markRead': '标为已读',
   'group.panel.markUnread': '标为未读',
   'group.panel.desc': '说明',
-  'group.panel.descDefault': '说明默认展开',
   'group.panel.pre': '先修',
   'group.panel.post': '后续',
   'group.panel.noDirectPre': '组内没有直接先修',

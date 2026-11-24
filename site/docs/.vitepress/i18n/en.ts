@@ -150,7 +150,6 @@ export const en: Messages = {
   'group.panel.markRead': 'Mark read',
   'group.panel.markUnread': 'Mark unread',
   'group.panel.desc': 'Description',
-  'group.panel.descDefault': 'Open the description by default',
   'group.panel.pre': 'Prerequisites',
   'group.panel.post': 'Follow-ups',
   'group.panel.noDirectPre': 'No direct prerequisite in this group',

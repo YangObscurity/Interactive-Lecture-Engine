@@ -273,21 +273,29 @@ for (const [theme, impl] of SKINS) {
       await expect(chip(page, 'mea-l06')).not.toHaveAttribute('data-ready', '')
     })
 
-    // 6. the 说明 preference
-    test('6. the 说明 default (open / closed) is kept across reloads', async ({ page }) => {
+    // 6. the 说明 preference (managed solely in Reader Settings)
+    test('6. the 说明 default (open / closed) is set in Settings and kept across reloads', async ({ page }) => {
       await openGroup(page, '/mea/', theme, impl)
       await chip(page, 'mea-l04').dblclick()
+      await expect(page.locator('[data-gp-pref="desc"]')).toHaveCount(0)
       const details = page.locator('.gp-p-desc details')
       await expect(details).toHaveJSProperty('open', true)
-      await page.locator('[data-gp-pref="desc"]').uncheck()
+
+      await page.locator('[data-lec-settings-btn]').click()
+      await page.locator('[data-lec-group-desc]').uncheck()
+      await page.locator('[data-lec-settings-save]').click()
       await expect(details).toHaveJSProperty('open', false)
       expect(await page.evaluate(() => localStorage.getItem('lecture:group-desc'))).toBe('0')
+
       await page.reload()
       await page.waitForSelector('html[data-hydrated="1"]')
       await page.waitForSelector('.gp-lanes .gp-lc')
       await chip(page, 'mea-l04').dblclick()
       await expect(page.locator('.gp-p-desc details')).toHaveJSProperty('open', false)
-      await page.locator('[data-gp-pref="desc"]').check()
+
+      await page.locator('[data-lec-settings-btn]').click()
+      await page.locator('[data-lec-group-desc]').check()
+      await page.locator('[data-lec-settings-save]').click()
       await expect(page.locator('.gp-p-desc details')).toHaveJSProperty('open', true)
       expect(await page.evaluate(() => localStorage.getItem('lecture:group-desc'))).toBe('1')
     })
@@ -521,11 +529,13 @@ for (const [theme, impl] of SKINS) {
       await expect.poll(() => panel.evaluate((el) => el.scrollTop)).toBe(0)
     })
 
-    // 17. audit #10: the 说明 fold follows the 说明默认展开 setting for every lecture shown, not the last hand toggle
+    // 17. audit #10: the 说明 fold follows the Settings 说明默认展开 setting for every lecture shown, not the last hand toggle
     test('17. 说明 opened by hand on one lecture is back to the default (closed) on the next one', async ({ page }) => {
       await openGroup(page, '/mea/', theme, impl)
       await chip(page, 'mea-l04').dblclick()
-      await page.locator('[data-gp-pref="desc"]').uncheck()
+      await page.locator('[data-lec-settings-btn]').click()
+      await page.locator('[data-lec-group-desc]').uncheck()
+      await page.locator('[data-lec-settings-save]').click()
       const details = page.locator('.gp-p-desc details')
       await expect(details).toHaveJSProperty('open', false)
       await details.locator('summary').click()
