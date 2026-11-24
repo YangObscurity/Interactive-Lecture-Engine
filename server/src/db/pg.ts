@@ -84,8 +84,19 @@ function normalizePgResult<T>(res: QueryResult | QueryResult[]): DbQueryResult<T
   }
 }
 
-export function createPgDb(connectionString: string): Db {
-  const pool = new Pool({ connectionString })
+export interface PgDbOptions {
+  connectionTimeoutMillis?: number
+  statementTimeoutMs?: number
+}
+
+export function createPgDb(connectionString: string, opts: PgDbOptions = {}): Db {
+  const pool = new Pool({
+    connectionString,
+    connectionTimeoutMillis: opts.connectionTimeoutMillis ?? 10000,
+    ...(opts.statementTimeoutMs !== undefined
+      ? { statement_timeout: opts.statementTimeoutMs }
+      : {}),
+  })
 
   // pg-pool copies options with Object.assign({}, options), leaving connectionString enumerable.
   if (pool.options && Object.prototype.hasOwnProperty.call(pool.options, 'connectionString')) {

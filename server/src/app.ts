@@ -3,6 +3,7 @@ import { Hono, type MiddlewareHandler } from 'hono'
 import { bodyLimit } from 'hono/body-limit'
 import { createAuthMiddleware, type AuthResult, type WireSession, type WireSessionUser } from './auth/index.js'
 import type { AppConfig } from './config/schema.js'
+import { createDbManager, type DbManager } from './db/manager.js'
 import type { Db } from './db/types.js'
 import { handleAppError, rateLimited } from './http/errors.js'
 import { serverLogBuffer } from './http/logBuffer.js'
@@ -48,6 +49,8 @@ export interface AppOptions {
   modelFactory?: (config: AppConfig) => LanguageModel
   /** Test hook to supply an MCP client factory (e.g. InMemoryTransport) for external MCP tests. */
   mcpClientFactory?: McpClientFactory
+  /** Live hot-swappable database manager (defaults to wrapping the passed Db). */
+  dbManager?: DbManager
 }
 
 const appCloseHandlers = new WeakMap<object, () => Promise<void>>()
@@ -61,6 +64,13 @@ export async function closeAppResources(app: Hono<AppEnv>): Promise<void> {
 
 export function createApp(config: AppConfig, db: Db, options: AppOptions = {}): Hono<AppEnv> {
   const app = new Hono<AppEnv>()
+  const dbManager =
+    options.dbManager ??
+    createDbManager(db, {
+      databaseUrl: config.databaseUrl,
+      databaseUrlDirect: config.databaseUrlDirect,
+    })
+  const effectiveDb = dbManager.asDb()
   const now = options.now ?? Date.now
   const aiRuntime = createAiRuntime(config, {
     now,
@@ -144,7 +154,7 @@ export function createApp(config: AppConfig, db: Db, options: AppOptions = {}): 
   })
 
   // 3. Auth context extraction
-  app.use('*', createAuthMiddleware(config, db))
+  app.use('*', createAuthMiddleware(config, effectiveDb))
 
   // 4. Route Tier Access Guards
   const requireUser: MiddlewareHandler<AppEnv> = async (c, next) => {
@@ -230,25 +240,25 @@ export function createApp(config: AppConfig, db: Db, options: AppOptions = {}): 
 
   // 5. Mount Route Handlers
   // Tier 1: Public Routes
-  app.get('/api/health', createHealthHandler(config, db, { ai: aiRuntime.recorder, now }))
+  app.get('/api/health', createHealthHandler(config, effectiveDb, { ai: aiRuntime.recorder, now }))
   app.route('/api/auth/session', createSessionRouter())
-  app.route('/api/auth', createAuthRouter(config, db))
+  app.route('/api/auth', createAuthRouter(config, effectiveDb))
 
   // Tier 2: User Routes
-  const meRouter = createMeRouter(config, db)
+  const meRouter = createMeRouter(config, effectiveDb)
   app.route('/api/me', meRouter)
 
-  const progressRouter = createProgressRouter(db)
+  const progressRouter = createProgressRouter(effectiveDb)
   app.route('/api/db/progress', progressRouter)
   app.route('/api/progress', progressRouter)
 
-  const sessionsRouter = createSessionsRouter(db)
+  const sessionsRouter = createSessionsRouter(effectiveDb)
   app.route('/api/db/sessions', sessionsRouter)
 
-  const messagesRouter = createMessagesRouter(db)
+  const messagesRouter = createMessagesRouter(effectiveDb)
   app.route('/api/db/messages', messagesRouter)
 
-  const reviewChecklistsRouter = createReviewChecklistsRouter(db)
+  const reviewChecklistsRouter = createReviewChecklistsRouter(effectiveDb)
   app.route('/api/db/review-checklists', reviewChecklistsRouter)
   app.route('/api/db/checklist', reviewChecklistsRouter)
 
@@ -268,7 +278,7 @@ export function createApp(config: AppConfig, db: Db, options: AppOptions = {}): 
   app.route('/api/mcp', mcpRouter)
 
   // Tier 3: Admin Routes
-  const adminRouter = createAdminRouter(config, db, aiRuntime)
+  const adminRouter = createAdminRouter(config, effectiveDb, aiRuntime, dbManager)
   app.route('/api/admin', adminRouter)
 
   // Unimplemented routes fall through

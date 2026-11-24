@@ -1,6 +1,7 @@
 import { Hono, type MiddlewareHandler } from 'hono'
 import type { AppEnv } from '../../app.js'
 import type { AppConfig } from '../../config/schema.js'
+import { createDbManager, type DbManager } from '../../db/manager.js'
 import type { Db } from '../../db/types.js'
 import { getSetting, setSetting } from '../../repo/siteSettings.js'
 import type { AiRuntime } from '../ai/runtime.js'
@@ -9,6 +10,7 @@ import { createAdminAiToolsHandler } from './aiTools.js'
 import { createAdminBackupsRouter } from './backups.js'
 import { createAdminChecksRouter } from './checks.js'
 import { createAdminCompanionRouter } from './companion.js'
+import { createAdminDbRouter } from './db.js'
 import { createAdminFiguresRouter } from './figures.js'
 import { createAdminHealthHandler } from './health.js'
 import { createAdminLogsRouter } from './logs.js'
@@ -22,8 +24,15 @@ export function createAdminRouter(
   config: AppConfig,
   db: Db,
   aiRuntime?: AiRuntime,
+  dbManager?: DbManager,
 ): Hono<AppEnv> {
   const router = new Hono<AppEnv>()
+  const effectiveDbManager =
+    dbManager ??
+    createDbManager(db, {
+      databaseUrl: config.databaseUrl,
+      databaseUrlDirect: config.databaseUrlDirect,
+    })
 
   const requireStrictAdmin: MiddlewareHandler<AppEnv> = async (c, next) => {
     const session = c.get('session')
@@ -73,6 +82,10 @@ export function createAdminRouter(
   router.use('/backups', requireStrictAdmin)
   router.use('/backups/*', requireStrictAdmin)
   router.route('/backups', createAdminBackupsRouter(db))
+
+  router.use('/db', requireStrictAdmin)
+  router.use('/db/*', requireStrictAdmin)
+  router.route('/db', createAdminDbRouter(effectiveDbManager))
 
   router.use('/settings', requireStrictAdmin)
   router.use('/settings/*', requireStrictAdmin)

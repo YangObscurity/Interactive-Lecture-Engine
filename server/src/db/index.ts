@@ -1,15 +1,32 @@
-import { createPgDb } from './pg.js'
+import { createPgDb, type PgDbOptions } from './pg.js'
 import { createPGliteDb } from './pglite.js'
 import type { Db } from './types.js'
 
 export type { Db, DbClient, DbQueryResult } from './types.js'
-export { createPgDb, redactUrlSecrets, sanitizePgError } from './pg.js'
+export {
+  canonicalDbTarget,
+  createDbManager,
+  extractPgliteDir,
+  isEnvFileWritable,
+  resolveEnvFilePath,
+  type DbManager,
+  type DbManagerMetaInput,
+  type DbManagerPublicMeta,
+  type DbSwapNextMeta,
+  type DbSwapOptions,
+  type DbSwapResult,
+} from './manager.js'
+export { createPgDb, redactUrlSecrets, sanitizePgError, type PgDbOptions } from './pg.js'
 export { createPGliteDb } from './pglite.js'
 
 // eslint-disable-next-line no-control-regex
 const CONTROL_CHAR_RE = /[\x00-\x1f\x7f]/
 
-export function createDb(databaseUrl: string): Db {
+export interface CreateDbOptions {
+  pg?: PgDbOptions
+}
+
+export function createDb(databaseUrl: string, options?: CreateDbOptions): Db {
   if (typeof databaseUrl !== 'string') {
     throw new Error('Invalid database URL: expected a non-empty string')
   }
@@ -43,7 +60,7 @@ export function createDb(databaseUrl: string): Db {
     if (!parsed.hostname) {
       throw new Error('Invalid PostgreSQL connection URL: missing hostname')
     }
-    return createPgDb(trimmed)
+    return createPgDb(trimmed, options?.pg)
   }
 
   throw new Error(

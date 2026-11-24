@@ -4,7 +4,7 @@ import { serve, type ServerType } from '@hono/node-server'
 import { type AppEnv, closeAppResources, createApp } from './app.js'
 import { ConfigError, formatConfigSummary, loadConfig } from './config/load.js'
 import type { AppConfig } from './config/schema.js'
-import { createDb } from './db/index.js'
+import { createDb, createDbManager, resolveEnvFilePath } from './db/index.js'
 import { getMigrationStatus, runMigrations } from './db/migrate.js'
 import type { Db } from './db/types.js'
 import type { Hono } from 'hono'
@@ -25,32 +25,49 @@ export interface ServerInstance {
 
 export async function startServer(
   customEnv?: Record<string, string | undefined>,
-  overrides?: { db?: Db },
+  overrides?: { db?: Db; envFilePath?: string | null },
 ): Promise<ServerInstance> {
-  const cfg = loadConfig(customEnv)
+  const envFilePath =
+    overrides?.envFilePath !== undefined
+      ? overrides.envFilePath
+      : resolveEnvFilePath(customEnv)
+  const cfg =
+    customEnv === undefined && process.env.LECTURE_ENV_FILE?.trim()
+      ? loadConfig({ env: process.env, envFile: envFilePath ?? false })
+      : loadConfig(customEnv)
   const summary = formatConfigSummary(cfg)
   console.info(`${SERVICE_NAME} (${SERVICE_VERSION}) config loaded:`, JSON.stringify(summary))
 
-  const db = overrides?.db ?? (await createDb(cfg.databaseUrl))
+  const initialDb = overrides?.db ?? (await createDb(cfg.databaseUrl))
+  const dbManager = createDbManager(initialDb, {
+    databaseUrl: cfg.databaseUrl,
+    databaseUrlDirect: cfg.databaseUrlDirect,
+    envFilePath,
+  })
+  const db = dbManager.asDb()
 
   // Startup migration check
-  const status = await getMigrationStatus(db)
-  if (status.pending.length > 0) {
-    if (cfg.dbAutoMigrate) {
-      console.info(`Applying ${status.pending.length} pending migration(s)...`)
-      await runMigrations(db, { log: console.info })
-    } else {
-      console.error(
-        `Found ${status.pending.length} pending migration(s). Refusing to start without migrations applied.\nPlease run: npm run db:migrate`,
-      )
-      await db.close()
-      throw new Error(
-        'Pending migrations exist. Refusing to start without migrations applied. Please run: npm run db:migrate',
-      )
+  try {
+    const status = await getMigrationStatus(db)
+    if (status.pending.length > 0) {
+      if (cfg.dbAutoMigrate) {
+        console.info(`Applying ${status.pending.length} pending migration(s)...`)
+        await runMigrations(db, { log: console.info })
+      } else {
+        console.error(
+          `Found ${status.pending.length} pending migration(s). Refusing to start without migrations applied.\nPlease run: npm run db:migrate`,
+        )
+        throw new Error(
+          'Pending migrations exist. Refusing to start without migrations applied. Please run: npm run db:migrate',
+        )
+      }
     }
+  } catch (err) {
+    await dbManager.close().catch(() => {})
+    throw err
   }
 
-  const app = createApp(cfg, db)
+  const app = createApp(cfg, db, { dbManager })
 
   return new Promise<ServerInstance>((resolvePromise, reject) => {
     try {
@@ -68,7 +85,7 @@ export async function startServer(
             await closeAppResources(app)
             return new Promise<void>((resClose) => {
               server.close(async () => {
-                await db.close()
+                await dbManager.close()
                 resClose()
               })
             })
@@ -116,14 +133,11 @@ const isMain =
 
 if (isMain) {
   startServer()
-    .then(({ server, db, app }) => {
+    .then(({ close }) => {
       const shutdown = async () => {
         console.info('Shutting down server...')
-        await closeAppResources(app)
-        server.close(async () => {
-          await db.close()
-          process.exit(0)
-        })
+        await close()
+        process.exit(0)
       }
       process.on('SIGINT', shutdown)
       process.on('SIGTERM', shutdown)
