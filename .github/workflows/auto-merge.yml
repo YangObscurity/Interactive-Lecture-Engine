@@ -144,7 +144,10 @@ jobs:
               echo "::error::Failed to query label events for PR #$PR_NUMBER; aborting without modifying PR state" >&2
               return 2
             fi
-            actor="$(printf '%s' "$events_json" | jq -r '[flatten(1)[] | select(.event == "labeled" and .label.name == "automerge")] | last | .actor.login // ""')"
+            if ! actor="$(printf '%s' "$events_json" | jq -r '[flatten(1)[] | select(.event == "labeled" and .label.name == "automerge")] | last | .actor.login // ""')"; then
+              echo "::error::Failed to parse label events for PR #$PR_NUMBER; aborting without modifying PR state" >&2
+              return 2
+            fi
             [ -n "$actor" ] || return 1
             if [ "$author" = "dependabot[bot]" ]; then
               [ "$actor" = "$REPO_OWNER" ]
@@ -166,10 +169,8 @@ jobs:
               echo "automerge label already absent on PR #$PR_NUMBER; skipping revoke"
               exit 0
             fi
-            set +e
-            check_label_auth "$live_author" "$live_assoc"
-            auth_rc=$?
-            set -e
+            auth_rc=0
+            check_label_auth "$live_author" "$live_assoc" || auth_rc=$?
             if [ "$auth_rc" -eq 0 ]; then
               echo "::notice::Live automerge label on PR #$PR_NUMBER is now authorized; keeping label"
               exit 0
@@ -204,10 +205,8 @@ jobs:
               disable_auto_if_enabled
               exit 0
             fi
-            set +e
-            check_label_auth "$live_author" "$live_assoc"
-            auth_rc=$?
-            set -e
+            auth_rc=0
+            check_label_auth "$live_author" "$live_assoc" || auth_rc=$?
             if [ "$auth_rc" -ge 2 ]; then
               exit 1
             elif [ "$auth_rc" -ne 0 ]; then
