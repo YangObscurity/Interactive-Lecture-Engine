@@ -62,21 +62,29 @@ jobs:
 
           echo "is_dependabot_auto=false" >> "$GITHUB_OUTPUT"
 
-          # Maintainer opt-in via `automerge` label on same-repo PRs.
+          # Maintainer opt-in via `automerge` label on same-repo PRs (including dependabot[bot] npm bumps).
           has_label="$(jq -rn --argjson labels "$PR_LABELS_JSON" '$labels | index("automerge") != null')"
           if [ "$has_label" = "true" ]; then
-            case "$AUTHOR_ASSOC" in
-              OWNER|MEMBER|COLLABORATOR) ;;
-              *)
-                echo "::notice::PR author association ($AUTHOR_ASSOC) is not eligible for automerge label"
+            if [ "$PR_AUTHOR" != "dependabot[bot]" ]; then
+              case "$AUTHOR_ASSOC" in
+                OWNER|MEMBER|COLLABORATOR) ;;
+                *)
+                  echo "::notice::PR author association ($AUTHOR_ASSOC) is not eligible for automerge label"
+                  echo "action=revoke" >> "$GITHUB_OUTPUT"
+                  exit 0
+                  ;;
+              esac
+            fi
+
+            # Verify the latest actor who applied the `automerge` label on EVERY event.
+            label_actor="$(gh api --paginate --slurp "repos/${GH_REPO}/issues/${PR_NUMBER}/events?per_page=100" | jq -r '[flatten(1)[] | select(.event == "labeled" and .label.name == "automerge")] | last | .actor.login // ""')"
+            if [ "$PR_AUTHOR" = "dependabot[bot]" ]; then
+              if [ -z "$label_actor" ] || [ "$label_actor" != "$REPO_OWNER" ]; then
+                echo "::notice::Unauthorized automerge label actor (${label_actor:-unknown}) on dependabot PR; revoking label"
                 echo "action=revoke" >> "$GITHUB_OUTPUT"
                 exit 0
-                ;;
-            esac
-
-            # Verify the latest actor who applied the `automerge` label on EVERY event (prevents stale label bypass on synchronize).
-            label_actor="$(gh api --paginate --slurp "repos/${GH_REPO}/issues/${PR_NUMBER}/events?per_page=100" | jq -r '[flatten(1)[] | select(.event == "labeled" and .label.name == "automerge")] | last | .actor.login // ""')"
-            if [ -z "$label_actor" ] || { [ "$label_actor" != "$REPO_OWNER" ] && [ "$label_actor" != "$PR_AUTHOR" ]; }; then
+              fi
+            elif [ -z "$label_actor" ] || { [ "$label_actor" != "$REPO_OWNER" ] && [ "$label_actor" != "$PR_AUTHOR" ]; }; then
               echo "::notice::Unauthorized or unverifiable automerge label actor (${label_actor:-unknown}); revoking label"
               echo "action=revoke" >> "$GITHUB_OUTPUT"
               exit 0
@@ -114,22 +122,33 @@ jobs:
         run: |
           set -euo pipefail
 
-          if [ "$ACTION" = "revoke" ]; then
-            gh pr edit "$PR_NUMBER" --repo "$GH_REPO" --remove-label automerge || true
-            gh pr merge --repo "$GH_REPO" --disable-auto "$PR_NUMBER" || true
-            exit 0
-          fi
-
-          if [ "$ACTION" = "disable" ]; then
-            # Re-verify live label state in case an earlier unlabeled event races with a newer re-label.
-            live_has_label="$(gh api "repos/${GH_REPO}/pulls/${PR_NUMBER}" --jq '[.labels[].name] | index("automerge") != null')"
-            if [ "$live_has_label" = "false" ] && [ "$IS_DEP_AUTO" != "true" ]; then
-              gh pr merge --repo "$GH_REPO" --disable-auto "$PR_NUMBER" || true
+          disable_auto_if_enabled() {
+            local has_auto
+            has_auto="$(gh pr view "$PR_NUMBER" --repo "$GH_REPO" --json autoMergeRequest --jq '.autoMergeRequest != null')"
+            if [ "$has_auto" = "true" ]; then
+              gh pr merge --repo "$GH_REPO" --disable-auto "$PR_NUMBER"
             fi
-            exit 0
-          fi
+          }
 
-          # Re-read live PR state right before enabling/merging so delayed runs never override newer label removal or pushes.
+          is_label_authorized() {
+            local author="$1"
+            local assoc="$2"
+            local actor
+            if [ "$author" != "dependabot[bot]" ]; then
+              case "$assoc" in
+                OWNER|MEMBER|COLLABORATOR) ;;
+                *) return 1 ;;
+              esac
+            fi
+            actor="$(gh api --paginate --slurp "repos/${GH_REPO}/issues/${PR_NUMBER}/events?per_page=100" | jq -r '[flatten(1)[] | select(.event == "labeled" and .label.name == "automerge")] | last | .actor.login // ""')"
+            [ -n "$actor" ] || return 1
+            if [ "$author" = "dependabot[bot]" ]; then
+              [ "$actor" = "$REPO_OWNER" ]
+            else
+              [ "$actor" = "$REPO_OWNER" ] || [ "$actor" = "$author" ]
+            fi
+          }
+
           live_pr="$(gh api "repos/${GH_REPO}/pulls/${PR_NUMBER}")"
           live_draft="$(printf '%s' "$live_pr" | jq -r '.draft')"
           live_head_sha="$(printf '%s' "$live_pr" | jq -r '.head.sha')"
@@ -138,22 +157,47 @@ jobs:
           live_assoc="$(printf '%s' "$live_pr" | jq -r '.author_association')"
           live_has_label="$(printf '%s' "$live_pr" | jq -r '[.labels[].name] | index("automerge") != null')"
 
+          if [ "$ACTION" = "revoke" ]; then
+            if [ "$live_has_label" != "true" ]; then
+              echo "automerge label already absent on PR #$PR_NUMBER; skipping revoke"
+              exit 0
+            fi
+            if is_label_authorized "$live_author" "$live_assoc"; then
+              echo "::notice::Live automerge label on PR #$PR_NUMBER is now authorized; keeping label"
+              exit 0
+            fi
+            gh pr edit "$PR_NUMBER" --repo "$GH_REPO" --remove-label automerge
+            disable_auto_if_enabled
+            exit 0
+          fi
+
+          if [ "$ACTION" = "disable" ]; then
+            if [ "$live_has_label" != "true" ] && [ "$IS_DEP_AUTO" != "true" ]; then
+              disable_auto_if_enabled
+            fi
+            exit 0
+          fi
+
           if [ "$live_draft" = "true" ] || [ "$live_head_repo" != "$GH_REPO" ] || [ "$live_head_sha" != "$HEAD_SHA" ]; then
             echo "::notice::PR #$PR_NUMBER live state changed (draft=$live_draft, head=$live_head_sha); skipping"
             exit 0
           fi
 
-          if [ "$IS_DEP_AUTO" != "true" ]; then
-            if [ "$live_has_label" != "true" ]; then
-              echo "::notice::automerge label was removed before apply; disabling auto-merge"
-              gh pr merge --repo "$GH_REPO" --disable-auto "$PR_NUMBER" || true
+          if [ "$IS_DEP_AUTO" = "true" ]; then
+            if [ "$live_author" != "dependabot[bot]" ]; then
+              echo "::notice::PR #$PR_NUMBER author changed away from dependabot[bot]; skipping"
               exit 0
             fi
-            label_actor="$(gh api --paginate --slurp "repos/${GH_REPO}/issues/${PR_NUMBER}/events?per_page=100" | jq -r '[flatten(1)[] | select(.event == "labeled" and .label.name == "automerge")] | last | .actor.login // ""')"
-            if [ -z "$label_actor" ] || { [ "$label_actor" != "$REPO_OWNER" ] && [ "$label_actor" != "$live_author" ]; } || { [ "$live_assoc" != "OWNER" ] && [ "$live_assoc" != "MEMBER" ] && [ "$live_assoc" != "COLLABORATOR" ]; }; then
-              echo "::notice::Live automerge authorization failed (actor=${label_actor:-unknown}, assoc=$live_assoc); revoking"
-              gh pr edit "$PR_NUMBER" --repo "$GH_REPO" --remove-label automerge || true
-              gh pr merge --repo "$GH_REPO" --disable-auto "$PR_NUMBER" || true
+          else
+            if [ "$live_has_label" != "true" ]; then
+              echo "::notice::automerge label was removed before apply; disabling auto-merge"
+              disable_auto_if_enabled
+              exit 0
+            fi
+            if ! is_label_authorized "$live_author" "$live_assoc"; then
+              echo "::notice::Live automerge authorization failed on PR #$PR_NUMBER; revoking"
+              gh pr edit "$PR_NUMBER" --repo "$GH_REPO" --remove-label automerge
+              disable_auto_if_enabled
               exit 0
             fi
           fi
