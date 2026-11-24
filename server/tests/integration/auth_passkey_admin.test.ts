@@ -365,7 +365,8 @@ describe('WP-2: Backend Authentication, Cookies, Passkeys, Hybrid, Me & Admin', 
       const data = await res.json()
       expect(data.challenge).toBeTruthy()
       expect(data.rp.id).toBe('localhost')
-      expect(data.user.name).toBe('Initial Admin')
+      expect(data.user.name).toBe('admin')
+      expect(data.user.displayName).toBe('Initial Admin')
 
       // Verify challenge exists in DB
       const challengeRow = await db.query(
@@ -1386,6 +1387,80 @@ describe('WP-2: Backend Authentication, Cookies, Passkeys, Hybrid, Me & Admin', 
         body: JSON.stringify({ username: 'nobody', password: 'wrong' }),
       })
       expect(blocked.status).toBe(429)
+
+      // Blind-audit regressions: strict WEBAUTHN_ORIGIN CSRF, same-site without Origin, Login CSRF, visibleSections, check only filter
+      const strictOriginApp = createApp(
+        makeTestConfig({ webauthnOrigin: 'https://docs.example.com' }),
+        db,
+      )
+      const fallthroughCsrf = await strictOriginApp.request('/api/admin/texts', {
+        method: 'PUT',
+        headers: {
+          Cookie: `lec_session=${cookieA}`,
+          Origin: 'http://localhost',
+          Host: 'localhost',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ texts: {} }),
+      })
+      expect(fallthroughCsrf.status).toBe(403)
+
+      const sameSiteNoOrigin = await strictOriginApp.request('/api/admin/texts', {
+        method: 'PUT',
+        headers: {
+          Cookie: `lec_session=${cookieA}`,
+          'Sec-Fetch-Site': 'same-site',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ texts: {} }),
+      })
+      expect(sameSiteNoOrigin.status).toBe(403)
+
+      const loginCsrf = await strictOriginApp.request('/api/auth/login', {
+        method: 'POST',
+        headers: {
+          Origin: 'https://evil.example.com',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ username: 'admin', password: 'Password123!' }),
+      })
+      expect(loginCsrf.status).toBe(403)
+
+      const statusRes = await app.request('/api/auth/status', {
+        headers: { Cookie: `lec_session=${cookieA}` },
+      })
+      expect(statusRes.status).toBe(200)
+      const statusBody = (await statusRes.json()) as { visibleSections: string[] }
+      expect(statusBody.visibleSections).toEqual([
+        'my-learning',
+        'account',
+        'overview',
+        'checks',
+        'figures',
+        'texts',
+        'companion',
+        'access',
+        'look',
+        'database',
+        'users',
+        'runtime',
+        'backup',
+      ])
+
+      const checksTextsOnly = await app.request('/api/admin/checks/run', {
+        method: 'POST',
+        headers: { Cookie: `lec_session=${cookieA}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ only: ['texts'] }),
+      })
+      expect(checksTextsOnly.status).toBe(200)
+      const checksTextsBody = (await checksTextsOnly.json()) as {
+        only?: string[]
+        report: { issues: Array<{ code: string }> }
+      }
+      expect(checksTextsBody.only).toEqual(['texts'])
+      for (const issue of checksTextsBody.report.issues) {
+        expect(issue.code.startsWith('texts.')).toBe(true)
+      }
     })
   })
 })

@@ -141,7 +141,10 @@ export async function fetchAdminOverview(
   endpoint = ADMIN_ENDPOINTS.overview,
   signal?: AbortSignal,
 ): Promise<HttpResult<AdminOverviewResponse>> {
-  const res = await request<unknown>('GET', endpoint, { ...(signal ? { signal } : {}) })
+  const res = await request<unknown>('GET', resolveApiUrl(endpoint), {
+    credentials: 'include',
+    ...(signal ? { signal } : {}),
+  })
   if (!res.ok) return res
   if (!isAdminOverview(res.data)) {
     return { ok: false, kind: 'parse', serverDate: res.serverDate }
@@ -153,7 +156,10 @@ export async function fetchAdminHealth(
   endpoint = ADMIN_ENDPOINTS.health,
   signal?: AbortSignal,
 ): Promise<HttpResult<AdminHealthResponse>> {
-  const res = await request<unknown>('GET', endpoint, { ...(signal ? { signal } : {}) })
+  const res = await request<unknown>('GET', resolveApiUrl(endpoint), {
+    credentials: 'include',
+    ...(signal ? { signal } : {}),
+  })
   if (!res.ok) return res
   if (!isAdminHealth(res.data)) {
     return { ok: false, kind: 'parse', serverDate: res.serverDate }

@@ -143,22 +143,22 @@ async function confirmDeleteSession(sessionId: string): Promise<void> {
     <template v-else-if="overview">
       <div class="db-figs" data-me-kpis>
         <div>
-          <b>{{ overview.progress.completed }}</b>
+          <b>{{ overview.progress?.completed ?? 0 }}</b>
           <span>{{ t('dsh.me.kpiCompleted') }}</span>
-          <small>{{ t('dsh.me.kpiTotalProgress', { n: overview.progress.total }) }}</small>
+          <small>{{ t('dsh.me.kpiTotalProgress', { n: overview.progress?.total ?? 0 }) }}</small>
         </div>
         <div>
-          <b>{{ overview.progress.in_progress }}</b>
+          <b>{{ overview.progress?.in_progress ?? 0 }}</b>
           <span>{{ t('dsh.me.kpiInProgress') }}</span>
-          <small>{{ t('dsh.me.kpiTotalProgress', { n: overview.progress.total }) }}</small>
+          <small>{{ t('dsh.me.kpiTotalProgress', { n: overview.progress?.total ?? 0 }) }}</small>
         </div>
         <div>
-          <b>{{ overview.checklists.completed }} / {{ overview.checklists.total }}</b>
+          <b>{{ overview.checklists?.completed ?? 0 }} / {{ overview.checklists?.total ?? 0 }}</b>
           <span>{{ t('dsh.me.kpiChecklists') }}</span>
-          <small>{{ t('dsh.me.kpiChecklistsSub', { n: overview.checklists.total }) }}</small>
+          <small>{{ t('dsh.me.kpiChecklistsSub', { n: overview.checklists?.total ?? 0 }) }}</small>
         </div>
         <div>
-          <b>{{ overview.passkeyCount }}</b>
+          <b>{{ overview.passkeyCount ?? 0 }}</b>
           <span>{{ t('dsh.me.kpiPasskeys') }}</span>
           <small>{{ t('dsh.me.kpiPasskeysSub') }}</small>
         </div>
@@ -184,9 +184,9 @@ async function confirmDeleteSession(sessionId: string): Promise<void> {
           <dl class="db-kv">
             <dt>{{ t('dsh.me.userLabel') }}</dt>
             <dd>
-              <strong>{{ overview.user.displayName }}</strong>
-              <span class="db-mono db-muted"> (@{{ overview.user.username }})</span>
-              <span v-if="overview.user.email" class="db-muted"> · {{ overview.user.email }}</span>
+              <strong>{{ overview.user?.displayName ?? overview.user?.username ?? '' }}</strong>
+              <span v-if="overview.user?.username" class="db-mono db-muted"> (@{{ overview.user.username }})</span>
+              <span v-if="overview.user?.email" class="db-muted"> · {{ overview.user.email }}</span>
             </dd>
             <dt>{{ t('dsh.me.authMethodLabel') }}</dt>
             <dd><span class="db-tag" data-me-auth-method>{{ authMethodLabel(overview.authMethod) }}</span></dd>

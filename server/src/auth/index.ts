@@ -70,6 +70,7 @@ function isCsrfOriginValid(
   }
   const actualOrigin = candidateOrigin.origin.toLowerCase()
 
+  // When WEBAUTHN_ORIGIN is explicitly configured, treat it as a strict allowlist (no fallthrough).
   if (config.webauthnOrigin && config.webauthnOrigin.trim() !== '') {
     const allowedOrigins = config.webauthnOrigin
       .split(',')
@@ -84,26 +85,36 @@ function isCsrfOriginValid(
         // skip invalid configured origin entry
       }
     }
+    return false
   }
 
   let reqUrl: URL | null = null
+  const protoToken = forwardedProto?.split(',')[0]?.trim().toLowerCase()
   try {
     reqUrl = new URL(reqUrlStr)
     if (reqUrl.origin.toLowerCase() === actualOrigin) {
       return true
     }
+    // Support TLS-terminating reverse proxies forwarding https over http loopback
+    if ((config.authCookieSecure === 'true' || protoToken === 'https') && reqUrl.host) {
+      if (`https://${reqUrl.host}`.toLowerCase() === actualOrigin) {
+        return true
+      }
+    }
+    return false
   } catch {
     reqUrl = null
   }
 
   if (hostHeader) {
-    const protoToken = forwardedProto?.split(',')[0]?.trim().toLowerCase()
+    const cleanHost = hostHeader.trim()
+    if (!cleanHost || /[\s/@\\]/.test(cleanHost)) {
+      return false
+    }
     const effectiveProto =
-      config.authCookieSecure === 'true' || protoToken === 'https'
-        ? 'https:'
-        : (reqUrl?.protocol ?? 'http:')
+      config.authCookieSecure === 'true' || protoToken === 'https' ? 'https:' : 'http:'
     try {
-      const hostOrigin = new URL(`${effectiveProto}//${hostHeader.trim()}`).origin.toLowerCase()
+      const hostOrigin = new URL(`${effectiveProto}//${cleanHost}`).origin.toLowerCase()
       if (hostOrigin === actualOrigin) {
         return true
       }
@@ -125,8 +136,10 @@ export function createAuthMiddleware(
     const getHeader: HeaderGetter = (name: string) => c.req.header(name)
     const auth = await adapter.authenticate(getHeader, c.req.url)
 
-    // Enforce Origin / Referer / Sec-Fetch-Site CSRF validation on authSource === 'cookie' mutating requests
-    if (auth.authSource === 'cookie') {
+    // Enforce Origin / Referer / Sec-Fetch-Site CSRF validation on cookie-authenticated mutations
+    // and auth session-establishing endpoints (login / bootstrap / passkey login / logout).
+    const isAuthMutationRoute = c.req.path.startsWith('/api/auth/')
+    if (auth.authSource === 'cookie' || isAuthMutationRoute) {
       const method = c.req.method.toUpperCase()
       if (method === 'POST' || method === 'PUT' || method === 'PATCH' || method === 'DELETE') {
         const secFetchSite = c.req.header('sec-fetch-site')?.trim().toLowerCase()
@@ -136,7 +149,13 @@ export function createAuthMiddleware(
 
         const origin = c.req.header('origin')?.trim()
         const referer = c.req.header('referer')?.trim()
-        const headerToCheck = origin || referer
+        const headerToCheck = origin !== undefined && origin !== '' ? origin : referer
+        if (secFetchSite === 'same-site' && !headerToCheck) {
+          return c.json(
+            { error: 'forbidden', message: 'CSRF origin required for same-site request' },
+            403,
+          )
+        }
         if (headerToCheck) {
           const valid = isCsrfOriginValid(
             headerToCheck,

@@ -29,7 +29,7 @@ import {
 } from '../api/auth'
 import type { DevAccessSummary } from '../api/devDashboard'
 import type { SiteTexts } from '../../site-texts-schema.ts'
-import { configureSession, currentSession, getSession, resetSession, type SessionState } from '../auth/session'
+import { configureSession, currentSession, getSession, publishSession, resetSession, type SessionState } from '../auth/session'
 import { endBodyHydration } from '../core/bodyHydration'
 import './dashboard.css'
 import DashboardLogin from './DashboardLogin.vue'
@@ -277,6 +277,7 @@ async function loadOnline(force = false): Promise<void> {
     const st = await fetchAuthStatus()
     authStatus.value = st
     syncSessionFromAuthStatus(st)
+    publishSession(session.value)
 
     if (!st.authenticated) {
       resetAuthState()
@@ -418,7 +419,21 @@ async function handleLoggedOut(logoutUrl?: string | null): Promise<void> {
     window.history.replaceState(null, '', window.location.pathname + window.location.search)
   }
 
-  authStatus.value = await fetchAuthStatus().catch(() => null)
+  const nextStatus = await fetchAuthStatus().catch(() => null)
+  authStatus.value = nextStatus
+  if (nextStatus?.authenticated) {
+    syncSessionFromAuthStatus(nextStatus)
+    publishSession(session.value)
+    gate.value = 'allowed'
+    dashboardState.mode = 'online'
+    applyAuthStatus(nextStatus)
+    applyInitialHashForRole()
+    if (dashboardState.canAccessAdmin || dashboardState.canAccessAuthor) {
+      await loadAdmin()
+    }
+    return
+  }
+  publishSession({ status: 'anonymous', source: 'server' })
   authMethods.value = await fetchAuthMethods().catch(() => [])
   loginHref.value = computeLoginHref()
   gate.value = 'signin'

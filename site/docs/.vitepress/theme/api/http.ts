@@ -32,6 +32,7 @@ export type HttpResult<T> =
 export interface HttpRequestOptions {
   body?: unknown
   headers?: Record<string, string>
+  credentials?: RequestCredentials
   timeoutMs?: number
   signal?: AbortSignal
   /** Test seam; default: the global `fetch` (resolved at call time). */
@@ -82,7 +83,14 @@ export async function request<T>(method: string, url: string, options: HttpReque
     }
     let res: Response
     try {
-      res = await fetchFn(url, { method, headers, body, signal: controller.signal, credentials: 'same-origin', redirect: 'manual' })
+      res = await fetchFn(url, {
+        method,
+        headers,
+        body,
+        signal: controller.signal,
+        credentials: options.credentials ?? 'same-origin',
+        redirect: 'manual',
+      })
     } catch {
       return { ok: false, kind: timedOut ? 'timeout' : 'network', serverDate: null }
     }

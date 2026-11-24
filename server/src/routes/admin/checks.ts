@@ -48,21 +48,33 @@ function countFilesRecursive(dirPath: string): number {
   return count
 }
 
-function scanContentChecks(contentDir: string | null): ContentCheckReport {
+function filterIssuesByOnly(issues: CheckIssue[], only?: string[]): CheckIssue[] {
+  if (!only || only.length === 0) return issues
+  const allowed = new Set(only)
+  return issues.filter((issue) => allowed.has(issue.code.split('.')[0] ?? issue.code))
+}
+
+function scanContentChecks(contentDir: string | null, only?: string[]): ContentCheckReport {
   const issues: CheckIssue[] = []
   if (!contentDir || !existsSync(contentDir)) {
     issues.push({
       level: 'info',
-      code: 'no_content_dir',
+      code: 'lecture.no_content_dir',
       message: 'No writable local CONTENT_DIR attached to server; running in DB-backed settings mode',
     })
+    const filtered = filterIssuesByOnly(issues, only)
+    const totals = {
+      fail: filtered.filter((i) => i.level === 'fail').length,
+      warn: filtered.filter((i) => i.level === 'warn').length,
+      info: filtered.filter((i) => i.level === 'info').length,
+    }
     return {
-      ok: true,
+      ok: totals.fail === 0,
       mode: 'online',
       root: 'db',
       counts: { groups: 0, lectures: 0, translations: 0, charts: 0, concepts: 0, figures: 0 },
-      totals: { fail: 0, warn: 0, info: issues.length },
-      issues,
+      totals,
+      issues: filtered,
     }
   }
 
@@ -75,7 +87,7 @@ function scanContentChecks(contentDir: string | null): ContentCheckReport {
   } else {
     issues.push({
       level: 'warn',
-      code: 'missing_groups',
+      code: 'group.missing_groups',
       message: 'groups.ts not found in content directory',
       file: 'groups.ts',
     })
@@ -107,16 +119,17 @@ function scanContentChecks(contentDir: string | null): ContentCheckReport {
   if (!existsSync(join(contentDir, 'prompts', 'companion.json'))) {
     issues.push({
       level: 'info',
-      code: 'companion_prompts_default',
+      code: 'texts.companion_prompts_default',
       message: 'prompts/companion.json not found on disk; DB or built-in defaults apply',
       file: 'prompts/companion.json',
     })
   }
 
+  const filteredIssues = filterIssuesByOnly(issues, only)
   const totals = {
-    fail: issues.filter((i) => i.level === 'fail').length,
-    warn: issues.filter((i) => i.level === 'warn').length,
-    info: issues.filter((i) => i.level === 'info').length,
+    fail: filteredIssues.filter((i) => i.level === 'fail').length,
+    warn: filteredIssues.filter((i) => i.level === 'warn').length,
+    info: filteredIssues.filter((i) => i.level === 'info').length,
   }
 
   return {
@@ -132,7 +145,7 @@ function scanContentChecks(contentDir: string | null): ContentCheckReport {
       figures: figuresCount,
     },
     totals,
-    issues,
+    issues: filteredIssues,
   }
 }
 
@@ -184,7 +197,7 @@ export function createAdminChecksRouter(config: AppConfig, db: Db): Hono<AppEnv>
     }
 
     const started = Date.now()
-    const report = scanContentChecks(resolveContentDir(config))
+    const report = scanContentChecks(resolveContentDir(config), only)
     const at = new Date().toISOString()
     const ms = Math.max(1, Date.now() - started)
     const exitCode = report.ok ? 0 : 1

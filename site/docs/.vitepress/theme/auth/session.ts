@@ -142,3 +142,21 @@ export function resetSession(): void {
   siteClient.reset()
   current = { status: 'unknown' }
 }
+
+/** Synchronize session state pushed from another surface (e.g. Dashboard login/logout) to all listeners. */
+export function publishSession(state: SessionState): void {
+  siteClient.reset()
+  const changed =
+    current.status !== state.status ||
+    JSON.stringify(current) !== JSON.stringify(state)
+  current = state
+  if (changed) {
+    for (const l of listeners) {
+      try {
+        l(state)
+      } catch {
+        // one broken listener must not stop the others
+      }
+    }
+  }
+}

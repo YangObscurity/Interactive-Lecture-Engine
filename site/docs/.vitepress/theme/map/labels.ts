@@ -633,6 +633,8 @@ export class LabelLayer {
   private resetAncCache(): void {
     this.passCache.anc.clear()
     this.passCache.sigs.clear()
+    this.passCache.ancAlpha.clear()
+    this.passCache.styles.clear()
     this.alphaCache.clear()
   }
 

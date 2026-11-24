@@ -32,9 +32,11 @@ export async function startServer(
       ? overrides.envFilePath
       : resolveEnvFilePath(customEnv)
   const cfg =
-    customEnv === undefined && process.env.LECTURE_ENV_FILE?.trim()
+    customEnv === undefined
       ? loadConfig({ env: process.env, envFile: envFilePath ?? false })
-      : loadConfig(customEnv)
+      : envFilePath
+        ? loadConfig({ env: customEnv, envFile: envFilePath })
+        : loadConfig(customEnv)
   const summary = formatConfigSummary(cfg)
   console.info(`${SERVICE_NAME} (${SERVICE_VERSION}) config loaded:`, JSON.stringify(summary))
 

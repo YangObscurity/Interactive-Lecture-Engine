@@ -1125,6 +1125,20 @@ describe('WP-3: Admin DB Selector, Hot-Swap, Transfer & Whitelisted 6-Table CRUD
         const qData = await qEscaped.json()
         expect(qData.rows).toHaveLength(1)
         expect(qData.rows[0].key).toBe('percent_100%_test')
+
+        // Short (<3 chars) username rejected in both POST and PATCH auth_users CRUD
+        const shortPost = await app.request('/api/admin/db/tables/auth_users/rows', {
+          method: 'POST',
+          headers: { ...ADMIN_HEADERS, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username: 'ab', password: 'LocalPassword123!' }),
+        })
+        expect(shortPost.status).toBe(400)
+        const shortPatch = await app.request(`/api/admin/db/tables/auth_users/rows/${localUserId}`, {
+          method: 'PATCH',
+          headers: { ...ADMIN_HEADERS, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username: 'ab' }),
+        })
+        expect(shortPatch.status).toBe(400)
       } finally {
         await dbManager.close()
       }

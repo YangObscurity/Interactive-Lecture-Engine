@@ -39,11 +39,10 @@ export function computeVisibleSections(roles: readonly Role[]): string[] {
       'companion',
       'access',
       'look',
-      'runtime',
-      'logs',
-      'backups',
+      'database',
       'users',
-      'settings',
+      'runtime',
+      'backup',
     ]
   }
   if (roles.includes('author')) {
@@ -422,7 +421,7 @@ export function createAuthRouter(
     try {
       const options = await createRegistrationOptions(db, config, reqCtx, {
         id: u.id,
-        username: u.display_name || u.username,
+        username: u.username,
         displayName: u.display_name || u.username,
       })
       return c.json(options, 200)

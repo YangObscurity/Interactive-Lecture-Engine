@@ -1636,10 +1636,14 @@ export function createAdminDbRouter(dbManager: DbManager): Hono<AppEnv> {
         typeof body.id === 'string' && body.id.trim() !== '' ? body.id.trim() : randomUUID()
       pushField('id', idVal, false)
 
-      if (typeof body.username !== 'string' || !body.username.trim()) {
-        return c.json({ error: 'invalid_request', message: 'username is required' }, 400)
+      const cleanUsername = typeof body.username === 'string' ? body.username.trim() : ''
+      if (!cleanUsername || cleanUsername.length < 3 || cleanUsername.length > 64) {
+        return c.json(
+          { error: 'invalid_username', message: 'Username must be between 3 and 64 characters' },
+          400,
+        )
       }
-      pushField('username', body.username.trim(), false)
+      pushField('username', cleanUsername, false)
 
       if (body.email !== undefined) {
         if (body.email !== null && typeof body.email !== 'string') {
@@ -1941,10 +1945,11 @@ export function createAdminDbRouter(dbManager: DbManager): Hono<AppEnv> {
           const params: unknown[] = [targetUserId]
 
           if (data.username !== undefined) {
-            if (typeof data.username !== 'string' || !data.username.trim()) {
+            const cleanUsername = typeof data.username === 'string' ? data.username.trim() : ''
+            if (!cleanUsername || cleanUsername.length < 3 || cleanUsername.length > 64) {
               throw new Error('invalid_username')
             }
-            params.push(data.username.trim())
+            params.push(cleanUsername)
             setClauses.push(`"username" = $${params.length}`)
           }
           if (data.email !== undefined) {

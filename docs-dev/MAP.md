@@ -144,7 +144,7 @@ over the svg draws the labels that are on screen at screen-pixel size.
   `prefers-color-scheme` and `document.fonts.ready` re-read all.
 - **Styles are read once, not per frame.** The first paint after a `collect()` / class change reads the labels that are on screen,
   idle time (`requestIdle` seam) reads the rest, and the results are kept across frames (cleared on a re-read of everything, element
-  caches cleared when an ancestor's class changes). Internal `passCache` is invalidated upon any SVG DOM mutation (node additions, removals, or attribute changes) to ensure layout recalculations never reuse stale geometry. So once the layer has settled, a pan, drag or zoom frame calls no
+  caches cleared when an ancestor's class changes). Internal `passCache` (`anc`, `sigs`, `ancAlpha`, `styles`) invalidates on tracked SVG `class` attribute mutations (and resets via `resetAncCache()` on `collect()`) so zoom/pan frames never reuse stale styles. So once the layer has settled, a pan, drag or zoom frame calls no
   `getComputedStyle` (unit test and `atlas.spec.ts` drag test spy on it).
 - **Web fonts.** `display: none` text makes the browser fetch nothing, and a canvas draw is not promised to start the download of
   the unicode-range slices (Chrome 157 does), so the layer collects the characters of its labels per distinct font (style, weight, family) and calls

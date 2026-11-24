@@ -54,7 +54,7 @@ When unauthenticated in online mode, the Dashboard renders the integrated `Dashb
    - First-time initialization via bootstrap administrator creation (`/api/auth/bootstrap`).
    - Secure login (`/api/auth/login`) supporting a 30-day persistent cookie (`Max-Age=2592000`, `rememberMe = true`) or standard session cookie (`rememberMe = false`).
 2. **WebAuthn Passkey Support**:
-   - Modern passwordless authentication utilizing browser credentials API and `@simplewebauthn/browser`.
+   - Modern passwordless authentication utilizing the browser native `navigator.credentials` WebAuthn API (`site/docs/.vitepress/theme/api/auth.ts`, no external `@simplewebauthn/browser` dependency).
    - Challenge/response handshake through `/api/auth/methods/passkey/login/start` and `/api/auth/methods/passkey/login/finish`.
    - Self-service Passkey registration and revocation in `PageAccount.vue` (`/api/me/credentials`).
 3. **Extensible Method Registry**:
@@ -112,5 +112,5 @@ When administrators or authors update site settings online (e.g. modifying `Page
    - **Archive Listing**: Automatically queries `/api/admin/backups` on mount, displaying archive directory path (`backupDir`), snapshot table (`filename`, formatted size, 8-character short SHA-256 checksum, creation timestamp via `shortDateTime`), and empty states.
    - **Create Backup**: Button (`data-backup-create`) calls `POST /api/admin/backups`, generates a logical `.json.gz` snapshot along with a `.sha256` checksum file, presents creation details, and refreshes the snapshot list.
    - **Dry-Run Verify**: Button (`:data-backup-dryrun="filename"`) calls `/api/admin/backups/restore` with `dryRun: true`, validating file existence, SHA-256 hash match, gzip decompression, and table record counts without altering data.
-   - **2-Step Confirmed Restore**: Button (`:data-backup-restore="filename"`) reveals an inline confirmation dialog (`data-backup-restore-confirm`) before allowing execution of `POST /api/admin/backups/restore` (`:data-backup-confirm-restore="filename"` with `dryRun: false`).
+   - **Confirmed Archive Verification**: Button (`:data-backup-restore="filename"`) reveals an inline confirmation dialog (`data-backup-restore-confirm`) before calling `POST /api/admin/backups/restore` (`:data-backup-confirm-restore="filename"` with `dryRun: false`) for read-only archive integrity & table-count verification (destructive database restores are run via server CLI `npm run db:restore`).
    - **Verification Results**: Panel (`data-backup-result`) displays filename, checksum status, operation mode, table count summary, and honest server verification message.

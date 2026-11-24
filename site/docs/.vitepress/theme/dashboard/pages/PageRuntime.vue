@@ -246,10 +246,9 @@ const statusMark = (s: string) => (s === 'ok' ? 'ok' : s === 'off' || s === 'dis
             </select>
             <select v-model="onlineLogFilter.category" class="db-in db-in-sm" :aria-label="t('dsh.rt.logsCategory')" data-online-log-category @change="loadOnlineLogs">
               <option value="all">{{ t('dsh.rt.all') }}</option>
+              <option value="http">http</option>
               <option value="admin">admin</option>
               <option value="auth">auth</option>
-              <option value="ai">ai</option>
-              <option value="db">db</option>
               <option value="error">error</option>
             </select>
             <select v-model.number="onlineLogFilter.limit" class="db-in db-in-sm" :aria-label="t('dsh.rt.logsLimit')" data-online-log-limit @change="loadOnlineLogs">

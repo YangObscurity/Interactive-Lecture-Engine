@@ -159,7 +159,7 @@ onBeforeUnmount(() => skinObserver?.disconnect())
             </div>
           </div>
         </div>
-        <div v-if="checksPending" class="db-empty" :data-overview-todo-running="checkState.running ? '1' : undefined" data-overview-todo-pending>
+        <div v-if="checksPending && !adminFailed" class="db-empty" :data-overview-todo-running="checkState.running ? '1' : undefined" data-overview-todo-pending>
           <span><span class="dm" data-k="off" aria-hidden="true"></span>{{ checkState.running ? t('dsh.ov.todoRunning') : checkState.error ? t('dsh.chk.runFailed') : t('dsh.chk.notRun') }}</span>
         </div>
         <div v-else-if="!todoCount" class="db-empty">

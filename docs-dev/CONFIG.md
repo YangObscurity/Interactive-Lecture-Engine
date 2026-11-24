@@ -164,8 +164,12 @@ npm run doctor -- --json
 
 ### 9.2 会话与 Cookie 策略
 - `SESSION_TTL_HOURS`: 服务端会话生命周期（小时），默认 12 小时。
+- `REMEMBER_ME_DAYS`: 勾选「记住我」后的持久 Cookie 天数，默认 `30`（`Max-Age=2592000`）。
+- `AUTH_COOKIE_NAME`: 会话 Cookie 名称，默认 `lec_session`。
+- `AUTH_COOKIE_SECURE`: Cookie `Secure` 标志策略，支持 `auto`、`true`、`false`（默认 `auto`）。
+- `AUTH_METHODS_ENABLED`: 启用的认证方式列表，逗号分隔（默认 `password,passkey,gateway`）。
 - **免登录与记住我 (rememberMe)**:
-  - 勾选「记住我」(`rememberMe = true`)：签发持久 Cookie，包含 `Max-Age=2592000`（30 天有效），浏览器关闭重启后仍保持登录状态。
+  - 勾选「记住我」(`rememberMe = true`)：签发持久 Cookie，包含 `Max-Age=2592000`（按 `REMEMBER_ME_DAYS` 计算，默认 30 天），浏览器关闭重启后仍保持登录状态。
   - 未勾选：签发标准会话 Cookie，不带 `Max-Age`/`Expires`，浏览器关闭即失效。
 
 ### 9.3 WebAuthn Passkey 配置

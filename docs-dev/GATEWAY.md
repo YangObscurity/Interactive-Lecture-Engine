@@ -21,7 +21,7 @@ lecture-api listens on loopback only (`HOST=127.0.0.1`, enforced at startup when
 |---|---|---|---|
 | `/internal/authelia/authz` | Authelia | internal | forward-auth subrequest, HEAD, sends `X-Original-URL` so Authelia rules see the real path |
 | `/api/db/` | 8100 | `auth_request` | progress, sessions, messages, checklists; body 512k |
-| `/api/admin/` | 8100 | `auth_request` | admin overview and health; the app checks the admin role, Authelia rules also restrict the path to admin groups |
+| `/api/admin/` | 8100 | `auth_request` | admin/author Dashboard APIs; `requireAdminOrAuthor` opens content endpoints to `author`/`admin` and `requireStrictAdmin` restricts system/site routes to `admin`; Authelia rules also protect `/api/admin/` |
 | `= /api/auth/session` | 8100 | `auth_request` | session discovery. On a site with public content the Authelia rule is `bypass`, so anonymous visitors get 200 with no identity headers and the app answers the anonymous shape. On a login-only site (production) it stays behind login like every page: nobody reaches the front end without a session |
 | `= /api/health` | 8100 | off | public; all identity headers blanked |
 | `/api/ai/` | 8100 | `auth_request` | chat (SSE): `proxy_buffering off`, `X-Accel-Buffering: no`, `proxy_read_timeout 330s`, body 64k, `limit_req` zone `lecture_ai` on top of the site zone `docslimit` |
@@ -113,7 +113,7 @@ When deploying with `AUTH_ADAPTER=hybrid`:
 
 ### 8.1 Dual-Authentication Flow
 1. **Primary Gateway Pass-Through**: `lecture-api` inspects `Remote-User`, `Remote-Groups`, `Remote-Email`, and `Remote-Name` supplied by the reverse proxy (e.g. Authelia, Authentik). If present, the user is authenticated directly (`authSource: 'gateway'`) and roles are mapped via `AUTH_ROLE_MAP`.
-2. **Fallback Local Session**: When gateway headers are absent or empty (e.g. direct access or standalone deployment), `lecture-api` falls back to its local cookie session store (`authSource: 'session'`), allowing login via local password or WebAuthn Passkey.
+2. **Fallback Local Session**: When gateway headers are absent or empty (e.g. direct access or standalone deployment), `lecture-api` falls back to its local cookie session store (`authSource: 'cookie'`), allowing login via local password or WebAuthn Passkey.
 
 ### 8.2 Session Lifetimes & Remember Me
 - `SESSION_TTL_HOURS`: Governs server session expiration (default: 12 hours).

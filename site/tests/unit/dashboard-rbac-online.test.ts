@@ -53,7 +53,9 @@ vi.mock('virtual:lecture-theme', () => ({
   },
 }))
 
+import { fetchAdminHealth, fetchAdminOverview, setApiOrigin } from '../../docs/.vitepress/theme/api/admin'
 import type { AuthMethodInfo, AuthStatus } from '../../docs/.vitepress/theme/api/auth'
+import { currentSession, resetSession, subscribeSession } from '../../docs/.vitepress/theme/auth/session'
 import DashboardLogin from '../../docs/.vitepress/theme/dashboard/DashboardLogin.vue'
 import DashboardPage from '../../docs/.vitepress/theme/dashboard/DashboardPage.vue'
 import CompanionTools from '../../docs/.vitepress/theme/dashboard/pages/CompanionTools.vue'
@@ -99,6 +101,8 @@ describe('WP-5 RBAC Online Dashboard Suite', () => {
     fetchCalls.length = 0
     mockLang.value = 'zh-CN'
     window.location.hash = ''
+    setApiOrigin('')
+    resetSession()
     resetAuthState()
     clearRebuildRequired()
     dashboardState.mode = 'loading'
@@ -775,5 +779,122 @@ describe('WP-5 RBAC Online Dashboard Suite', () => {
     expect(wrapper.findComponent(DashboardLogin).exists()).toBe(true)
     expect(wrapper.find('.db-shell').exists()).toBe(false)
     expect(window.location.hash).toBe('')
+  })
+
+  // ── f) Blind-audit regressions: session sync, hybrid gateway logout, split-origin overview/health ──
+  it('f) syncs session.ts listeners on login/logout, keeps hybrid gateway user signed in, and honors setApiOrigin on overview/health', async () => {
+    const seenStatuses: string[] = []
+    const unsub = subscribeSession((s) => {
+      seenStatuses.push(s.status === 'authenticated' ? `auth:${s.user.id}` : s.status)
+    })
+    try {
+      currentAuthStatus = {
+        authAdapter: 'hybrid',
+        authenticated: false,
+        needsBootstrap: false,
+        authSource: 'none',
+        authMethod: 'none',
+        rememberMe: false,
+        user: null,
+        roles: [],
+        groups: [],
+        canAccessAdmin: false,
+        canAccessAuthor: false,
+        visibleSections: [],
+      }
+
+      const wrapper = mount(DashboardPage)
+      await flushPromises()
+      expect(seenStatuses).toContain('anonymous')
+      expect(currentSession().status).toBe('anonymous')
+
+      currentAuthStatus = {
+        authAdapter: 'hybrid',
+        authenticated: true,
+        needsBootstrap: false,
+        authSource: 'gateway',
+        authMethod: 'gateway',
+        rememberMe: false,
+        user: { id: 'gw-admin', name: 'Gateway Admin', email: 'gw@example.com' },
+        roles: ['reader', 'admin'],
+        groups: ['admins'],
+        canAccessAdmin: true,
+        canAccessAuthor: true,
+        visibleSections: ['my-learning', 'account', 'overview'],
+      }
+      wrapper.findComponent(DashboardLogin).vm.$emit('authenticated')
+      await flushPromises()
+      expect(currentSession()).toMatchObject({ status: 'authenticated', user: { id: 'gw-admin' } })
+      expect(seenStatuses).toContain('auth:gw-admin')
+
+      // Gateway user clicking logout when Remote-User headers remain active stays in Dashboard (not trapped in signin)
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async (input: RequestInfo | URL) => {
+          const url = typeof input === 'string' ? input : input.toString()
+          if (url.endsWith('/api/auth/logout')) return jsonResponse({ ok: true, logoutUrl: null })
+          if (url.endsWith('/api/auth/status')) return jsonResponse(currentAuthStatus)
+          if (url.includes('/api/admin/overview')) {
+            return jsonResponse({
+              generatedAt: '2026-11-24T00:00:00.000Z',
+              totals: { users: 1, progressRows: 0, completedLectures: 0, sessions: 0, messages: 0, checklistItems: 0, completedChecklistItems: 0 },
+              byStatus: {},
+              byGroup: [],
+              recentActivity: {},
+            })
+          }
+          if (url.includes('/api/admin/health')) {
+            return jsonResponse({
+              ok: true,
+              service: 'lecture-api',
+              checks: { db: { status: 'ok' }, ai: { status: 'off', provider: 'off' }, notion: { configured: false, status: 'off' } },
+              runtime: { dbKind: 'pglite' },
+            })
+          }
+          return jsonResponse({ ok: true })
+        }),
+      )
+      await wrapper.find('[data-dashboard-logout]').trigger('click')
+      await flushPromises()
+      expect(wrapper.findComponent(DashboardLogin).exists()).toBe(false)
+      expect(wrapper.find('.db-shell').exists()).toBe(true)
+
+      // Split-origin setApiOrigin applied to fetchAdminOverview and fetchAdminHealth with credentials: 'include'
+      const seenReq: Array<{ url: string; credentials?: RequestCredentials }> = []
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+          const url = typeof input === 'string' ? input : input.toString()
+          seenReq.push({ url, credentials: init?.credentials })
+          if (url.includes('/api/admin/overview')) {
+            return jsonResponse({
+              generatedAt: '2026-11-24T00:00:00.000Z',
+              totals: { users: 1, progressRows: 0, completedLectures: 0, sessions: 0, messages: 0, checklistItems: 0, completedChecklistItems: 0 },
+              byStatus: {},
+              byGroup: [],
+              recentActivity: {},
+            })
+          }
+          return jsonResponse({
+            ok: true,
+            service: 'lecture-api',
+            checks: { db: { status: 'ok' }, ai: { status: 'off', provider: 'off' }, notion: { configured: false, status: 'off' } },
+            runtime: { dbKind: 'pglite' },
+          })
+        }),
+      )
+      setApiOrigin('https://api.example.com')
+      const ovRes = await fetchAdminOverview()
+      const hlRes = await fetchAdminHealth()
+      expect(ovRes.ok).toBe(true)
+      expect(hlRes.ok).toBe(true)
+      expect(seenReq).toEqual([
+        { url: 'https://api.example.com/api/admin/overview', credentials: 'include' },
+        { url: 'https://api.example.com/api/admin/health', credentials: 'include' },
+      ])
+    } finally {
+      setApiOrigin('')
+      unsub()
+    }
   })
 })
