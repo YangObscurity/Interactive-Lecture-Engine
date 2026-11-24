@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="480" height="220" viewBox="0 0 480 220" font-family="sans-serif">
+  <rect x="0" y="0" width="480" height="220" fill="#FFFFFF"/>
+  <rect x="80" y="12" width="360" height="20" rx="4" fill="#BFDBFE"/>
+  <text x="260" y="27" font-size="13" text-anchor="middle" fill="#1E3A8A">窗户（光从这一侧来）</text>
+  <text x="16" y="80" font-size="13" fill="#334155">靠窗</text>
+  <text x="16" y="145" font-size="13" fill="#334155">靠里</text>
+  <g font-size="14" text-anchor="middle" fill="#FFFFFF">
+    <rect x="88" y="58" width="44" height="34" rx="6" fill="#94A3B8"/><text x="110" y="80">1</text>
+    <rect x="148" y="58" width="44" height="34" rx="6" fill="#65A30D"/><text x="170" y="80">2</text>
+    <rect x="208" y="58" width="44" height="34" rx="6" fill="#65A30D"/><text x="230" y="80">3</text>
+    <rect x="268" y="58" width="44" height="34" rx="6" fill="#94A3B8"/><text x="290" y="80">4</text>
+    <rect x="328" y="58" width="44" height="34" rx="6" fill="#65A30D"/><text x="350" y="80">5</text>
+    <rect x="388" y="58" width="44" height="34" rx="6" fill="#94A3B8"/><text x="410" y="80">6</text>
+    <rect x="88" y="123" width="44" height="34" rx="6" fill="#94A3B8"/><text x="110" y="145">7</text>
+    <rect x="148" y="123" width="44" height="34" rx="6" fill="#65A30D"/><text x="170" y="145">8</text>
+    <rect x="208" y="123" width="44" height="34" rx="6" fill="#94A3B8"/><text x="230" y="145">9</text>
+    <rect x="268" y="123" width="44" height="34" rx="6" fill="#65A30D"/><text x="290" y="145">10</text>
+    <rect x="328" y="123" width="44" height="34" rx="6" fill="#65A30D"/><text x="350" y="145">11</text>
+    <rect x="388" y="123" width="44" height="34" rx="6" fill="#94A3B8"/><text x="410" y="145">12</text>
+  </g>
+  <rect x="88" y="190" width="14" height="14" rx="3" fill="#65A30D"/>
+  <text x="108" y="202" font-size="13" fill="#334155">每天浇 50 mL</text>
+  <rect x="250" y="190" width="14" height="14" rx="3" fill="#94A3B8"/>
+  <text x="270" y="202" font-size="13" fill="#334155">隔天浇 100 mL（对照组）</text>
+</svg>

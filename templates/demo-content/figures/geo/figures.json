@@ -1,0 +1,40 @@
+{
+  "version": 1,
+  "group": "geo",
+  "figures": [
+    {
+      "id": "geo-vector-add",
+      "file": "geo-vector-add.svg",
+      "kind": "figure",
+      "width": 480,
+      "height": 260,
+      "caption": {
+        "zh": "向量相加的三角形法则与平行四边形法则",
+        "en": "Adding vectors: the triangle rule and the parallelogram rule"
+      },
+      "source": {
+        "paper": "Original Example Diagram",
+        "number": "Fig. 1",
+        "page": 1
+      },
+      "sha256": "cfbaa0803ea3"
+    },
+    {
+      "id": "geo-right-triangle",
+      "file": "geo-right-triangle.svg",
+      "kind": "figure",
+      "width": 480,
+      "height": 250,
+      "caption": {
+        "zh": "直角三角形的对边、邻边、斜边与三角比",
+        "en": "Opposite, adjacent and hypotenuse of a right triangle, and the trigonometric ratios"
+      },
+      "source": {
+        "paper": "Original Example Diagram",
+        "number": "Fig. 2",
+        "page": 1
+      },
+      "sha256": "43b25f9a6507"
+    }
+  ]
+}

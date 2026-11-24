@@ -4,7 +4,8 @@
  * Design (§5.2.5 - §5.2.6):
  *   1. Hover summaries are NEVER bundled into JS chunks and NEVER fetched until the first hover/focus on `.lec-term`.
  *   2. Respects access tiers: loads public `/concepts-hover.json` plus any readable `/_access/<tier>/concepts-hover.json`.
- *   3. Tooltip surface is non-interactive (`role="tooltip"`, `pointer-events: none`) so clicks always navigate cleanly.
+ *   3. The card (`role="tooltip"`) opens on hover / focus of the word; the pointer can move onto it to use its "打开概念页 →"
+ *      link (same target as the word, out of the Tab order: keyboard users press Enter on the word). Spec board 11.1.
  *   4. Round-trip return: records exact `window.scrollY` in capture phase before leaving a lecture, uses `history.back()`
  *      when the previous entry is that lecture, and restores exact `scrollY` (<= 2 px) in one post-layout pass.
  */
@@ -304,7 +305,7 @@ export const conceptsFeature: PageFeature = {
       'click',
       (e) => {
         if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return
-        const anchor = (e.target as HTMLElement | null)?.closest?.('a.lec-term') as HTMLAnchorElement | null
+        const anchor = (e.target as HTMLElement | null)?.closest?.('a.lec-term, a.lec-tcard-open') as HTMLAnchorElement | null
         if (!anchor) return
         if (anchor.target && anchor.target !== '_self') return
         if (anchor.hasAttribute('download')) return
@@ -329,11 +330,32 @@ export const conceptsFeature: PageFeature = {
     let activeAnchor: HTMLElement | null = null
     let hoverToken = 0
 
+    let hideTimer = 0
+
+    const cancelHide = () => {
+      if (hideTimer) {
+        window.clearTimeout(hideTimer)
+        hideTimer = 0
+      }
+    }
+
     const hideCard = () => {
+      cancelHide()
       hoverToken++
       activeAnchor = null
       if (cardEl) cardEl.hidden = true
     }
+
+    // leaving the word or the card hides it after a short pause, so the pointer can cross the gap onto the card's link
+    const scheduleHide = () => {
+      cancelHide()
+      hideTimer = window.setTimeout(() => {
+        hideTimer = 0
+        hideCard()
+      }, 220)
+    }
+
+    const inCard = (el: Node | null | undefined): boolean => Boolean(el && cardEl && cardEl.contains(el))
 
     const ensureCard = (): HTMLElement => {
       if (cardEl) return cardEl
@@ -345,7 +367,8 @@ export const conceptsFeature: PageFeature = {
       return cardEl
     }
 
-    const renderEntry = (card: HTMLElement, entry: ConceptHoverEntry): void => {
+    // spec board 11.1 `.tcard`: term with its English name, the summary, and "打开概念页 →" (S6Y audit-spec #5)
+    const renderEntry = (card: HTMLElement, entry: ConceptHoverEntry, href: string): void => {
       card.textContent = ''
       const lang = currentLang()
 
@@ -363,35 +386,18 @@ export const conceptsFeature: PageFeature = {
       }
       card.appendChild(head)
 
-      if (entry.field || entry.groups.length > 0) {
-        const meta = document.createElement('div')
-        meta.className = 'lec-tcard-meta'
-        if (entry.field) {
-          const tag = document.createElement('span')
-          tag.className = 'lec-tcard-tag'
-          tag.textContent = entry.field
-          meta.appendChild(tag)
-        }
-        for (const g of entry.groups.slice(0, 3)) {
-          const gtag = document.createElement('span')
-          gtag.className = 'lec-tcard-tag'
-          gtag.textContent = g
-          meta.appendChild(gtag)
-        }
-        card.appendChild(meta)
-      }
-
       const summary = document.createElement('p')
       summary.className = 'lec-tcard-summary'
       summary.textContent = entry.summary || translate(lang, 'concepts.noSummary')
       card.appendChild(summary)
 
-      if (entry.aliases.length > 0) {
-        const aliasesEl = document.createElement('p')
-        aliasesEl.className = 'lec-tcard-aliases'
-        aliasesEl.textContent = `${translate(lang, 'concepts.aliasesLabel')}: ${entry.aliases.join(' · ')}`
-        card.appendChild(aliasesEl)
-      }
+      // the same target as the word itself; out of the Tab order (keyboard users press Enter on the word)
+      const open = document.createElement('a')
+      open.className = 'lec-tcard-open'
+      open.href = href
+      open.tabIndex = -1
+      open.textContent = translate(lang, 'concepts.openPage')
+      card.appendChild(open)
     }
 
     const showForAnchor = (anchor: HTMLElement) => {
@@ -404,7 +410,7 @@ export const conceptsFeature: PageFeature = {
         const entry = items[slug]
         if (!entry) return
         const card = ensureCard()
-        renderEntry(card, entry)
+        renderEntry(card, entry, anchor.getAttribute('href') || '')
         positionTooltipCard(card, anchor)
       })
     }
@@ -412,8 +418,14 @@ export const conceptsFeature: PageFeature = {
     document.addEventListener(
       'mouseover',
       (e) => {
-        const anchor = (e.target as HTMLElement | null)?.closest?.('a.lec-term') as HTMLElement | null
+        const target = e.target as HTMLElement | null
+        if (inCard(target)) {
+          cancelHide()
+          return
+        }
+        const anchor = target?.closest?.('a.lec-term') as HTMLElement | null
         if (!anchor) return
+        cancelHide()
         if (anchor === activeAnchor) return
         showForAnchor(anchor)
       },
@@ -425,9 +437,9 @@ export const conceptsFeature: PageFeature = {
       (e) => {
         if (!activeAnchor) return
         const related = e.relatedTarget as HTMLElement | null
-        if (related && activeAnchor.contains(related)) return
-        const leftAnchor = (e.target as HTMLElement | null)?.closest?.('a.lec-term')
-        if (leftAnchor === activeAnchor) hideCard()
+        if (related && (activeAnchor.contains(related) || inCard(related))) return
+        const from = e.target as HTMLElement | null
+        if (from?.closest?.('a.lec-term') === activeAnchor || inCard(from)) scheduleHide()
       },
       { signal },
     )
@@ -436,7 +448,10 @@ export const conceptsFeature: PageFeature = {
       'focusin',
       (e) => {
         const anchor = (e.target as HTMLElement | null)?.closest?.('a.lec-term') as HTMLElement | null
-        if (anchor) showForAnchor(anchor)
+        if (anchor) {
+          cancelHide()
+          showForAnchor(anchor)
+        }
       },
       { signal },
     )
@@ -446,7 +461,15 @@ export const conceptsFeature: PageFeature = {
       (e) => {
         if (!activeAnchor) return
         const related = e.relatedTarget as HTMLElement | null
-        if (related && activeAnchor.contains(related)) return
+        if (related && (activeAnchor.contains(related) || inCard(related))) return
+        if (inCard(e.target as Node | null) || (e.target as HTMLElement | null)?.closest?.('a.lec-term') === activeAnchor) {
+          // a pointer still over the word or the card keeps it (e.g. clicking the card's link moves focus)
+          try {
+            if (activeAnchor.matches(':hover') || cardEl?.matches(':hover')) return
+          } catch {
+            // ignore selector errors
+          }
+        }
         hideCard()
       },
       { signal },
@@ -477,6 +500,7 @@ export const conceptsFeature: PageFeature = {
     )
 
     ctx.defer(() => {
+      cancelHide()
       hoverToken++
       if (cardEl) {
         cardEl.remove()

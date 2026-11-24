@@ -193,3 +193,38 @@ for (const [theme, expectedImpl] of SKINS) {
     })
   })
 }
+
+// S6Y audit-spec #13 #17 #18 (spec board 04.2): snippets are readable text (a figure reference shows its label, never the
+// `[](fig:id)` markup), group headings are "MEA 测量" / "概念" (no all-caps eyebrow, no internal CONCEPTS id), and the count
+// next to the timing is the number of rows listed
+for (const [theme] of SKINS) {
+  test(`search (${theme} skin): figure labels in snippets, plain group headings, count = rows`, async ({ page, pageErrors }) => {
+    await useTheme(page, theme, 'light')
+    await gotoAndSettle(page, '/mea/L02')
+    await page.keyboard.press('ControlOrMeta+k')
+    const input = page.locator('#lec-search-input')
+    await expect(input).toBeFocused()
+    await page.locator('.sp-scope-btn', { hasText: '全部' }).click()
+    const metaCount = async () => Number(/(\d+)\s*条/.exec(await page.locator('.sp-scope .meta').innerText())?.[1] ?? -1)
+
+    // MEA L02: "如 [](fig:mea-ruler) 所示，图中的数字都是为本示例编写的"
+    await input.fill('为本示例编写')
+    await expect(page.locator('.sp-hit').first()).toBeVisible({ timeout: 15_000 })
+    await expect.poll(async () => (await page.locator('.sp-hit .snip').allInnerTexts()).some((s) => /图 2-1 所示/.test(s)), { timeout: 15_000 }).toBe(true)
+    const snips = await page.locator('.sp-hit').allInnerTexts()
+    for (const s of snips) expect(s, 'raw figure-reference markup in a search row').not.toMatch(/\[\]\(|\(fig:|\(tab:/)
+    await expect.poll(async () => (await metaCount()) === (await page.locator('.sp-hit').count()), { timeout: 15_000 }).toBe(true)
+
+    // a lecture group and the concept group
+    await input.fill('有效数字')
+    await expect(page.locator('.sp-grp h4').nth(1)).toBeVisible({ timeout: 15_000 })
+    const heads = await page.locator('.sp-grp h4 > span').allInnerTexts()
+    expect(heads).toContain('概念')
+    expect(heads.some((h) => /^MEA /.test(h))).toBe(true)
+    for (const h of heads) expect(h).not.toMatch(/CONCEPTS|SITE/)
+    const transform = await page.locator('.sp-grp h4').first().evaluate((el) => getComputedStyle(el).textTransform)
+    expect(transform).toBe('none')
+    await expect.poll(async () => (await metaCount()) === (await page.locator('.sp-hit').count()), { timeout: 15_000 }).toBe(true)
+    expect(pageErrors).toEqual([])
+  })
+}

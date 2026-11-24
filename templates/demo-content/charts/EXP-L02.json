@@ -1,0 +1,10 @@
+{
+  "c1": {
+    "type": "echarts",
+    "code": "{\n  \"title\": {\n    \"text\": \"试做：位置和浇水绑在了一起\",\n    \"left\": 8\n  },\n  \"tooltip\": {\n    \"trigger\": \"axis\"\n  },\n  \"grid\": {\n    \"top\": 72,\n    \"bottom\": 56,\n    \"left\": 56\n  },\n  \"xAxis\": {\n    \"type\": \"category\",\n    \"data\": [\n      \"每天浇 · 窗边\",\n      \"隔天浇 · 里侧\",\n      \"隔天浇 · 窗边（补测）\"\n    ]\n  },\n  \"yAxis\": {\n    \"type\": \"value\",\n    \"name\": \"平均苗高 / cm\",\n    \"min\": 0\n  },\n  \"series\": [\n    {\n      \"name\": \"平均苗高\",\n      \"type\": \"bar\",\n      \"barWidth\": \"45%\",\n      \"label\": {\n        \"show\": true,\n        \"position\": \"top\"\n      },\n      \"data\": [\n        {\n          \"value\": 13.5,\n          \"itemStyle\": {\n            \"color\": \"#65A30D\"\n          }\n        },\n        {\n          \"value\": 11,\n          \"itemStyle\": {\n            \"color\": \"#94A3B8\"\n          }\n        },\n        {\n          \"value\": 13,\n          \"itemStyle\": {\n            \"color\": \"#64748B\"\n          }\n        }\n      ]\n    }\n  ]\n}"
+  },
+  "c2": {
+    "type": "mermaid",
+    "code": "flowchart LR\n  W[\"浇水频率（自变量）\"] -->|想测的作用| H[\"苗高（因变量）\"]\n  S[\"光照与位置（混杂因素）\"] -.->|试做时决定了分组| W\n  S -->|也影响| H"
+  }
+}

@@ -12,6 +12,7 @@ import path from 'node:path'
 import { test, expect, gotoAndSettle } from './fixtures'
 import { THEME_MODES, useTheme } from './theme-helpers'
 import { E2E_CONTENT_COPY } from '../../scripts/build_e2e.mjs'
+import { DEMO_DIR } from './demo'
 
 const CONCEPTS_DIR = path.join(E2E_CONTENT_COPY, 'concepts')
 
@@ -132,7 +133,11 @@ test.describe('concept page panels and tool data (@concept-panels)', () => {
 
   test('tools/concepts.json lists the published concepts with correct backlinks; tiers.json and lectures.json are served', async ({ request }) => {
     const slugs = publishedSlugs()
-    expect(slugs).toEqual(['critical-path', 'significant-figures', 'truth-table'])
+    // the build's copy holds every concept page of the demo source (S6X: 14), and the three this spec checks by name
+    expect(slugs).toEqual(
+      fs.readdirSync(path.join(DEMO_DIR, 'concepts')).filter((f) => f.endsWith('.md')).map((f) => f.slice(0, -3)).sort(),
+    )
+    expect(slugs).toEqual(expect.arrayContaining([FULL, PREREQ, LECTURES_ONLY]))
     const res = await request.get('/tools/concepts.json')
     expect(res.status()).toBe(200)
     const data = (await res.json()) as { version: number; tier: string; generatedAt: string; concepts: ToolConcept[] }
@@ -161,7 +166,7 @@ test.describe('concept page panels and tool data (@concept-panels)', () => {
     expect(tiers.version).toBe(1)
     expect(tiers.tiers[0]).toMatchObject({ id: data.tier, path: '/tools/' })
 
-    // lectures.json: only its headers are checked here (unit tests cover the sections); the demo's 14 lectures
+    // lectures.json: only its headers are checked here (unit tests cover the sections); the demo's lectures
     // make a file of some kilobytes
     const head = await request.head('/tools/lectures.json')
     expect(head.status()).toBe(200)

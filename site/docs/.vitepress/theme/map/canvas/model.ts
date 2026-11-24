@@ -109,6 +109,464 @@ export function readerTraceCurve(a: readonly [number, number], b: readonly [numb
   return `M${a[0]} ${a[1]}C${a[0]} ${a[1] + dy} ${b[0]} ${b[1] - dy} ${b[0]} ${b[1]}`
 }
 
+// ---- Reader group-to-group routes ----------------------------------------------------------------------------------
+//
+// The prototype draws each group bundle as one bezier from the middle of a side of A to the middle of the facing side
+// of B. That only works while no two bundles share a side and nothing stands between the two groups: with groups packed
+// in a grid (the 9-group demo), MEA>PRB and MEA>PLN were the same vertical line (one could not be clicked) and MEA>PLN
+// ran straight through PRB (S6Y audit-home #2). Here every bundle gets its own port on the box side (a few slots per
+// side, one bundle per slot), runs through the gaps between the groups on an orthogonal grid (never into a box),
+// prefers a gap no other bundle uses yet, and bundles that still share a stretch of a gap are spread into lanes.
+
+export interface RouteBox {
+  x: number
+  y: number
+  w: number
+  h: number
+}
+
+export interface ReaderBundleRoute {
+  pts: Array<[number, number]>
+  d: string
+}
+
+/** Cost of a bend, and the extra cost factor of each other bundle already on a grid edge. */
+const ROUTE_BEND = 40
+const ROUTE_REUSE = 0.5
+/** Most space between two lanes of one gap (canvas units), and the corner radius of the drawn path. */
+const ROUTE_LANE = 18
+const ROUTE_RADIUS = 26
+/** Direction index = side index: 0 up / top, 1 right, 2 down / bottom, 3 left. */
+const RDX = [0, 1, 0, -1] as const
+const RDY = [-1, 0, 1, 0] as const
+
+interface RouteSlot {
+  box: number
+  side: number
+  center: number
+  px: number
+  py: number
+  node: number
+  used: boolean
+}
+
+class MinHeap {
+  private c: number[] = []
+  private s: number[] = []
+  get size(): number {
+    return this.c.length
+  }
+  push(cost: number, state: number): void {
+    const c = this.c
+    const s = this.s
+    let i = c.length
+    c.push(cost)
+    s.push(state)
+    while (i > 0) {
+      const p = (i - 1) >> 1
+      if (c[p]! <= cost) break
+      c[i] = c[p]!
+      s[i] = s[p]!
+      i = p
+    }
+    c[i] = cost
+    s[i] = state
+  }
+  pop(): [number, number] {
+    const c = this.c
+    const s = this.s
+    const top: [number, number] = [c[0]!, s[0]!]
+    const lc = c.pop()!
+    const ls = s.pop()!
+    const n = c.length
+    if (n > 0) {
+      let i = 0
+      for (;;) {
+        const l = 2 * i + 1
+        if (l >= n) break
+        const r = l + 1
+        const m = r < n && c[r]! < c[l]! ? r : l
+        if (c[m]! >= lc) break
+        c[i] = c[m]!
+        s[i] = s[m]!
+        i = m
+      }
+      c[i] = lc
+      s[i] = ls
+    }
+    return top
+  }
+}
+
+/** Orthogonal polyline with rounded corners (the arrow marker follows the last, straight piece). */
+export function roundedRoutePath(pts: ReadonlyArray<readonly [number, number]>, radius = ROUTE_RADIUS): string {
+  const f = (v: number): string => (Math.round(v * 10) / 10).toString()
+  if (pts.length === 0) return ''
+  let d = `M${f(pts[0]![0])} ${f(pts[0]![1])}`
+  for (let i = 1; i < pts.length - 1; i++) {
+    const p = pts[i - 1]!
+    const c = pts[i]!
+    const n = pts[i + 1]!
+    const lin = Math.hypot(c[0] - p[0], c[1] - p[1])
+    const lout = Math.hypot(n[0] - c[0], n[1] - c[1])
+    const r = Math.min(radius, lin / 2, lout / 2)
+    if (r < 0.5 || lin === 0 || lout === 0) {
+      d += `L${f(c[0])} ${f(c[1])}`
+      continue
+    }
+    const ax = c[0] - ((c[0] - p[0]) / lin) * r
+    const ay = c[1] - ((c[1] - p[1]) / lin) * r
+    const bx = c[0] + ((n[0] - c[0]) / lout) * r
+    const by = c[1] + ((n[1] - c[1]) / lout) * r
+    d += `L${f(ax)} ${f(ay)}Q${f(c[0])} ${f(c[1])} ${f(bx)} ${f(by)}`
+  }
+  const last = pts[pts.length - 1]!
+  return `${d}L${f(last[0])} ${f(last[1])}`
+}
+
+/** Drop repeated points and the middle point of three on one straight line. */
+function simplifyRoute(pts: Array<[number, number]>): Array<[number, number]> {
+  const out: Array<[number, number]> = []
+  for (const p of pts) {
+    const q = out[out.length - 1]
+    if (q && Math.abs(q[0] - p[0]) < 0.01 && Math.abs(q[1] - p[1]) < 0.01) continue
+    const o = out[out.length - 2]
+    if (o && q && ((Math.abs(o[0] - q[0]) < 0.01 && Math.abs(q[0] - p[0]) < 0.01) || (Math.abs(o[1] - q[1]) < 0.01 && Math.abs(q[1] - p[1]) < 0.01))) out.pop()
+    out.push(p)
+  }
+  return out
+}
+
+/**
+ * Route every bundle `[from box, to box]` between the group boxes (pure, deterministic). `gap` is the packing gap
+ * between groups (the routes run along its middle), `width` / `height` the canvas. A bundle with no route returns null
+ * (the caller falls back to the prototype bezier).
+ */
+export function routeReaderBundles(
+  boxes: readonly RouteBox[],
+  pairs: ReadonlyArray<readonly [number, number]>,
+  opts: { gap: number; width: number; height: number },
+): Array<ReaderBundleRoute | null> {
+  const half = opts.gap / 2
+  const clear = Math.max(4, Math.min(20, half - 6))
+  const q = (v: number): number => Math.round(v * 10) / 10
+  const inBox = (x: number, y: number, m: number): boolean => {
+    for (const b of boxes) if (x > b.x - m && x < b.x + b.w + m && y > b.y - m && y < b.y + b.h + m) return true
+    return false
+  }
+
+  // ports: a few slots on every side, with the grid point in the middle of the gap in front of each
+  const raw: Array<Omit<RouteSlot, 'node' | 'used'> & { gx: number; gy: number }> = []
+  boxes.forEach((b, bi) => {
+    for (let side = 0; side < 4; side++) {
+      const horiz = side === 0 || side === 2
+      const len = horiz ? b.w : b.h
+      const k = Math.max(1, Math.min(7, Math.floor(len / 60) - 1))
+      for (let i = 0; i < k; i++) {
+        const t = (i + 1) / (k + 1)
+        const px = q(horiz ? b.x + b.w * t : side === 1 ? b.x + b.w : b.x)
+        const py = q(horiz ? (side === 0 ? b.y : b.y + b.h) : b.y + b.h * t)
+        raw.push({ box: bi, side, center: Math.abs(i - (k - 1) / 2), px, py, gx: q(px + RDX[side]! * half), gy: q(py + RDY[side]! * half) })
+      }
+    }
+  })
+  const xsSet = new Set<number>()
+  const ysSet = new Set<number>()
+  for (const b of boxes) {
+    xsSet.add(q(b.x - half))
+    xsSet.add(q(b.x + b.w + half))
+    ysSet.add(q(b.y - half))
+    ysSet.add(q(b.y + b.h + half))
+  }
+  for (const s of raw) {
+    xsSet.add(s.gx)
+    ysSet.add(s.gy)
+  }
+  const xs = [...xsSet].filter((x) => x >= 0 && x <= opts.width).sort((a, b) => a - b)
+  const ys = [...ysSet].filter((y) => y >= 0 && y <= opts.height).sort((a, b) => a - b)
+  const NX = xs.length
+  const NY = ys.length
+  const N = NX * NY
+  const xi = new Map(xs.map((x, i) => [x, i]))
+  const yi = new Map(ys.map((y, j) => [y, j]))
+  const ok = new Uint8Array(N)
+  for (let j = 0; j < NY; j++) for (let i = 0; i < NX; i++) ok[j * NX + i] = inBox(xs[i]!, ys[j]!, clear) ? 0 : 1
+  const segFree = (x0: number, y0: number, x1: number, y1: number): boolean => {
+    const lx = Math.min(x0, x1)
+    const hx = Math.max(x0, x1)
+    const ly = Math.min(y0, y1)
+    const hy = Math.max(y0, y1)
+    for (const b of boxes) if (hx > b.x - clear && lx < b.x + b.w + clear && hy > b.y - clear && ly < b.y + b.h + clear) return false
+    return true
+  }
+  // okH[n]: edge n -> n+1 is free; okV[n]: edge n -> n+NX is free
+  const okH = new Uint8Array(N)
+  const okV = new Uint8Array(N)
+  for (let j = 0; j < NY; j++) {
+    for (let i = 0; i < NX; i++) {
+      const n = j * NX + i
+      if (!ok[n]) continue
+      if (i + 1 < NX && ok[n + 1] && segFree(xs[i]!, ys[j]!, xs[i + 1]!, ys[j]!)) okH[n] = 1
+      if (j + 1 < NY && ok[n + NX] && segFree(xs[i]!, ys[j]!, xs[i]!, ys[j + 1]!)) okV[n] = 1
+    }
+  }
+  const slots: RouteSlot[] = []
+  for (const s of raw) {
+    const i = xi.get(s.gx)
+    const j = yi.get(s.gy)
+    if (i === undefined || j === undefined || !ok[j * NX + i]) continue
+    slots.push({ box: s.box, side: s.side, center: s.center, px: s.px, py: s.py, node: j * NX + i, used: false })
+  }
+  const usedH = new Uint16Array(N)
+  const usedV = new Uint16Array(N)
+  const step = (n: number, dir: number): number => {
+    const i = n % NX
+    if (dir === 0) return n >= NX && okV[n - NX] ? n - NX : -1
+    if (dir === 1) return i + 1 < NX && okH[n] ? n + 1 : -1
+    if (dir === 2) return n + NX < N && okV[n] ? n + NX : -1
+    return i > 0 && okH[n - 1] ? n - 1 : -1
+  }
+  const edgeUse = (n: number, dir: number): number => (dir === 0 ? usedV[n - NX]! : dir === 1 ? usedH[n]! : dir === 2 ? usedV[n]! : usedH[n - 1]!)
+  const markEdge = (n: number, m: number): void => {
+    if (m === n + 1) usedH[n]!++
+    else if (m === n - 1) usedH[m]!++
+    else if (m === n + NX) usedV[n]!++
+    else if (m === n - NX) usedV[m]!++
+  }
+  const coord = (n: number): [number, number] => [xs[n % NX]!, ys[Math.floor(n / NX)]!]
+
+  const S = N * 4
+  const SINK = S
+  const dist = new Float64Array(S + 1)
+  const prev = new Int32Array(S + 1)
+  const routes: Array<Array<[number, number]> | null> = pairs.map(() => null)
+  const centerOf = (b: RouteBox): [number, number] => [b.x + b.w / 2, b.y + b.h / 2]
+  const order = pairs
+    .map((p, idx) => {
+      const a = boxes[p[0]]
+      const b = boxes[p[1]]
+      const ca = a ? centerOf(a) : [0, 0]
+      const cb = b ? centerOf(b) : [0, 0]
+      return { idx, len: Math.abs(ca[0]! - cb[0]!) + Math.abs(ca[1]! - cb[1]!) }
+    })
+    .sort((u, v) => u.len - v.len || u.idx - v.idx)
+
+  for (const { idx } of order) {
+    const [ai, bi] = pairs[idx]!
+    if (ai === bi || !boxes[ai] || !boxes[bi]) continue
+    dist.fill(Infinity)
+    prev.fill(-1)
+    const heap = new MinHeap()
+    const srcSlot = new Map<number, RouteSlot>()
+    for (const s of slots) {
+      if (s.box !== ai || s.used) continue
+      const st = s.node * 4 + s.side
+      const c = half + s.center * 6
+      if (c < dist[st]!) {
+        dist[st] = c
+        srcSlot.set(st, s)
+        heap.push(c, st)
+      }
+    }
+    const targets = new Map<number, RouteSlot[]>()
+    for (const s of slots) if (s.box === bi && !s.used) (targets.get(s.node) ?? targets.set(s.node, []).get(s.node)!).push(s)
+    let sinkSlot: RouteSlot | null = null
+    while (heap.size > 0) {
+      const [c, st] = heap.pop()
+      if (c > dist[st]!) continue
+      if (st === SINK) break
+      const n = st >> 2
+      const d = st & 3
+      const tl = targets.get(n)
+      if (tl) {
+        for (const t of tl) {
+          const inward = (t.side + 2) % 4
+          const ct = c + half + (d !== inward ? ROUTE_BEND : 0) + t.center * 6
+          if (ct < dist[SINK]!) {
+            dist[SINK] = ct
+            prev[SINK] = st
+            sinkSlot = t
+            heap.push(ct, SINK)
+          }
+        }
+      }
+      for (let nd = 0; nd < 4; nd++) {
+        if (nd === (d + 2) % 4) continue
+        const m = step(n, nd)
+        if (m < 0) continue
+        const [x0, y0] = coord(n)
+        const [x1, y1] = coord(m)
+        const len = Math.abs(x1 - x0) + Math.abs(y1 - y0)
+        const cm = c + len * (1 + ROUTE_REUSE * edgeUse(n, nd)) + (nd !== d ? ROUTE_BEND : 0)
+        const sm = m * 4 + nd
+        if (cm < dist[sm]!) {
+          dist[sm] = cm
+          prev[sm] = st
+          heap.push(cm, sm)
+        }
+      }
+    }
+    if (!sinkSlot || prev[SINK]! < 0) continue
+    const chain: number[] = []
+    let st = prev[SINK]!
+    let first = st
+    while (st >= 0) {
+      chain.push(st >> 2)
+      first = st
+      st = prev[st]!
+    }
+    chain.reverse()
+    const src = srcSlot.get(first)
+    if (!src) continue
+    src.used = true
+    sinkSlot.used = true
+    for (let k = 1; k < chain.length; k++) if (chain[k] !== chain[k - 1]) markEdge(chain[k - 1]!, chain[k]!)
+    routes[idx] = simplifyRoute([[src.px, src.py], ...chain.map(coord), [sinkSlot.px, sinkSlot.py]])
+  }
+
+  // lanes: bundles sharing a stretch of one grid line are spread across the gap
+  interface Seg { r: number; i: number; vert: boolean; c: number; lo: number; hi: number; key: number }
+  const lines = new Map<string, Seg[]>()
+  routes.forEach((pts, r) => {
+    if (!pts) return
+    for (let i = 0; i + 1 < pts.length; i++) {
+      const p = pts[i]!
+      const n = pts[i + 1]!
+      const vert = Math.abs(p[0] - n[0]) < 0.01
+      const c = vert ? p[0] : p[1]
+      const a = vert ? p[1] : p[0]
+      const b = vert ? n[1] : n[0]
+      const sg: Seg = { r, i, vert, c, lo: Math.min(a, b), hi: Math.max(a, b), key: 0 }
+      const k = vert ? 'v' : 'h'
+      ;(lines.get(k) ?? lines.set(k, []).get(k)!).push(sg)
+    }
+  })
+  const off = routes.map((pts) => (pts ? new Float64Array(pts.length) : null))
+  // segments of one direction that overlap (or touch) along their length and lie closer than two lanes across join one
+  // band; every band of two or more bundles is spread
+  for (const segs of lines.values()) {
+    const parent = segs.map((_, i) => i)
+    const root = (i: number): number => {
+      while (parent[i] !== i) i = parent[i] = parent[parent[i]!]!
+      return i
+    }
+    for (let i = 0; i < segs.length; i++) {
+      for (let j = i + 1; j < segs.length; j++) {
+        const u = segs[i]!
+        const v = segs[j]!
+        if (Math.abs(u.c - v.c) < 2 * ROUTE_LANE && u.lo <= v.hi + 0.5 && v.lo <= u.hi + 0.5) parent[root(i)] = root(j)
+      }
+    }
+    const bands = new Map<number, Seg[]>()
+    segs.forEach((s, i) => (bands.get(root(i)) ?? bands.set(root(i), []).get(root(i))!).push(s))
+    for (const band of bands.values()) if (new Set(band.map((s) => s.r)).size >= 2) spread(band)
+  }
+  function spread(comp: Seg[]): void {
+    const vert = comp[0]!.vert
+    const c = comp.reduce((t, s) => t + s.c, 0) / comp.length
+    const ax = vert ? 0 : 1
+    for (const s of comp) {
+      const pts = routes[s.r]!
+      const side = (p: readonly [number, number] | undefined): number => (p ? Math.sign(p[ax] - s.c) : 0)
+      s.key = side(pts[s.i - 1]) + side(pts[s.i + 2])
+    }
+    comp.sort((u, v) => u.c - v.c || u.key - v.key || u.r - v.r)
+    const lo = Math.min(...comp.map((s) => s.lo))
+    const hi = Math.max(...comp.map((s) => s.hi))
+    let dl = c
+    let dr = (vert ? opts.width : opts.height) - c
+    for (const b of boxes) {
+      const [b0, b1, p0, p1] = vert ? [b.y, b.y + b.h, b.x, b.x + b.w] : [b.x, b.x + b.w, b.y, b.y + b.h]
+      if (!(b0 < hi && b1 > lo)) continue
+      if (p1 <= c) dl = Math.min(dl, c - p1)
+      else if (p0 >= c) dr = Math.min(dr, p0 - c)
+    }
+    // the lanes fill the free band around the line (8 units off each box and the canvas edge), centred on the line when
+    // the band allows it; offset of segment i of its route: a vertical segment moves in x, a horizontal one in y (a port
+    // moves along its side)
+    const fl = Math.max(0, dl - 8)
+    const fr = Math.max(0, dr - 8)
+    const n = comp.length
+    const sp = Math.min(ROUTE_LANE, (fl + fr) / (n - 1))
+    const total = sp * (n - 1)
+    const start = Math.min(Math.max(-total / 2, -fl), fr - total)
+    comp.forEach((s, k) => {
+      off[s.r]![s.i] = c + start + k * sp - s.c
+    })
+  }
+  const outs = routes.map((pts, r) => {
+    if (!pts) return null
+    const o = off[r]!
+    const out = pts.map((p): [number, number] => [p[0], p[1]])
+    for (let i = 0; i + 1 < pts.length; i++) {
+      if (!o[i]) continue
+      const vert = Math.abs(pts[i]![0] - pts[i + 1]![0]) < 0.01
+      const ax = vert ? 0 : 1
+      out[i]![ax] += o[i]!
+      out[i + 1]![ax] += o[i]!
+    }
+    return out
+  })
+  // two facing sides whose ports sit a little apart give a small S: move one port along its side so the line is straight
+  const ports = (): Array<[number, number]> => outs.flatMap((p) => (p ? [p[0]!, p[p.length - 1]!] : []))
+  outs.forEach((p, r) => {
+    if (!p || p.length !== 4) return
+    const horiz = Math.abs(p[0]![1] - p[1]![1]) < 0.01 && Math.abs(p[2]![1] - p[3]![1]) < 0.01
+    const vert = Math.abs(p[0]![0] - p[1]![0]) < 0.01 && Math.abs(p[2]![0] - p[3]![0]) < 0.01
+    if (!horiz && !vert) return
+    const ax: 0 | 1 = horiz ? 1 : 0
+    const along: 0 | 1 = horiz ? 0 : 1
+    // only an S between two facing sides (both ends run the same way), not a U back to the same side
+    if (Math.sign(p[1]![along] - p[0]![along]) !== Math.sign(p[3]![along] - p[2]![along])) return
+    if (Math.abs(p[1]![ax] - p[2]![ax]) >= 2 * ROUTE_RADIUS) return
+    const taken = ports()
+    const fits = (end: 0 | 3, v: number): boolean => {
+      const b = boxes[pairs[r]![end === 0 ? 0 : 1]]!
+      const [lo, len] = horiz ? [b.y, b.h] : [b.x, b.w]
+      if (v < lo + 12 || v > lo + len - 12) return false
+      const at: [number, number] = horiz ? [p[end]![0], v] : [v, p[end]![1]]
+      return !taken.some((q) => q !== p[end] && Math.hypot(q[0] - at[0], q[1] - at[1]) < 12)
+    }
+    if (fits(3, p[0]![ax])) {
+      p[2]![ax] = p[0]![ax]
+      p[3]![ax] = p[0]![ax]
+    } else if (fits(0, p[3]![ax])) {
+      p[0]![ax] = p[3]![ax]
+      p[1]![ax] = p[3]![ax]
+    } else return
+    outs[r] = [p[0]!, p[3]!]
+  })
+  return outs.map((out) => (out ? { pts: out, d: roundedRoutePath(out) } : null))
+}
+
+const readerRouteCache = new WeakMap<object, Map<string, ReaderBundleRoute | null>>()
+
+/** The routes of a reader layout, computed once per layout object; keyed `${a}>${b}`. */
+export function readerBundleRoutes(R: {
+  W: number
+  H: number
+  groups: ReadonlyArray<CanvasReaderGroupLayout>
+  bundles: ReadonlyArray<{ a: string; b: string }>
+}): Map<string, ReaderBundleRoute | null> {
+  const hit = readerRouteCache.get(R)
+  if (hit) return hit
+  const index = new Map(R.groups.map((g, i) => [g.id, i]))
+  const pairs: Array<[number, number]> = []
+  const keys: string[] = []
+  for (const b of R.bundles) {
+    const a = index.get(b.a)
+    const c = index.get(b.b)
+    if (a === undefined || c === undefined) continue
+    pairs.push([a, c])
+    keys.push(`${b.a}>${b.b}`)
+  }
+  const routes = routeReaderBundles(R.groups, pairs, { gap: CANVAS_READER_DIM.GROUPGAP, width: R.W, height: R.H })
+  const out = new Map<string, ReaderBundleRoute | null>()
+  keys.forEach((k, i) => out.set(k, routes[i] ?? null))
+  readerRouteCache.set(R, out)
+  return out
+}
+
 // ---- Datasheet pinout layout geometry ----------------------------------------------------------------------------
 
 export interface DsPinGeom {
@@ -400,6 +858,7 @@ export function buildCanvasBoardView(input: {
 
   // Inter-group bundles / buses
   const bundleEdges: CanvasEdgeProps[] = []
+  const readerRoutes = skin === 'reader' ? readerBundleRoutes(R) : null
   for (const b of R.bundles) {
     const pairKey = b.a < b.b ? `${b.a}|${b.b}` : `${b.b}|${b.a}`
     const active = focus.activePairKey === pairKey
@@ -408,25 +867,29 @@ export function buildCanvasBoardView(input: {
       const A = GMap.get(b.a)
       const B = GMap.get(b.b)
       if (!A || !B) continue
-      let p1: [number, number]
-      let p2: [number, number]
-      let horiz = true
-      if (B.x >= A.x + A.w) {
-        p1 = [A.x + A.w, A.y + A.h / 2]
-        p2 = [B.x, B.y + B.h / 2]
-      } else if (A.x >= B.x + B.w) {
-        p1 = [A.x, A.y + A.h / 2]
-        p2 = [B.x + B.w, B.y + B.h / 2]
-      } else if (B.y >= A.y) {
-        p1 = [A.x + A.w / 2, A.y + A.h]
-        p2 = [B.x + B.w / 2, B.y]
-        horiz = false
-      } else {
-        p1 = [A.x + A.w / 2, A.y]
-        p2 = [B.x + B.w / 2, B.y + B.h]
-        horiz = false
+      let d = readerRoutes?.get(`${b.a}>${b.b}`)?.d ?? ''
+      if (!d) {
+        // no way through the gaps (should not happen with a packed layout): the prototype's bezier between side middles
+        let p1: [number, number]
+        let p2: [number, number]
+        let horiz = true
+        if (B.x >= A.x + A.w) {
+          p1 = [A.x + A.w, A.y + A.h / 2]
+          p2 = [B.x, B.y + B.h / 2]
+        } else if (A.x >= B.x + B.w) {
+          p1 = [A.x, A.y + A.h / 2]
+          p2 = [B.x + B.w, B.y + B.h / 2]
+        } else if (B.y >= A.y) {
+          p1 = [A.x + A.w / 2, A.y + A.h]
+          p2 = [B.x + B.w / 2, B.y]
+          horiz = false
+        } else {
+          p1 = [A.x + A.w / 2, A.y]
+          p2 = [B.x + B.w / 2, B.y + B.h]
+          horiz = false
+        }
+        d = readerBundleBezier(p1, p2, horiz)
       }
-      const d = readerBundleBezier(p1, p2, horiz)
       bundleEdges.push({
         kind: 'bundle',
         d,

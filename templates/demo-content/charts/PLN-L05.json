@@ -1,0 +1,10 @@
+{
+  "c1": {
+    "type": "mermaid",
+    "code": "flowchart LR\n  P[制订计划] --> D[执行]\n  D --> R[记录实际]\n  R --> V[复盘：对比计划与实际]\n  V --> A[调整做法或估算]\n  A --> P"
+  },
+  "c2": {
+    "type": "echarts",
+    "code": "{\n  \"title\": {\n    \"text\": \"五轮迭代的估算误差\",\n    \"subtext\": \"误差 = (实际 - 估算) / 估算\",\n    \"left\": 8\n  },\n  \"tooltip\": {\n    \"trigger\": \"axis\"\n  },\n  \"grid\": {\n    \"left\": 56,\n    \"right\": 24,\n    \"top\": 92,\n    \"bottom\": 60\n  },\n  \"xAxis\": {\n    \"type\": \"category\",\n    \"data\": [\n      \"第1轮\",\n      \"第2轮\",\n      \"第3轮\",\n      \"第4轮\",\n      \"第5轮\"\n    ],\n    \"name\": \"迭代\",\n    \"nameLocation\": \"middle\",\n    \"nameGap\": 30\n  },\n  \"yAxis\": {\n    \"type\": \"value\",\n    \"name\": \"误差（%）\",\n    \"min\": 0,\n    \"nameTextStyle\": {\n      \"align\": \"left\"\n    }\n  },\n  \"series\": [\n    {\n      \"name\": \"估算误差\",\n      \"type\": \"line\",\n      \"data\": [\n        45,\n        30,\n        22,\n        15,\n        12\n      ],\n      \"label\": {\n        \"show\": true,\n        \"formatter\": \"{c}%\"\n      }\n    }\n  ]\n}"
+  }
+}

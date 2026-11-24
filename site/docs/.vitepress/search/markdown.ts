@@ -128,6 +128,8 @@ export function cleanProseSegment(raw: string): string {
   s = s.replace(/\|/g, ' ')
   // Markdown images and links
   s = s.replace(/!\[([^\]]*)\]\([^)]*\)/g, ' $1 ')
+  // empty-text links left over (`[](fig:id)` the index builder could not number, search/figureLabels.ts) carry no prose
+  s = s.replace(/\[\]\([^)]*\)/g, ' ')
   s = s.replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
   // Strip remaining HTML tags (preserving inner prose such as cite chip labels)
   s = s.replace(/<[^>]+>/g, ' ')

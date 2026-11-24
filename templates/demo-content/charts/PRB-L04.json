@@ -1,0 +1,6 @@
+{
+  "c1": {
+    "type": "echarts",
+    "code": "{\n  \"title\": {\n    \"text\": \"50 名学生步行到校用时\",\n    \"left\": 8\n  },\n  \"tooltip\": {\n    \"trigger\": \"axis\"\n  },\n  \"grid\": {\n    \"top\": 64,\n    \"bottom\": 56,\n    \"left\": 56\n  },\n  \"xAxis\": {\n    \"type\": \"category\",\n    \"name\": \"用时（分钟）\",\n    \"nameLocation\": \"middle\",\n    \"nameGap\": 32,\n    \"data\": [\n      \"0–5\",\n      \"5–10\",\n      \"10–15\",\n      \"15–20\",\n      \"20–25\",\n      \"25–30\",\n      \"30–35\"\n    ]\n  },\n  \"yAxis\": {\n    \"type\": \"value\",\n    \"name\": \"人数\"\n  },\n  \"series\": [\n    {\n      \"name\": \"人数\",\n      \"type\": \"bar\",\n      \"barCategoryGap\": \"0%\",\n      \"itemStyle\": {\n        \"borderColor\": \"#ffffff\",\n        \"borderWidth\": 1\n      },\n      \"label\": {\n        \"show\": true,\n        \"position\": \"top\"\n      },\n      \"data\": [\n        3,\n        9,\n        15,\n        12,\n        7,\n        3,\n        1\n      ]\n    }\n  ]\n}"
+  }
+}

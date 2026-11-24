@@ -53,7 +53,7 @@ const geo = computed(() => {
 
 <template>
   <div class="gm-d">
-    <div class="dip-grid" :style="{ gridTemplateRows: `repeat(${geo.half}, 28px)` }" role="group" :aria-label="labels.lectures">
+    <div class="dip-grid" :style="{ gridTemplateRows: `repeat(${geo.half}, ${geo.half <= 2 ? Math.ceil(96 / geo.half) : 28}px)` }" role="group" :aria-label="labels.lectures">
       <div class="dip-body" :style="{ gridRow: `1 / ${geo.half + 1}` }" aria-hidden="true">
         <span class="pin1" />
         <span class="chip-id">{{ groupId }}</span>
@@ -153,6 +153,8 @@ const geo = computed(() => {
   height: 28px;
   min-width: 0;
   color: inherit !important;
+  /* the prototype's pin names are regular; without this the link takes `.vp-doc a { font-weight: 500 }` (S6Y audit-group #5) */
+  font-weight: 400;
   text-decoration: none !important;
 }
 .pin.l > a,

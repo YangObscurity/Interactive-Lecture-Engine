@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="480" height="260" viewBox="0 0 480 260" font-family="sans-serif">
+  <rect x="10" y="10" width="460" height="240" rx="10" fill="#FFFFFF" stroke="#CBD5E1"/>
+  <text x="24" y="38" font-size="16" font-weight="bold" fill="#1E293B">豆苗浇水实验 · 记录卡</text>
+  <g font-size="12" fill="#334155">
+    <text x="24" y="60">问题：每天浇 50 mL 与隔天浇 100 mL，第 14 天平均苗高是否相差 ≥ 1 cm</text>
+    <text x="24" y="78">分组：随机数种子 2026，每组 6 盆；方案日期 2026-05-01</text>
+    <text x="24" y="96">测量：从土面量到顶芽，单位 cm，读到 0.1</text>
+  </g>
+  <line x1="24" y1="108" x2="456" y2="108" stroke="#94A3B8"/>
+  <g font-size="12" font-weight="bold" fill="#475569">
+    <text x="24" y="128">日期</text><text x="96" y="128">位置</text><text x="146" y="128">组</text>
+    <text x="200" y="128">苗高 / cm</text><text x="290" y="128">记录人</text><text x="346" y="128">备注</text>
+  </g>
+  <g font-size="12" fill="#1E293B">
+    <text x="24" y="152">05-15</text><text x="96" y="152">1</text><text x="146" y="152">隔天</text><text x="200" y="152">11.2</text><text x="290" y="152">甲</text>
+    <text x="24" y="176">05-15</text><text x="96" y="176">2</text><text x="146" y="176">每天</text><text x="200" y="176">12.1</text><text x="290" y="176">甲</text>
+    <text x="24" y="200">05-15</text><text x="96" y="200">7</text><text x="146" y="200">隔天</text><text x="200" y="200">10.6</text><text x="290" y="200">甲</text><text x="346" y="200">第 9 天倾倒后扶正</text>
+    <text x="24" y="224">05-15</text><text x="96" y="224">8</text><text x="146" y="224">每天</text><text x="200" y="224" fill="#94A3B8">12.6</text><text x="236" y="224" fill="#DC2626">12.9</text><text x="290" y="224">甲</text><text x="346" y="224">读错，划线改正</text>
+  </g>
+  <line x1="198" y1="220" x2="228" y2="220" stroke="#DC2626" stroke-width="1.5"/>
+  <g stroke="#E2E8F0"><line x1="24" y1="136" x2="456" y2="136"/><line x1="24" y1="160" x2="456" y2="160"/><line x1="24" y1="184" x2="456" y2="184"/><line x1="24" y1="208" x2="456" y2="208"/></g>
+</svg>

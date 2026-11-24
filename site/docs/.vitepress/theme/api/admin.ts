@@ -9,7 +9,7 @@ import { PROGRESS_WIRE_STATUS } from '../../site.config.mts'
 import type { CompanionPromptsFile, PROMPT_LIMITS as PromptLimitsShape } from '../../prompts/companion.ts'
 import type { SiteTexts } from '../../site-texts-schema.ts'
 import { request, type HttpResult } from './http'
-import { demoReadOnlyHint } from './devDashboard'
+import { demoReadOnlyHint, type DevAccessSummary } from './devDashboard'
 
 export interface AdminOverviewTotals {
   users: number
@@ -102,8 +102,11 @@ export interface DevDashboardStatus {
   settings: DevSettingSummary[]
   themes: Array<{ id: string; builtin: boolean; enabled: boolean; engine: string | null; errors: string[] }>
   autheliaPreview: string
+  autheliaPreviewNote?: { code: string; detail?: string } | null
   nodeVersion: string
   texts?: SiteTexts
+  access?: DevAccessSummary
+  demo?: boolean
 }
 
 export const ADMIN_ENDPOINTS = {

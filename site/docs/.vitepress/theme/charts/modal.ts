@@ -14,7 +14,7 @@ import type PhotoSwipe from 'photoswipe'
 import type { PhotoSwipeOptions, SlideData } from 'photoswipe'
 import { currentLang, translate } from '../../i18n/index.ts'
 import type { MessageKey } from '../../i18n/index.ts'
-import { chartBody, chartTagLabel, fitInlineSvg, svgNaturalSize } from './dom'
+import { chartBody, fitInlineSvg, svgNaturalSize } from './dom'
 import { figExtras } from './state'
 import type { EChartsInstanceLike } from './state'
 
@@ -211,6 +211,10 @@ function mountChartIntoSlide(viewer: ActiveViewer, slideIndex: number, container
   host.appendChild(body)
   body.style.width = ''
   body.style.height = ''
+  // the inline figure hides its "loading" placeholder by status; the viewer's host figure has no status, so drop it here
+  if (fig.dataset.chartStatus === 'ok') {
+    for (const pending of Array.from(body.querySelectorAll(':scope > .chart-pending'))) pending.remove()
+  }
 
   const svg = body.querySelector<SVGSVGElement>('svg')
   const api: ChartZoomApi | null =
@@ -365,11 +369,63 @@ function cleanupViewer(viewer: ActiveViewer): void {
   }
 }
 
-function slideTitleText(fig: HTMLElement): string {
+/**
+ * Viewer title of a chart: its number and caption, as under the figure ("图 5-2 插值结果"; spec board 07: no type tag, no
+ * internal `MEA-L05#c2` id — S6Y audit-spec #10). The number is the build-time `data-fig-label` (figures/numbering.ts).
+ */
+export function slideTitleText(fig: HTMLElement): string {
   const L = (key: MessageKey): string => translate(currentLang(), key)
-  const type = fig.dataset.type || ''
-  return (chartTagLabel(type) || L('chart.modal.defaultTitle')) +
-    (fig.dataset.lecture ? ' · ' + fig.dataset.lecture + '#' + (fig.dataset.id || '') : '')
+  const label = fig.dataset.figLabel || fig.querySelector('.lec-ff-no')?.textContent?.trim() || ''
+  const caption = fig.querySelector('.lec-ff-caption')?.textContent?.trim() || fig.dataset.caption || fig.dataset.title || ''
+  const text = [label, caption].filter(Boolean).join(' ')
+  return text || L('chart.modal.defaultTitle')
+}
+
+/** A file name from the slide title ("图 5-2 插值结果" → "图_5-2_插值结果"). */
+function exportFileName(slide: ViewerSlide, ext: string): string {
+  const base = (slide.title || slide.id || 'figure').replace(/[\\/:*?"<>|]+/g, '').replace(/\s+/g, '_').slice(0, 80)
+  return `${base || 'figure'}.${ext}`
+}
+
+function triggerDownload(href: string, name: string): void {
+  const a = document.createElement('a')
+  a.href = href
+  a.download = name
+  a.rel = 'noopener'
+  a.style.display = 'none'
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+}
+
+/**
+ * Viewer export (spec board 07: "导出放在查看器里"; S6Y audit-spec #8): a figure downloads its file (the original when the
+ * figure pack has one); a chart downloads its drawing as SVG (ECharts uses the SVG renderer, Mermaid and WaveDrom are SVG),
+ * or PNG when the chart fell back to a canvas.
+ */
+export function exportSlide(slide: ViewerSlide | undefined, liveBody: HTMLElement | null = null): void {
+  if (!slide || typeof document === 'undefined') return
+  if (slide.kind === 'figure') {
+    const href = slide.originalUrl || slide.src
+    if (!href) return
+    const ext = (href.split(/[?#]/, 1)[0]!.split('.').pop() || 'png').toLowerCase()
+    triggerDownload(href, exportFileName(slide, ext))
+    return
+  }
+  const body = liveBody ?? (slide.originEl ? chartBody(slide.originEl) : null)
+  if (!body) return
+  const svg = body.querySelector<SVGSVGElement>('svg')
+  if (svg) {
+    const clone = svg.cloneNode(true) as SVGSVGElement
+    if (!clone.getAttribute('xmlns')) clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg')
+    const xml = new XMLSerializer().serializeToString(clone)
+    const url = URL.createObjectURL(new Blob([xml], { type: 'image/svg+xml;charset=utf-8' }))
+    triggerDownload(url, exportFileName(slide, 'svg'))
+    setTimeout(() => URL.revokeObjectURL(url), 1000)
+    return
+  }
+  const canvas = body.querySelector<HTMLCanvasElement>('canvas')
+  if (canvas) triggerDownload(canvas.toDataURL('image/png'), exportFileName(slide, 'png'))
 }
 
 /** Collect every figure (`<LectureFigure>`) and rendered diagram (`figure.chart`) in page reading order. */
@@ -603,6 +659,7 @@ function startViewer(
             `<button type="button" data-m="next" title="${L('chart.modal.next')}" aria-label="${L('chart.modal.next')}">&#8250;</button>`
           : '') +
         `<a class="chart-modal__orig" data-m="original" target="_blank" rel="noopener noreferrer" hidden>${L('lecture.fig.openOriginal')}</a>` +
+        `<button type="button" class="chart-modal__export" data-m="export" title="${L('chart.modal.exportTitle')}" aria-label="${L('chart.modal.exportTitle')}">${L('chart.modal.export')}</button>` +
         `<button type="button" data-m="in" title="${L('chart.modal.zoomIn')}" aria-label="${L('chart.modal.zoomIn')}">&#43;</button>` +
         `<button type="button" data-m="out" title="${L('chart.modal.zoomOut')}" aria-label="${L('chart.modal.zoomOut')}">&#8722;</button>` +
         `<button type="button" data-m="reset" title="${L('chart.modal.reset')}" aria-label="${L('chart.modal.reset')}">&#8634;</button>` +
@@ -633,6 +690,9 @@ function startViewer(
             } else if (act === 'in' || act === 'out' || act === 'reset') {
               ev.preventDefault()
               zoomCurrent(act)
+            } else if (act === 'export') {
+              ev.preventDefault()
+              exportSlide(slides[pswp.currIndex], viewer.mountedChart?.slideIndex === pswp.currIndex ? viewer.mountedChart.body : null)
             }
           },
           { signal: listeners.signal },

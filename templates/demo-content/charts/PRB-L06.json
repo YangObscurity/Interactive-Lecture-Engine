@@ -1,0 +1,6 @@
+{
+  "c1": {
+    "type": "mermaid",
+    "code": "flowchart TB\n  T[气温] --> I[冷饮销量]\n  T --> E[空调用电量]\n  I -.-|看起来相关，并无因果| E"
+  }
+}

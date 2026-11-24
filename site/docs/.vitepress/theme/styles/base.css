@@ -101,10 +101,76 @@
   padding: 0 4px;
 }
 
-/* code blocks */
-.vp-doc div[class*='language-'] {
+/* code blocks (spec board §09) */
+.vp-doc div[class*='language-'],
+.vp-doc .code {
   border: var(--lec-line-hair) solid var(--lec-border);
   border-radius: var(--lec-radius-2);
+  background: var(--lec-surface);
+  overflow: hidden;
+  position: relative;
+  margin: var(--lec-space-4) 0;
+}
+
+/* persistent code block header (spec board §09) */
+.vp-doc .code-head,
+.code-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 2px var(--lec-space-1) 2px var(--lec-space-3);
+  border-bottom: var(--lec-line-hair) solid var(--lec-border);
+  font: 400 11.5px var(--lec-font-mono);
+  color: var(--lec-text-muted);
+}
+.vp-doc .code-head button,
+.code-head button {
+  font: 500 12px var(--lec-font-heading);
+  border: 0;
+  background: transparent;
+  color: var(--lec-text-muted);
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: var(--lec-radius-1);
+  transition: color 0.15s ease, background 0.15s ease;
+}
+.vp-doc .code-head button:hover,
+.code-head button:hover {
+  color: var(--lec-accent);
+  background: var(--lec-accent-tint);
+}
+.vp-doc .code-head button:focus-visible,
+.code-head button:focus-visible {
+  outline: var(--lec-line-heavy) solid var(--lec-accent);
+  outline-offset: 1px;
+}
+.vp-doc .code-head button.copied,
+.code-head button.copied {
+  color: var(--lec-done-text);
+  background: transparent;
+}
+.vp-doc .code-head button.copy-failed,
+.code-head button.copy-failed {
+  color: var(--lec-danger);
+  background: transparent;
+}
+
+/* Hide VitePress hover-only floating copy button and duplicate lang overlay */
+.vp-doc div[class*='language-'] > button.copy {
+  display: none !important;
+}
+.vp-doc div[class*='language-'] > span.lang {
+  display: none !important;
+}
+
+/* code-group tab integration: tabs sit directly on top of active block */
+.vp-code-group div[class*='language-'] {
+  margin-top: 0 !important;
+  border-top-left-radius: 0 !important;
+  border-top-right-radius: 0 !important;
+}
+.vp-doc .vp-code-group div[class*='language-']:not(.active) {
+  display: none;
 }
 
 /* ---------------------------------------------------------------- cite (spec board §09) */
@@ -319,12 +385,13 @@ figure.chart .chart-body svg tspan::selection,
 }
 /* the place of a title block whose group data is still on its way (restricted tiers): reader height, see LectureTitleHost.vue */
 .lec-tb-ph {
-  min-height: 231px;
+  /* S6Y F1: heights of the title block after its own line height (1.6) and the 40px h1: 221 on desktop and phone */
+  min-height: 221px;
   margin: 0 0 var(--lec-space-5);
 }
 @media (max-width: 560px) {
   .lec-tb-ph {
-    min-height: 293px;
+    min-height: 221px;
   }
 }
 .vp-doc .lec-quiz-host {
@@ -398,6 +465,18 @@ html[data-lec-scrollbar='on']::-webkit-scrollbar-thumb:hover {
 }
 .vp-doc table {
   overflow-x: auto;
+}
+/* spec board 07.1: wide tables, code blocks, formula blocks (and the other block components: self-check cards and tip boxes,
+   charts) go below a floated thumbnail instead of being squeezed into the strip beside it (a flow-root box next to a float
+   shrinks to the remaining width: S6Y audit-spec #7, a 319 px self-check card and a 319×478 ECharts chart in a 624 px column).
+   Running prose keeps wrapping beside the thumbnail. */
+.vp-doc div[class*='language-'],
+.vp-doc .math-block,
+.vp-doc .katex-display,
+.vp-doc .custom-block,
+.vp-doc figure.chart,
+.vp-doc table {
+  clear: both;
 }
 
 /* spec board 07.1: thin frame on the panel colour, 3 px padding, no radius; datasheet adds the heavy top rule */
@@ -608,6 +687,8 @@ html.dark .lec-xref-peek__thumb {
   font-family: var(--lec-font-heading);
   font-size: 12.5px;
   font-weight: 500;
+  /* S6Y F1: spec board 07.1 .backbtn (3px 10px, line normal -> 24px); VitePress buttons inherit 24px */
+  line-height: normal;
   cursor: pointer;
 }
 .lec-xref-backbtn:hover {

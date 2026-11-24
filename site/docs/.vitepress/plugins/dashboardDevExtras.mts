@@ -11,6 +11,18 @@ import fs from 'node:fs'
 import http from 'node:http'
 import path from 'node:path'
 import type { ContentPaths } from '../content/paths.mts'
+import {
+  BASE_COLORS,
+  baseBackground,
+  checkThemeContrast,
+  isDarkColor,
+  SKIN_PALETTES,
+  validateThemeImportJson,
+  type ContrastCheckRow,
+  type SkinId,
+} from '../theme/tokens/customTint'
+
+export { BASE_COLORS, baseBackground, checkThemeContrast, SKIN_PALETTES, type ContrastCheckRow }
 
 export interface CheckRun {
   at: string
@@ -334,7 +346,8 @@ export function readToolsView(paths: Pick<ContentPaths, 'aiToolsFile' | 'aiTools
     // lecture-api (server/src/tools/mcpConfig.ts) treats a missing engine tool as switched on
     engine[id] = isObj(e) ? e.enabled !== false : true
   }
-  const servers = (Array.isArray(raw?.mcpServers) ? raw.mcpServers : []).filter(isObj).map((s) => ({
+  const rawServersList = Array.isArray(raw?.mcpServers) ? raw.mcpServers : Array.isArray(raw?.servers) ? raw.servers : []
+  const servers = rawServersList.filter(isObj).map((s) => ({
     id: String(s.id ?? ''),
     name: String(s.name ?? s.id ?? ''),
     url: String(s.url ?? ''),
@@ -369,14 +382,27 @@ export function readToolsView(paths: Pick<ContentPaths, 'aiToolsFile' | 'aiTools
 
 export interface ToolSwitches {
   engine?: Record<string, boolean>
-  servers?: Record<string, { enabled?: boolean; tools?: Record<string, boolean> }>
+  servers?:
+    | Record<string, { enabled?: boolean; tools?: Record<string, boolean> }>
+    | Array<{
+        id: string
+        name?: string
+        url?: string
+        enabled?: boolean
+        headers?: Array<{ name: string; env: string }>
+        headerEnv?: Record<string, string>
+        tools?: Record<string, boolean | { enabled: boolean }>
+        timeoutMs?: number | null
+      }>
 }
 
 /**
- * Apply on/off switches to content/ai-tools.json and write it (from the engine example when the file does not exist
- * yet). Only booleans of known entries change: no server, url, header or tool is added, renamed or removed here.
+ * Apply on/off switches, additions or removals to content/ai-tools.json and write it.
  */
-export function writeToolSwitches(paths: Pick<ContentPaths, 'aiToolsFile' | 'aiToolsExample'>, sw: ToolSwitches): { ok: true } | { ok: false; error: string } {
+export function writeToolSwitches(
+  paths: Pick<ContentPaths, 'aiToolsFile' | 'aiToolsExample' | 'repoRoot'>,
+  sw: ToolSwitches,
+): { ok: true } | { ok: false; error: string } {
   const base = fs.existsSync(paths.aiToolsFile) ? readJsonObject(paths.aiToolsFile) : readJsonObject(paths.aiToolsExample)
   if (!base) return { ok: false, error: 'tools_file_unreadable' }
   const next = JSON.parse(JSON.stringify(base)) as Record<string, unknown>
@@ -389,22 +415,313 @@ export function writeToolSwitches(paths: Pick<ContentPaths, 'aiToolsFile' | 'aiT
     }
   }
   if (sw.servers) {
-    const list = Array.isArray(next.mcpServers) ? next.mcpServers.filter(isObj) : []
-    for (const [id, s] of Object.entries(sw.servers)) {
-      const srv = list.find((x) => x.id === id)
-      if (!srv) return { ok: false, error: `unknown_server:${id}` }
-      if (s.enabled !== undefined) {
-        if (typeof s.enabled !== 'boolean') return { ok: false, error: 'invalid_switch' }
-        srv.enabled = s.enabled
+    const serverKey = Array.isArray(next.mcpServers) ? 'mcpServers' : Array.isArray(next.servers) ? 'servers' : 'mcpServers'
+    if (Array.isArray(sw.servers)) {
+      const existingList = Array.isArray(next[serverKey]) ? (next[serverKey] as Array<Record<string, unknown>>).filter(isObj) : []
+      const updatedList: Array<Record<string, unknown>> = []
+      for (const s of sw.servers) {
+        if (!s || typeof s.id !== 'string') continue
+        const existing = existingList.find((x) => x.id === s.id)
+        if (existing) {
+          const entry = { ...existing }
+          if (typeof s.enabled === 'boolean') entry.enabled = s.enabled
+          if (s.tools && typeof s.tools === 'object') {
+            const curTools = isObj(entry.tools) ? { ...entry.tools } : {}
+            for (const [tk, tv] of Object.entries(s.tools)) {
+              const on = typeof tv === 'boolean' ? tv : isObj(tv) && tv.enabled === true
+              curTools[tk] = { ...(isObj(curTools[tk]) ? (curTools[tk] as Record<string, unknown>) : {}), enabled: on }
+            }
+            entry.tools = curTools
+          }
+          updatedList.push(entry)
+        } else {
+          // New server added in draft
+          const hdr = s.headers?.[0]?.name ?? Object.keys(s.headerEnv ?? {})[0] ?? 'Authorization'
+          const env = s.headers?.[0]?.env ?? Object.values(s.headerEnv ?? {})[0] ?? ''
+          const validated = validateMcpServer(
+            { id: s.id, name: s.name || s.id, url: s.url || '', hdr, env },
+            updatedList.map((x) => String(x.id ?? '')),
+          )
+          if ('error' in validated) return { ok: false, error: validated.error }
+          const toolsOut: Record<string, { enabled: boolean }> = {}
+          if (s.tools && typeof s.tools === 'object') {
+            for (const [tk, tv] of Object.entries(s.tools)) {
+              toolsOut[tk] = { enabled: typeof tv === 'boolean' ? tv : isObj(tv) && tv.enabled === true }
+            }
+          }
+          updatedList.push({
+            id: validated.server.id,
+            name: validated.server.name,
+            url: validated.server.url,
+            headerEnv: { [validated.server.hdr]: validated.server.env },
+            enabled: s.enabled === true,
+            tools: toolsOut,
+            timeoutMs: s.timeoutMs ?? 8000,
+          })
+        }
       }
-      for (const [k, on] of Object.entries(s.tools ?? {})) {
-        const tools = isObj(srv.tools) ? srv.tools : null
-        if (!tools || !(k in tools) || typeof on !== 'boolean') return { ok: false, error: `unknown_tool:${id}/${k}` }
-        tools[k] = { ...(isObj(tools[k]) ? (tools[k] as Record<string, unknown>) : {}), enabled: on }
+      next[serverKey] = updatedList
+    } else {
+      const list = Array.isArray(next[serverKey]) ? (next[serverKey] as Array<Record<string, unknown>>).filter(isObj) : []
+      for (const [id, s] of Object.entries(sw.servers)) {
+        const srv = list.find((x) => x.id === id)
+        if (!srv) return { ok: false, error: `unknown_server:${id}` }
+        if (s.enabled !== undefined) {
+          if (typeof s.enabled !== 'boolean') return { ok: false, error: 'invalid_switch' }
+          srv.enabled = s.enabled
+        }
+        for (const [k, on] of Object.entries(s.tools ?? {})) {
+          const tools = isObj(srv.tools) ? srv.tools : null
+          if (!tools || !(k in tools) || typeof on !== 'boolean') return { ok: false, error: `unknown_tool:${id}/${k}` }
+          tools[k] = { ...(isObj(tools[k]) ? (tools[k] as Record<string, unknown>) : {}), enabled: on }
+        }
       }
     }
   }
   fs.mkdirSync(path.dirname(paths.aiToolsFile), { recursive: true })
   fs.writeFileSync(paths.aiToolsFile, `${JSON.stringify(next, null, 2)}\n`, 'utf8')
   return { ok: true }
+}
+
+// ---- external MCP server CRUD & validation ----
+
+export interface McpServerInput {
+  id?: string
+  name: string
+  url: string
+  hdr?: string
+  env: string
+  enabled?: boolean
+}
+
+export function validateMcpServer(
+  input: unknown,
+  existingIds: string[] = [],
+): { ok: true; server: { id: string; name: string; url: string; hdr: string; env: string } } | { ok: false; error: string; field?: string } {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) {
+    return { ok: false, error: 'invalid_input' }
+  }
+  const obj = input as Record<string, unknown>
+  const name = typeof obj.name === 'string' ? obj.name.trim() : ''
+  const url = typeof obj.url === 'string' ? obj.url.trim() : ''
+  const hdr = typeof obj.hdr === 'string' && obj.hdr.trim() ? obj.hdr.trim() : 'Authorization'
+  const env = typeof obj.env === 'string' ? obj.env.trim() : ''
+
+  // Secret safety check: NEVER allow actual tokens/secrets to be stored in ai-tools.json
+  const suspectPatterns = [
+    /sk-[a-zA-Z0-9_-]{10,}/,
+    /bearer\s+/i,
+    /ghp_[a-zA-Z0-9]{20,}/,
+    /eyJ[a-zA-Z0-9_-]{15,}/,
+  ]
+  for (const str of [name, url, hdr, env]) {
+    for (const pat of suspectPatterns) {
+      if (pat.test(str)) {
+        return { ok: false, error: 'secret_leak_rejected' }
+      }
+    }
+  }
+
+  if (!name) return { ok: false, error: 'name_required', field: 'name' }
+
+  let parsedUrl: URL | null = null
+  try {
+    parsedUrl = new URL(url)
+  } catch {
+    parsedUrl = null
+  }
+  if (!parsedUrl || parsedUrl.protocol !== 'https:' || !parsedUrl.hostname || /\s/.test(url)) {
+    return { ok: false, error: 'url_invalid', field: 'url' }
+  }
+
+  if (!/^[A-Za-z][A-Za-z0-9-]*$/.test(hdr)) {
+    return { ok: false, error: 'hdr_invalid', field: 'hdr' }
+  }
+
+  if (!/^[A-Z][A-Z0-9_]*$/.test(env)) {
+    return { ok: false, error: 'env_invalid', field: 'env' }
+  }
+
+  let id = typeof obj.id === 'string' ? obj.id.trim().toLowerCase() : ''
+  if (id) {
+    if (!/^[a-z0-9-]+$/.test(id)) {
+      return { ok: false, error: 'id_invalid', field: 'id' }
+    }
+  } else {
+    id = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || ('srv-' + Date.now().toString(36).slice(-4))
+  }
+
+  if (existingIds.includes(id)) {
+    return { ok: false, error: 'id_exists', field: 'id' }
+  }
+
+  return { ok: true, server: { id, name, url, hdr, env } }
+}
+
+export function addMcpServer(
+  paths: Pick<ContentPaths, 'aiToolsFile' | 'aiToolsExample' | 'repoRoot'>,
+  input: unknown,
+): { ok: true; server: { id: string; name: string; url: string; enabled: boolean; headers: Array<{ name: string; env: string; set: boolean }>; tools: Record<string, boolean>; timeoutMs: number | null } } | { ok: false; error: string; field?: string } {
+  const base = fs.existsSync(paths.aiToolsFile) ? readJsonObject(paths.aiToolsFile) : readJsonObject(paths.aiToolsExample)
+  if (!base) return { ok: false, error: 'tools_file_unreadable' }
+  const next = JSON.parse(JSON.stringify(base)) as Record<string, unknown>
+  const serverKey = Array.isArray(next.mcpServers) ? 'mcpServers' : Array.isArray(next.servers) ? 'servers' : 'mcpServers'
+  const list = Array.isArray(next[serverKey]) ? (next[serverKey] as Array<Record<string, unknown>>) : ((next[serverKey] = []) as Array<Record<string, unknown>>)
+  const existingIds = list.map((s) => String(s.id ?? ''))
+
+  const validated = validateMcpServer(input, existingIds)
+  if ('error' in validated) return validated
+
+  const envText = envTextOf(paths.repoRoot)
+  const isSet = envIsSet(envText, validated.server.env)
+
+  const newEntry: Record<string, unknown> = {
+    id: validated.server.id,
+    name: validated.server.name,
+    url: validated.server.url,
+    headerEnv: { [validated.server.hdr]: validated.server.env },
+    enabled: false,
+    tools: {},
+    timeoutMs: 8000,
+  }
+  list.push(newEntry)
+
+  fs.mkdirSync(path.dirname(paths.aiToolsFile), { recursive: true })
+  fs.writeFileSync(paths.aiToolsFile, `${JSON.stringify(next, null, 2)}\n`, 'utf8')
+
+  return {
+    ok: true,
+    server: {
+      id: validated.server.id,
+      name: validated.server.name,
+      url: validated.server.url,
+      enabled: false,
+      headers: [{ name: validated.server.hdr, env: validated.server.env, set: isSet }],
+      tools: {},
+      timeoutMs: 8000,
+    },
+  }
+}
+
+export function removeMcpServer(
+  paths: Pick<ContentPaths, 'aiToolsFile' | 'aiToolsExample'>,
+  serverId: string,
+): { ok: true } | { ok: false; error: string } {
+  const base = fs.existsSync(paths.aiToolsFile) ? readJsonObject(paths.aiToolsFile) : readJsonObject(paths.aiToolsExample)
+  if (!base) return { ok: false, error: 'tools_file_unreadable' }
+  const next = JSON.parse(JSON.stringify(base)) as Record<string, unknown>
+  const serverKey = Array.isArray(next.mcpServers) ? 'mcpServers' : Array.isArray(next.servers) ? 'servers' : 'mcpServers'
+  const list = Array.isArray(next[serverKey]) ? (next[serverKey] as Array<Record<string, unknown>>) : []
+  const idx = list.findIndex((s) => s.id === serverId)
+  if (idx === -1) return { ok: false, error: 'unknown_server' }
+  list.splice(idx, 1)
+  next[serverKey] = list
+
+  fs.mkdirSync(path.dirname(paths.aiToolsFile), { recursive: true })
+  fs.writeFileSync(paths.aiToolsFile, `${JSON.stringify(next, null, 2)}\n`, 'utf8')
+  return { ok: true }
+}
+
+// ---- appearance / theme.json persistence & contrast checking ----
+
+export interface ThemeView {
+  file: string
+  exists: boolean
+  skin: 'reader' | 'datasheet'
+  base: 'paper' | 'sepia' | 'green' | 'dark' | 'custom'
+  custom: string
+}
+
+export function readThemeView(
+  paths: Pick<ContentPaths, 'themeFile' | 'repoRoot'>,
+  defaultSkin: SkinId = 'reader',
+): ThemeView {
+  const exists = fs.existsSync(paths.themeFile)
+  const relFile = path.relative(paths.repoRoot, paths.themeFile).replace(/\\/g, '/')
+  if (!exists) {
+    return {
+      file: relFile,
+      exists: false,
+      skin: defaultSkin,
+      base: 'paper',
+      custom: '#EAF2E3',
+    }
+  }
+  const raw = readJsonObject(paths.themeFile)
+  const ext = (raw?.$extensions as Record<string, unknown> | undefined)?.['org.lecture-engine'] as Record<string, unknown> | undefined
+  const skin = (raw?.skin ?? ext?.defaultSkin ?? ext?.skin ?? defaultSkin) as string
+  const base = (raw?.base ?? ext?.defaultBase ?? ext?.base ?? 'paper') as string
+  const custom = (raw?.custom ?? ext?.customTint ?? ext?.custom ?? '#EAF2E3') as string
+  const cleanSkin: SkinId = skin === 'datasheet' ? 'datasheet' : 'reader'
+  const cleanBase = (['paper', 'sepia', 'green', 'dark', 'custom'] as const).includes(base as 'paper' | 'sepia' | 'green' | 'dark' | 'custom')
+    ? (base as 'paper' | 'sepia' | 'green' | 'dark' | 'custom')
+    : 'paper'
+  const cleanCustom = typeof custom === 'string' && /^#[0-9a-fA-F]{6}$/.test(custom) ? custom : '#EAF2E3'
+  return {
+    file: relFile,
+    exists: true,
+    skin: cleanSkin,
+    base: cleanBase,
+    custom: cleanCustom,
+  }
+}
+
+export function saveThemeConfig(
+  paths: Pick<ContentPaths, 'themeFile' | 'repoRoot'>,
+  payload: { skin?: string; base?: string; custom?: string },
+): { ok: true; theme: ThemeView } | { ok: false; error: string; reason?: string } {
+  const skin: SkinId = payload.skin === 'datasheet' ? 'datasheet' : 'reader'
+  const base = (['paper', 'sepia', 'green', 'dark', 'custom'] as const).includes(payload.base as 'paper' | 'sepia' | 'green' | 'dark' | 'custom')
+    ? (payload.base as 'paper' | 'sepia' | 'green' | 'dark' | 'custom')
+    : 'paper'
+  const custom = typeof payload.custom === 'string' && /^#[0-9a-fA-F]{6}$/.test(payload.custom) ? payload.custom : '#EAF2E3'
+
+  if (base === 'custom' && !/^#[0-9a-fA-F]{6}$/.test(payload.custom ?? '')) {
+    return { ok: false, error: 'invalid_hex' }
+  }
+
+  const contrastResult = checkThemeContrast(skin, base, custom)
+  if (!contrastResult || !contrastResult.ok) {
+    const failedRow = contrastResult?.rows.find((r) => !r.pass)
+    const reason = failedRow ? `${failedRow.name} ${failedRow.ratio.toFixed(1)}:1 < ${failedRow.min}:1` : 'contrast_failed'
+    return { ok: false, error: 'contrast_check_failed', reason }
+  }
+
+  const doc: Record<string, unknown> = {
+    $extensions: {
+      'org.lecture-engine': {
+        id: skin,
+        contract: 1,
+        skin,
+        base,
+        custom,
+        defaultSkin: skin,
+        defaultBase: base,
+        customTint: custom,
+      },
+    },
+    skin,
+    base,
+    custom,
+  }
+
+  // Only emit custom mode overrides when base === 'custom' so built-in light (纸白), dark, and datasheet modes stay intact.
+  if (base === 'custom') {
+    const bg = contrastResult.bg
+    const modeKey = isDarkColor(bg) ? 'dark' : 'custom'
+    doc.modes = {
+      [modeKey]: {
+        bg: { $type: 'color', $value: bg },
+        surface: { $type: 'color', $value: contrastResult.surface },
+      },
+    }
+    const validated = validateThemeImportJson(JSON.stringify({ modes: doc.modes }))
+    if ('message' in validated) {
+      return { ok: false, error: validated.message }
+    }
+  }
+
+  fs.mkdirSync(path.dirname(paths.themeFile), { recursive: true })
+  fs.writeFileSync(paths.themeFile, `${JSON.stringify(doc, null, 2)}\n`, 'utf8')
+  return { ok: true, theme: readThemeView(paths, skin) }
 }

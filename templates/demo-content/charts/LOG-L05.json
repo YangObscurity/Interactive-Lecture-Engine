@@ -1,0 +1,10 @@
+{
+  "c1": {
+    "type": "mermaid",
+    "code": "flowchart TB\n  A[要证：命题 P] --> B[假设 P 不成立]\n  B --> C[按规则一步步推理]\n  C --> D{推出矛盾了吗}\n  D -- 是 --> E[假设错误，P 成立]\n  D -- 否 --> F[检查推理或换思路]"
+  },
+  "c2": {
+    "type": "echarts",
+    "code": "{\n  \"title\": {\n    \"text\": \"f(n) = n² + n + 41 的值\",\n    \"left\": 8\n  },\n  \"tooltip\": {\n    \"trigger\": \"axis\"\n  },\n  \"legend\": {\n    \"bottom\": 0\n  },\n  \"grid\": {\n    \"bottom\": 64\n  },\n  \"xAxis\": {\n    \"type\": \"category\",\n    \"name\": \"n\",\n    \"data\": [\"34\", \"35\", \"36\", \"37\", \"38\", \"39\", \"40\", \"41\"]\n  },\n  \"yAxis\": {\n    \"type\": \"value\",\n    \"name\": \"f(n)\",\n    \"min\": 1000\n  },\n  \"series\": [\n    {\n      \"name\": \"质数\",\n      \"type\": \"bar\",\n      \"stack\": \"f\",\n      \"data\": [1231, 1301, 1373, 1447, 1523, 1601, null, null]\n    },\n    {\n      \"name\": \"合数（反例）\",\n      \"type\": \"bar\",\n      \"stack\": \"f\",\n      \"itemStyle\": {\n        \"color\": \"#DC2626\"\n      },\n      \"label\": {\n        \"show\": true,\n        \"position\": \"top\"\n      },\n      \"data\": [null, null, null, null, null, null, 1681, 1763]\n    }\n  ]\n}"
+  }
+}

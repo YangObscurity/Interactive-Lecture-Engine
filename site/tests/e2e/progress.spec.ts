@@ -20,6 +20,7 @@
  */
 import type { BrowserContext, Page, Route } from '@playwright/test'
 import { test, expect, gotoAndSettle } from './fixtures'
+import { demoGroup } from './demo'
 
 // ---------------------------------------------------------------------------------------------------
 // the in-spec backend
@@ -300,7 +301,7 @@ test.describe('progress (stateful mock backend)', () => {
     const mock = new ProgressMock()
     await open(page, mock, GROUP)
     const total = await page.locator('.gp-lanes [data-lecture]').count()
-    expect(total).toBe(6)
+    expect(total).toBe(demoGroup('MEA').lectures.length)
     // MEA L01-L02 are read in the seed; L03 (reading) and L04-L06 (unread) are marked together
     await expect(page.locator('[data-gp-spec="read"]')).toContainText(`2 / ${total}`)
 

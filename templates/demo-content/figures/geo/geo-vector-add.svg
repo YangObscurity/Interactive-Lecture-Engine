@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="480" height="260" viewBox="0 0 480 260" font-family="sans-serif">
+  <rect x="0" y="0" width="480" height="260" fill="#F8FAFC"/>
+  <defs><marker id="ah-c" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="#0891B2"/></marker><marker id="ah-v" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="#7C3AED"/></marker><marker id="ah-r" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="#DC2626"/></marker></defs>
+  <line x1="60" y1="220" x2="60" y2="20" stroke="#E2E8F0"/>
+  <line x1="100" y1="220" x2="100" y2="20" stroke="#E2E8F0"/>
+  <line x1="140" y1="220" x2="140" y2="20" stroke="#E2E8F0"/>
+  <line x1="180" y1="220" x2="180" y2="20" stroke="#E2E8F0"/>
+  <line x1="220" y1="220" x2="220" y2="20" stroke="#E2E8F0"/>
+  <line x1="260" y1="220" x2="260" y2="20" stroke="#E2E8F0"/>
+  <line x1="300" y1="220" x2="300" y2="20" stroke="#E2E8F0"/>
+  <line x1="340" y1="220" x2="340" y2="20" stroke="#E2E8F0"/>
+  <line x1="380" y1="220" x2="380" y2="20" stroke="#E2E8F0"/>
+  <line x1="420" y1="220" x2="420" y2="20" stroke="#E2E8F0"/>
+  <line x1="60" y1="220" x2="420" y2="220" stroke="#E2E8F0"/>
+  <line x1="60" y1="180" x2="420" y2="180" stroke="#E2E8F0"/>
+  <line x1="60" y1="140" x2="420" y2="140" stroke="#E2E8F0"/>
+  <line x1="60" y1="100" x2="420" y2="100" stroke="#E2E8F0"/>
+  <line x1="60" y1="60" x2="420" y2="60" stroke="#E2E8F0"/>
+  <line x1="60" y1="20" x2="420" y2="20" stroke="#E2E8F0"/>
+  <polygon points="60,220 260,180 340,60 140,100" fill="#CFFAFE" fill-opacity="0.5" stroke="none"/>
+  <line x1="60" y1="220" x2="260" y2="180" stroke="#0891B2" stroke-width="3" marker-end="url(#ah)"/>
+  <line x1="260" y1="180" x2="340" y2="60" stroke="#7C3AED" stroke-width="3" marker-end="url(#ah)"/>
+  <line x1="60" y1="220" x2="140" y2="100" stroke="#7C3AED" stroke-width="3" stroke-dasharray="7 5" marker-end="url(#ah)"/>
+  <line x1="140" y1="100" x2="340" y2="60" stroke="#0891B2" stroke-width="3" stroke-dasharray="7 5" marker-end="url(#ah)"/>
+  <line x1="60" y1="220" x2="340" y2="60" stroke="#DC2626" stroke-width="3" marker-end="url(#ah)"/>
+  <text x="164" y="212" font-size="14" text-anchor="middle" fill="#0E7490">a = (5, 1)</text>
+  <text x="336" y="128" font-size="14" text-anchor="start" fill="#6D28D9">b = (2, 3)</text>
+  <text x="180" y="116" font-size="14" text-anchor="end" fill="#B91C1C">a + b = (7, 4)</text>
+  <text x="54" y="238" font-size="13" text-anchor="middle" fill="#334155">O</text>
+</svg>

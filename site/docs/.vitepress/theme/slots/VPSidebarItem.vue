@@ -216,6 +216,16 @@ const statusLabel = computed(() => t(STATUS_LABEL[status.value]))
   transition: color 0.25s;
 }
 
+/* S6Y F1: lecture rows follow spec board 05 (.side a.link: 5px 8px, line 1.45 -> 30.3px) instead of VitePress' 4px / 24px */
+.link:has(> .lec-status-box) > .text {
+  padding: 5px 0;
+  line-height: 1.45;
+}
+.link:has(> .lec-status-box) > .lec-status-box {
+  height: calc(14px * 1.45);
+  margin-top: 5px;
+}
+
 .VPSidebarItem.level-0 .text {
   font-weight: 700;
   color: var(--vp-c-text-1);

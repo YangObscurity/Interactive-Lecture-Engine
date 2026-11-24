@@ -321,6 +321,12 @@ export function validate(
       return { valid: true }
     }
     case 'url': {
+      if (setting.kind === 'site' && /^\/(?!\/)\S*$/.test(v)) {
+        return { valid: true }
+      }
+      if (/\s/.test(v)) {
+        return { valid: false, error: `URL 不应包含空格${valHint}` }
+      }
       try {
         const u = new URL(v)
         if (u.protocol !== 'http:' && u.protocol !== 'https:') {

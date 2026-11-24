@@ -1,0 +1,10 @@
+{
+  "c1": {
+    "type": "mermaid",
+    "code": "flowchart LR\n  W[\"宽表<br/>一行一个班级<br/>每月占一列\"] -- 拉长 --> L[\"长表<br/>一行一个班级的一个月\"]\n  L -- 透视 --> P[\"透视表<br/>行是班级，列是月份<br/>格子是借阅量之和\"]"
+  },
+  "c2": {
+    "type": "echarts",
+    "code": "{\n  \"title\": {\n    \"text\": \"透视结果：各班每月借阅量\",\n    \"subtext\": \"单位：本\",\n    \"left\": 8\n  },\n  \"tooltip\": {\n    \"trigger\": \"axis\"\n  },\n  \"grid\": {\n    \"left\": 56,\n    \"right\": 24,\n    \"top\": 92,\n    \"bottom\": 84\n  },\n  \"legend\": {\n    \"bottom\": 0\n  },\n  \"xAxis\": {\n    \"type\": \"category\",\n    \"data\": [\n      \"3月\",\n      \"4月\",\n      \"5月\"\n    ],\n    \"name\": \"月份\",\n    \"nameLocation\": \"middle\",\n    \"nameGap\": 30\n  },\n  \"yAxis\": {\n    \"type\": \"value\",\n    \"name\": \"借阅量（本）\",\n    \"min\": 0,\n    \"nameTextStyle\": {\n      \"align\": \"left\"\n    }\n  },\n  \"series\": [\n    {\n      \"name\": \"一班\",\n      \"type\": \"bar\",\n      \"data\": [\n        34,\n        41,\n        38\n      ]\n    },\n    {\n      \"name\": \"二班\",\n      \"type\": \"bar\",\n      \"data\": [\n        29,\n        33,\n        45\n      ]\n    },\n    {\n      \"name\": \"三班\",\n      \"type\": \"bar\",\n      \"data\": [\n        40,\n        36,\n        31\n      ]\n    }\n  ]\n}"
+  }
+}

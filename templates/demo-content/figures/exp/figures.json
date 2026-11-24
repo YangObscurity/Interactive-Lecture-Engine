@@ -1,0 +1,40 @@
+{
+  "version": 1,
+  "group": "exp",
+  "figures": [
+    {
+      "id": "exp-layout",
+      "file": "exp-layout.svg",
+      "kind": "figure",
+      "width": 480,
+      "height": 220,
+      "caption": {
+        "zh": "抽签决定的窗台摆放：12 个位置，两组各 6 盆",
+        "en": "Positions on the windowsill drawn by lot: 12 places, 6 pots per group"
+      },
+      "source": {
+        "paper": "Original Example Diagram",
+        "number": "Fig. 1",
+        "page": 1
+      },
+      "sha256": "5a969ed24877"
+    },
+    {
+      "id": "exp-record-card",
+      "file": "exp-record-card.svg",
+      "kind": "figure",
+      "width": 480,
+      "height": 260,
+      "caption": {
+        "zh": "记录卡：上半是方案摘要，下半每条观察一行，改正时保留原值",
+        "en": "A record card: the plan summary on top, one row per observation below; corrections keep the original value"
+      },
+      "source": {
+        "paper": "Original Example Diagram",
+        "number": "Fig. 2",
+        "page": 1
+      },
+      "sha256": "e336b1123a33"
+    }
+  ]
+}

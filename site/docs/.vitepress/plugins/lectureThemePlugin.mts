@@ -23,7 +23,8 @@
  */
 import fs from 'node:fs'
 import path from 'node:path'
-import type { Plugin } from 'vite'
+import type { Plugin, ViteDevServer } from 'vite'
+import { isDarkColor } from '../theme/tokens/customTint'
 import {
   applyLayer,
   checkContrast,
@@ -33,6 +34,7 @@ import {
   resolveTheme,
   type ResolvedTheme,
   type ThemeIssue,
+  type ThemeLayer,
   type ThemeSource,
 } from '../theme/tokens/pack'
 import { compileThemes } from '../theme/tokens/compile'
@@ -58,6 +60,8 @@ export interface BuildThemesOptions {
   siteDir?: string
   /** Folder of the slot runtime (engine default components). Default: `../theme/slots` next to `themesDir`. */
   slotsDir?: string
+  /** Site-level theme.json override file path. */
+  themeFile?: string
 }
 
 /** Where a theme pack lives and what code it brings (doctor and the virtual module read this). */
@@ -207,6 +211,56 @@ export function buildThemes(config: LectureConfig, opts: BuildThemesOptions): Bu
   const ids = enabledThemes(config)
   const siteDir = opts.siteDir ?? path.resolve(opts.themesDir, '..', '..', '..')
   const slotsDir = opts.slotsDir ?? path.resolve(opts.themesDir, '..', 'theme', 'slots')
+
+  let siteThemeFile: string | null = opts.themeFile ? path.resolve(opts.themeFile) : null
+  if (!siteThemeFile) {
+    const directSiteFile = path.resolve(siteDir, 'theme.json')
+    if (fs.existsSync(directSiteFile)) {
+      siteThemeFile = directSiteFile
+    } else {
+      const parentContentFile = path.resolve(siteDir, '..', 'content', 'theme.json')
+      if (fs.existsSync(parentContentFile)) {
+        siteThemeFile = parentContentFile
+      }
+    }
+  }
+
+  let siteSkin: string | null = null
+  let siteBase: string | null = null
+  let siteCustom: string | null = null
+  let siteThemeLayer: ThemeLayer | null = null
+
+  if (siteThemeFile && fs.existsSync(siteThemeFile)) {
+    files.push(siteThemeFile)
+    try {
+      const doc = JSON.parse(fs.readFileSync(siteThemeFile, 'utf8')) as Record<string, unknown>
+      const ext = (doc.$extensions as Record<string, unknown> | undefined)?.[EXTENSION_KEY] as Record<string, unknown> | undefined
+      siteSkin = typeof doc.skin === 'string' ? doc.skin : typeof ext?.defaultSkin === 'string' ? (ext.defaultSkin as string) : typeof ext?.skin === 'string' ? (ext.skin as string) : null
+      siteBase = typeof doc.base === 'string' ? doc.base : typeof ext?.defaultBase === 'string' ? (ext.defaultBase as string) : typeof ext?.base === 'string' ? (ext.base as string) : null
+      siteCustom = typeof doc.custom === 'string' ? doc.custom : typeof ext?.customTint === 'string' ? (ext.customTint as string) : typeof ext?.custom === 'string' ? (ext.custom as string) : null
+      if (siteBase === 'custom' && doc.modes && typeof doc.modes === 'object') {
+        const rawModes = doc.modes as Record<string, Record<string, unknown> | undefined>
+        const safeModes: NonNullable<ThemeLayer['modes']> = {}
+        if (rawModes.custom && typeof rawModes.custom === 'object') safeModes.custom = rawModes.custom
+        if (rawModes.dark && typeof rawModes.dark === 'object' && siteCustom && isDarkColor(siteCustom)) {
+          safeModes.dark = rawModes.dark
+        }
+        if (Object.keys(safeModes).length > 0) siteThemeLayer = { modes: safeModes }
+      }
+    } catch (e) {
+      warnings.push({ severity: 'warning', code: 'structure', theme: 'site', message: `theme.json unreadable: ${(e as Error).message}` })
+    }
+  }
+
+  const effectiveDefaultTheme = (siteSkin && (ids as readonly string[]).includes(siteSkin)) ? siteSkin : config.theme
+  const effectiveBase = siteBase === 'custom' && siteCustom && isDarkColor(siteCustom) ? 'dark' : siteBase
+  let defaultTint: string | null = null
+  if (siteBase === 'sepia' || siteBase === 'green') {
+    defaultTint = siteBase
+  } else if (siteBase === 'custom' && siteCustom && /^#[0-9a-fA-F]{6}$/.test(siteCustom) && !isDarkColor(siteCustom)) {
+    defaultTint = 'custom'
+  }
+
   const packDirs = locatePacks(config, siteDir, files, errors)
   const dirOf = (id: string): string => packDirs.get(id) ?? path.join(opts.themesDir, id)
 
@@ -226,8 +280,12 @@ export function buildThemes(config: LectureConfig, opts: BuildThemesOptions): Bu
       components: resolveComponents(pack.source, dirOf(id), files, errors),
       edges: pack.source.edges ?? DEFAULT_LAYOUT_EDGES,
     })
-    const layered = applyLayer(pack.source, config.themeOverrides?.[id], 'deployer')
+    let layered = applyLayer(pack.source, config.themeOverrides?.[id], 'deployer')
     errors.push(...layered.issues)
+    if (siteThemeLayer && id === effectiveDefaultTheme) {
+      layered = applyLayer(layered.value, siteThemeLayer, 'deployer')
+      errors.push(...layered.issues)
+    }
     const resolved = resolveTheme(layered.value, id === BASE_THEME ? undefined : base.source)
     errors.push(...resolved.issues.filter((i) => i.severity === 'error'))
     if (!resolved.value) continue
@@ -239,19 +297,22 @@ export function buildThemes(config: LectureConfig, opts: BuildThemesOptions): Bu
   if (errors.length) throw new ThemeBuildError(errors)
 
   const css = compileThemes(themes, {
-    defaultTheme: config.theme,
+    defaultTheme: effectiveDefaultTheme,
     banner: `generated by plugins/lectureThemePlugin.mts from themes/{${ids.join(',')}}/theme.json — do not edit`,
   })
   const themeCss: string[] = []
   for (const id of ids) {
-    const f = path.join(dirOf(id), 'theme.css')
+    const f = path.join(dirOf(id), 'theme.json'.replace('theme.json', 'theme.css'))
     if (fs.existsSync(f)) themeCss.push(f)
   }
   const slotDefaults = Object.fromEntries(SLOT_NAMES.map((n) => [n, path.resolve(slotsDir, SLOT_DEFAULT_FILES[n])])) as Record<SlotName, string>
   return {
     css,
     runtime: {
-      defaultTheme: config.theme,
+      defaultTheme: effectiveDefaultTheme,
+      ...(defaultTint ? { defaultTint } : {}),
+      ...(effectiveBase ? { defaultBase: effectiveBase } : {}),
+      ...(siteCustom ? { customTint: siteCustom } : {}),
       themes: themes.map((t) => ({ id: t.id, label: t.label, tints: t.tints })),
     },
     themes,
@@ -260,7 +321,7 @@ export function buildThemes(config: LectureConfig, opts: BuildThemesOptions): Bu
     warnings,
     files,
     packs,
-    defaultTheme: config.theme,
+    defaultTheme: effectiveDefaultTheme,
     slotDefaults,
   }
 }
@@ -325,9 +386,29 @@ export interface LectureThemePluginOptions extends BuildThemesOptions {
   initial?: BuildThemesResult
 }
 
+let activeThemeReloadHook: (() => void) | null = null
+
+export function invalidateLectureThemeServer(): void {
+  activeThemeReloadHook?.()
+}
+
 export function lectureThemePlugin(options: LectureThemePluginOptions): Plugin {
   let result = options.initial ?? buildThemes(options.config, options)
   let warned = false
+  const reload = (server: ViteDevServer) => {
+    try {
+      result = buildThemes(options.config, options)
+      for (const w of result.warnings) server.config.logger.warn(formatIssue(w))
+    } catch (e) {
+      server.config.logger.error(e instanceof Error ? e.message : String(e))
+      return
+    }
+    for (const id of [RESOLVED_CSS, RESOLVED_JS, RESOLVED_COMPONENTS]) {
+      const mod = server.moduleGraph.getModuleById(id)
+      if (mod) server.moduleGraph.invalidateModule(mod)
+    }
+    server.ws.send({ type: 'full-reload' })
+  }
   return {
     name: 'lecture-theme',
     enforce: 'pre',
@@ -349,23 +430,18 @@ export function lectureThemePlugin(options: LectureThemePluginOptions): Plugin {
       return null
     },
     configureServer(server) {
+      activeThemeReloadHook = () => reload(server)
       for (const f of result.files) server.watcher.add(f)
-      server.watcher.on('change', (file) => {
+      if (options.themeFile) server.watcher.add(path.resolve(options.themeFile))
+      const watchedSiteTheme = options.themeFile ? path.resolve(options.themeFile) : null
+      const onFsEvent = (file: string) => {
         const norm = path.resolve(file)
-        if (!result.files.some((f) => path.resolve(f) === norm)) return
-        try {
-          result = buildThemes(options.config, options)
-          for (const w of result.warnings) server.config.logger.warn(formatIssue(w))
-        } catch (e) {
-          server.config.logger.error(e instanceof Error ? e.message : String(e))
-          return
-        }
-        for (const id of [RESOLVED_CSS, RESOLVED_JS, RESOLVED_COMPONENTS]) {
-          const mod = server.moduleGraph.getModuleById(id)
-          if (mod) server.moduleGraph.invalidateModule(mod)
-        }
-        server.ws.send({ type: 'full-reload' })
-      })
+        if (!result.files.some((f) => path.resolve(f) === norm) && (!watchedSiteTheme || norm !== watchedSiteTheme)) return
+        reload(server)
+      }
+      server.watcher.on('change', onFsEvent)
+      server.watcher.on('add', onFsEvent)
+      server.watcher.on('unlink', onFsEvent)
     },
   }
 }

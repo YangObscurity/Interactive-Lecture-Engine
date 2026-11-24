@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="560" height="240" viewBox="0 0 560 240">
+  <rect x="0" y="0" width="560" height="240" fill="#F8FAFC"/>
+  <text x="140" y="28" font-size="16" text-anchor="middle" fill="#334155">对比太弱</text>
+  <text x="420" y="28" font-size="16" text-anchor="middle" fill="#334155">对比足够</text>
+  <line x1="280" y1="44" x2="280" y2="224" stroke="#CBD5E1" stroke-width="2" stroke-dasharray="6 6"/>
+  <rect x="40" y="48" width="200" height="72" rx="8" fill="#FFFFFF" stroke="#E2E8F0"/>
+  <text x="140" y="92" font-size="18" text-anchor="middle" fill="#FDE68A">浅黄字在白底上</text>
+  <rect x="320" y="48" width="200" height="72" rx="8" fill="#FFFFFF" stroke="#E2E8F0"/>
+  <text x="420" y="92" font-size="18" text-anchor="middle" fill="#1E293B">深色字在白底上</text>
+  <rect x="40" y="140" width="96" height="60" rx="6" fill="#DC2626"/>
+  <rect x="144" y="140" width="96" height="60" rx="6" fill="#16A34A"/>
+  <text x="140" y="220" font-size="13" text-anchor="middle" fill="#475569">红与绿：部分读者分不清</text>
+  <rect x="320" y="140" width="96" height="60" rx="6" fill="#1D4ED8"/>
+  <rect x="424" y="140" width="96" height="60" rx="6" fill="#FDBA74"/>
+  <text x="420" y="220" font-size="13" text-anchor="middle" fill="#475569">深蓝与浅橙：色相、深浅都不同</text>
+</svg>

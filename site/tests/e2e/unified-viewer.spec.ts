@@ -1,10 +1,15 @@
 import { test, expect, gotoAndSettle } from './fixtures'
 import { useTheme } from './theme-helpers'
+import fs from 'node:fs'
+import path from 'node:path'
+import { DEMO_DIR } from './demo'
 
 // S6: the demo lecture with every kind of figure in one viewer gallery, in page order: Mermaid c1, a figure pack
 // figure that has an original, ECharts c2 and WaveDrom c3 (templates/demo-content/lectures/mea/L05.md)
 const LECTURE = '/mea/L05'
 const LECTURE_ID = 'MEA-L05'
+/** the gallery holds every chart placeholder and every figure of the lecture, read from its source */
+const SLIDES = (fs.readFileSync(path.join(DEMO_DIR, 'lectures', 'mea', 'L05.md'), 'utf8').match(/<figure class="chart"|<LectureFigure\b/g) ?? []).length
 
 test.describe('WP-F8: unified PhotoSwipe viewer for figures, ECharts & Mermaid', () => {
   test('opens figures and Mermaid diagrams in one gallery with zoom, gallery navigation, focus trap & Esc across skins', async ({
@@ -15,14 +20,14 @@ test.describe('WP-F8: unified PhotoSwipe viewer for figures, ECharts & Mermaid',
     await page.setViewportSize({ width: 1280, height: 860 })
     await gotoAndSettle(page, LECTURE)
 
-    // 1. Click the group figure thumbnail -> opens unified PhotoSwipe viewer (slide 2 of 4: after inline Mermaid c1)
+    // 1. Click the group figure thumbnail -> opens unified PhotoSwipe viewer (slide 2 of SLIDES: after inline Mermaid c1)
     const thumbMedia = page.locator('figure.lec-fig .lec-fig-media').first()
     await thumbMedia.scrollIntoViewIfNeeded()
     await thumbMedia.click()
     const viewer = page.locator('.pswp.chart-modal')
     await expect(viewer).toBeVisible()
     await expect(page.locator('html')).toHaveClass(/chart-modal-open/)
-    await expect(viewer.locator('.chart-modal__counter')).toHaveText(/^2 \/ 4$/)
+    await expect(viewer.locator('.chart-modal__counter')).toHaveText(`2 / ${SLIDES}`)
 
     // the figure starts fitted inside the viewport below the bar, and only a figure with an original offers the link
     await expect(viewer.locator('[data-m="original"]')).toBeVisible()
@@ -42,7 +47,7 @@ test.describe('WP-F8: unified PhotoSwipe viewer for figures, ECharts & Mermaid',
 
     // 3. Navigate left to Mermaid diagram slide inside the same viewer
     await viewer.locator('button[data-m="prev"]').click()
-    await expect(viewer.locator('.chart-modal__counter')).toHaveText(/^1 \/ 4$/)
+    await expect(viewer.locator('.chart-modal__counter')).toHaveText(`1 / ${SLIDES}`)
     await expect(viewer.locator('[data-m="original"]')).toBeHidden()
     await expect(viewer.locator('.chart-modal__stage figure.chart--modal[data-type="mermaid"] svg')).toBeVisible()
 

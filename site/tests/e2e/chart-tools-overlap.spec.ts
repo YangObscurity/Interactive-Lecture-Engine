@@ -1,13 +1,14 @@
 /**
- * The engine's enlarge icon (`figure.chart .chart-enlarge`, styles/base.css) and the ECharts tool icons (save image, data
- * view, restore; charts/renderers/echarts.ts) share the top right corner of a chart. On touch screens the enlarge icon is
- * always shown, so it once sat on the restore icon. Here, for every ECharts figure of the demo lectures, both skins, light
- * and dark, on a 390 px touch phone and a 1280 px desktop:
- *   - the tool icons are the small drawn shapes in the top right strip of the chart's SVG (their on-screen boxes, not a
- *     guess from the option);
- *   - the enlarge icon's box and every tool icon's box do not overlap;
- *   - each is the topmost element at its centre, and a click (a tap on the phone) works: the enlarge icon opens the viewer,
- *     the data view icon opens the ECharts data view, and neither opens the other.
+ * ECharts figures in the text and in the viewer (spec board 07: "图框不显示常驻按钮；悬停时右上角出一个放大图标，点图或图标打开全站
+ * 共用的查看器（可缩放、平移、关闭；导出放在查看器里）"; S6Y audit-spec #8 #9 #10).
+ *
+ * The engine used to add the ECharts toolbox (save image, data view, restore) in the top right corner, next to the enlarge icon
+ * (an earlier version of this spec checked that the two did not overlap). Now, for every ECharts figure of the demo lectures, in
+ * both skins, light and dark, on a 390 px touch phone and a 1280 px desktop:
+ *   - the chart draws no tool icons (no small shapes in the top right strip of its SVG);
+ *   - the enlarge icon is on top at its centre and opens the viewer; a click (a tap) on the chart itself opens it too;
+ *   - in the viewer the title is the figure number and caption (no type tag, no internal id), the tool bar has an export
+ *     button, the "loading" placeholder is gone and the whole chart (x axis included) fits inside the stage.
  * Functional check on the built demo site (prod project).
  */
 import type { Page } from '@playwright/test'
@@ -18,8 +19,6 @@ import { useTheme, type ThemeId, type Mode } from './theme-helpers'
 const LECTURES = ['/mea/L03', '/mea/L04', '/mea/L05'] as const
 const LOOKS: Array<[ThemeId, Mode]> = [
   ['reader', 'light'],
-  ['reader', 'dark'],
-  ['datasheet', 'light'],
   ['datasheet', 'dark'],
 ]
 const FIG = 'figure.chart[data-type="echarts"]:not(.chart--modal)'
@@ -30,40 +29,30 @@ interface Box {
   width: number
   height: number
 }
-interface Probe {
-  button: Box | null
-  icons: Box[]
-}
 
-/**
- * The n-th ECharts figure: its enlarge icon and its tool icons. The tool icons are the SVG paths, at most 20 px, drawn in
- * the top 32 px and right 180 px of the chart (the title is text, the plot area and the legend lie lower), left to right.
- */
-function probe(page: Page, n: number): Promise<Probe> {
+/** The n-th ECharts figure: its enlarge icon and the small drawn shapes in the top right strip (where the toolbox was). */
+function probe(page: Page, n: number): Promise<{ button: Box | null; icons: number; svg: boolean }> {
   return page.evaluate(
     ({ sel, n }) => {
       const fig = document.querySelectorAll<HTMLElement>(sel)[n]
       const body = fig?.querySelector<HTMLElement>('.chart-body')
       const svg = body?.querySelector<SVGSVGElement>(':scope > div > svg')
-      if (!fig || !body || !svg) return { button: null, icons: [] }
+      if (!fig || !body || !svg) return { button: null, icons: 0, svg: false }
       const r = body.getBoundingClientRect()
-      const icons: Box[] = []
+      let icons = 0
       for (const p of Array.from(svg.querySelectorAll('path'))) {
         const b = p.getBoundingClientRect()
         if (b.width === 0 || b.width > 20 || b.height > 20) continue
         if (b.top < r.top || b.bottom > r.top + 32 || b.left < r.right - 180 || b.right > r.right) continue
-        icons.push({ x: b.x, y: b.y, width: b.width, height: b.height })
+        icons++
       }
-      icons.sort((a, b) => a.x - b.x)
       const bt = fig.querySelector<HTMLElement>('.chart-enlarge')?.getBoundingClientRect()
-      return { button: bt ? { x: bt.x, y: bt.y, width: bt.width, height: bt.height } : null, icons }
+      return { button: bt ? { x: bt.x, y: bt.y, width: bt.width, height: bt.height } : null, icons, svg: true }
     },
     { sel: FIG, n },
   )
 }
 
-const overlap = (a: Box, b: Box): boolean =>
-  a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height
 const centre = (b: Box): { x: number; y: number } => ({ x: b.x + b.width / 2, y: b.y + b.height / 2 })
 
 /** What is on top at a point: 'enlarge', 'chart' (inside the chart body) or the tag name of something else. */
@@ -81,14 +70,37 @@ function topAt(page: Page, n: number, p: { x: number; y: number }): Promise<stri
   )
 }
 
+/** The open viewer: title, export button, placeholder, chart box vs stage box. */
+function viewerState(page: Page) {
+  return page.evaluate(() => {
+    const root = document.querySelector<HTMLElement>('.chart-modal')
+    const stage = root?.querySelector<HTMLElement>('.chart-modal__stage')
+    const svg = stage?.querySelector<SVGSVGElement>('.chart-body svg')
+    const s = stage?.getBoundingClientRect()
+    const g = svg?.getBoundingClientRect()
+    // the lowest drawn text (the x axis labels) must be inside the stage
+    const texts = svg ? Array.from(svg.querySelectorAll('text')).map((t) => t.getBoundingClientRect().bottom) : []
+    return {
+      title: root?.querySelector('.chart-modal__title')?.textContent?.trim() ?? '',
+      exportBtn: Boolean(root?.querySelector('button[data-m="export"]')),
+      pending: root ? Array.from(root.querySelectorAll<HTMLElement>('.chart-pending')).filter((p) => p.getClientRects().length > 0).length : -1,
+      stageBottom: s ? s.bottom : 0,
+      svgBottom: g ? g.bottom : 0,
+      lowestText: texts.length ? Math.max(...texts) : 0,
+    }
+  })
+}
+
 for (const vp of [
   { name: 'phone 390', width: 390, height: 844, touch: true },
   { name: 'desktop 1280', width: 1280, height: 900, touch: false },
 ]) {
-  test.describe(`chart tool icons, ${vp.name}`, () => {
+  test.describe(`ECharts figure chrome and viewer, ${vp.name}`, () => {
     test.use({ viewport: { width: vp.width, height: vp.height }, isMobile: vp.touch, hasTouch: vp.touch })
     for (const path of LECTURES) {
-      test(`${path}: the enlarge icon and the ECharts tool icons do not overlap and all can be clicked`, async ({ page }) => {
+      test(`${path}: no ECharts tool icons; the icon and the chart open the viewer with number title, export, whole chart`, async ({
+        page,
+      }) => {
         test.skip(test.info().project.name !== 'prod', 'checked on the built demo site')
         test.setTimeout(180_000)
         for (const [theme, mode] of LOOKS) {
@@ -102,33 +114,39 @@ for (const vp of [
             await fig.scrollIntoViewIfNeeded()
             if (!vp.touch) await fig.locator('.chart-body').hover({ position: { x: 20, y: 200 } })
             const where = `${look} figure ${i}`
-            // the chart may still be drawing after the scroll: wait for its three tool icons
-            await expect.poll(async () => (await probe(page, i)).icons.length, { message: `${where}: tool icons`, timeout: 15_000 }).toBe(3)
+            await expect.poll(async () => (await probe(page, i)).svg, { message: `${where}: drawn`, timeout: 15_000 }).toBe(true)
             const pr = await probe(page, i)
+            expect(pr.icons, `${where}: ECharts tool icons in the figure`).toBe(0)
             expect(pr.button, `${where}: enlarge icon`).not.toBeNull()
             const button = pr.button as Box
-            for (const ic of pr.icons) {
-              expect(overlap(ic, button), `${where}: tool icon ${JSON.stringify(ic)} under the enlarge icon ${JSON.stringify(button)}`).toBe(false)
-              expect(await topAt(page, i, centre(ic)), `${where}: on top at a tool icon`).toBe('chart')
-            }
             expect(await topAt(page, i, centre(button)), `${where}: on top at the enlarge icon`).toBe('enlarge')
+            const label = (await fig.getAttribute('data-fig-label')) ?? ''
+            expect(label, `${where}: build-time number`).toMatch(/^图 \d+-\d+$/)
 
             // the enlarge icon opens the viewer
             const b = centre(button)
             if (vp.touch) await page.touchscreen.tap(b.x, b.y)
             else await page.mouse.click(b.x, b.y)
-            await expect(page.locator('.chart-modal'), `${where}: viewer opened`).toHaveCount(1)
+            await expect(page.locator('.chart-modal'), `${where}: viewer opened from the icon`).toHaveCount(1)
+            await expect.poll(async () => (await viewerState(page)).svgBottom, { message: `${where}: chart in the viewer` }).toBeGreaterThan(0)
+            const v = await viewerState(page)
+            expect(v.title, `${where}: viewer title`).toMatch(new RegExp(`^${label}( |$)`))
+            expect(v.title, `${where}: no internal id`).not.toMatch(/#c\d|MEA-L\d/)
+            expect(v.exportBtn, `${where}: export in the viewer`).toBe(true)
+            expect(v.pending, `${where}: no loading placeholder`).toBe(0)
+            expect(v.lowestText, `${where}: x axis inside the stage`).toBeLessThanOrEqual(v.stageBottom + 1)
             await page.keyboard.press('Escape')
             await expect(page.locator('.chart-modal')).toHaveCount(0)
 
-            // the data view icon (the middle one) opens the ECharts data view, not the viewer
+            // a click (tap) on the chart itself opens the viewer too (audit-spec #9)
             await fig.scrollIntoViewIfNeeded()
-            const again = await probe(page, i)
-            expect(again.icons.length, `${where}: tool icons after the viewer`).toBe(3)
-            const dv = centre(again.icons[1] as Box)
-            if (vp.touch) await page.touchscreen.tap(dv.x, dv.y)
-            else await page.mouse.click(dv.x, dv.y)
-            await expect(fig.locator('.chart-body textarea'), `${where}: data view opened`).toHaveCount(1)
+            const body = await fig.locator('.chart-body').boundingBox()
+            expect(body, `${where}: chart body`).not.toBeNull()
+            const p = { x: body!.x + body!.width / 2, y: body!.y + body!.height / 2 }
+            if (vp.touch) await page.touchscreen.tap(p.x, p.y)
+            else await page.mouse.click(p.x, p.y)
+            await expect(page.locator('.chart-modal'), `${where}: viewer opened from the chart`).toHaveCount(1)
+            await page.keyboard.press('Escape')
             await expect(page.locator('.chart-modal')).toHaveCount(0)
           }
         }

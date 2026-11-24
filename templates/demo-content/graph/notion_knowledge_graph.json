@@ -11,7 +11,9 @@
     "completedDate": "2026-01-10",
     "prerequisites": [],
     "subsequents": [
-      "mea_sigfigs"
+      "mea_sigfigs",
+      "prb_freq",
+      "geo_vec"
     ]
   },
   {
@@ -46,7 +48,8 @@
     ],
     "subsequents": [
       "mea_spread",
-      "mea_plots"
+      "mea_plots",
+      "geo_area"
     ]
   },
   {
@@ -65,7 +68,8 @@
     "subsequents": [
       "mea_dims",
       "pln_buffer",
-      "dat_tidy"
+      "dat_tidy",
+      "prb_dist"
     ]
   },
   {
@@ -82,7 +86,8 @@
       "mea_uncert"
     ],
     "subsequents": [
-      "mea_dims"
+      "mea_dims",
+      "vis_axes"
     ]
   },
   {
@@ -131,7 +136,10 @@
     ],
     "subsequents": [
       "log_proofs",
-      "pln_crit"
+      "pln_crit",
+      "log_sets",
+      "prb_cond",
+      "exp_question"
     ]
   },
   {
@@ -146,6 +154,234 @@
     "completedDate": null,
     "prerequisites": [
       "log_cond"
+    ],
+    "subsequents": [
+      "log_counter"
+    ]
+  },
+  {
+    "notionPageId": "00000000-0000-4000-8000-000000000015",
+    "nodeId": "log_sets",
+    "title": "第4讲 · 集合与量词",
+    "category": "基础方法",
+    "groupId": "LOG",
+    "lectureId": "LOG-L04",
+    "lecturePath": "/log/L04",
+    "status": "未开始",
+    "completedDate": null,
+    "prerequisites": [
+      "log_cond"
+    ],
+    "subsequents": [
+      "log_counter"
+    ]
+  },
+  {
+    "notionPageId": "00000000-0000-4000-8000-000000000016",
+    "nodeId": "log_counter",
+    "title": "第5讲 · 反例与归谬",
+    "category": "基础方法",
+    "groupId": "LOG",
+    "lectureId": "LOG-L05",
+    "lecturePath": "/log/L05",
+    "status": "未开始",
+    "completedDate": null,
+    "prerequisites": [
+      "log_proofs",
+      "log_sets"
+    ],
+    "subsequents": [
+      "prb_corr"
+    ]
+  },
+  {
+    "notionPageId": "00000000-0000-4000-8000-000000000017",
+    "nodeId": "prb_freq",
+    "title": "第1讲 · 随机与频率",
+    "category": "基础方法",
+    "groupId": "PRB",
+    "lectureId": "PRB-L01",
+    "lecturePath": "/prb/L01",
+    "status": "已完成",
+    "completedDate": "2026-01-18",
+    "prerequisites": [
+      "mea_units"
+    ],
+    "subsequents": [
+      "prb_cond",
+      "prb_expect"
+    ]
+  },
+  {
+    "notionPageId": "00000000-0000-4000-8000-000000000018",
+    "nodeId": "prb_cond",
+    "title": "第2讲 · 条件概率",
+    "category": "基础方法",
+    "groupId": "PRB",
+    "lectureId": "PRB-L02",
+    "lecturePath": "/prb/L02",
+    "status": "未开始",
+    "completedDate": null,
+    "prerequisites": [
+      "prb_freq",
+      "log_cond"
+    ],
+    "subsequents": []
+  },
+  {
+    "notionPageId": "00000000-0000-4000-8000-000000000019",
+    "nodeId": "prb_expect",
+    "title": "第3讲 · 期望值",
+    "category": "基础方法",
+    "groupId": "PRB",
+    "lectureId": "PRB-L03",
+    "lecturePath": "/prb/L03",
+    "status": "未开始",
+    "completedDate": null,
+    "prerequisites": [
+      "prb_freq"
+    ],
+    "subsequents": [
+      "prb_dist"
+    ]
+  },
+  {
+    "notionPageId": "00000000-0000-4000-8000-000000000020",
+    "nodeId": "prb_dist",
+    "title": "第4讲 · 分布与直方图",
+    "category": "基础方法",
+    "groupId": "PRB",
+    "lectureId": "PRB-L04",
+    "lecturePath": "/prb/L04",
+    "status": "未开始",
+    "completedDate": null,
+    "prerequisites": [
+      "prb_expect",
+      "mea_spread"
+    ],
+    "subsequents": [
+      "prb_sample",
+      "vis_mislead"
+    ]
+  },
+  {
+    "notionPageId": "00000000-0000-4000-8000-000000000021",
+    "nodeId": "prb_sample",
+    "title": "第5讲 · 抽样与估计",
+    "category": "基础方法",
+    "groupId": "PRB",
+    "lectureId": "PRB-L05",
+    "lecturePath": "/prb/L05",
+    "status": "未开始",
+    "completedDate": null,
+    "prerequisites": [
+      "prb_dist"
+    ],
+    "subsequents": [
+      "prb_corr",
+      "exp_random"
+    ]
+  },
+  {
+    "notionPageId": "00000000-0000-4000-8000-000000000022",
+    "nodeId": "prb_corr",
+    "title": "第6讲 · 相关与因果",
+    "category": "基础方法",
+    "groupId": "PRB",
+    "lectureId": "PRB-L06",
+    "lecturePath": "/prb/L06",
+    "status": "未开始",
+    "completedDate": null,
+    "prerequisites": [
+      "prb_sample",
+      "log_counter"
+    ],
+    "subsequents": [
+      "exp_conclude"
+    ]
+  },
+  {
+    "notionPageId": "00000000-0000-4000-8000-000000000023",
+    "nodeId": "geo_vec",
+    "title": "第1讲 · 坐标与向量",
+    "category": "基础方法",
+    "groupId": "GEO",
+    "lectureId": "GEO-L01",
+    "lecturePath": "/geo/L01",
+    "status": "学习中",
+    "completedDate": null,
+    "prerequisites": [
+      "mea_units"
+    ],
+    "subsequents": [
+      "geo_trig",
+      "geo_xform"
+    ]
+  },
+  {
+    "notionPageId": "00000000-0000-4000-8000-000000000024",
+    "nodeId": "geo_trig",
+    "title": "第2讲 · 角度与三角",
+    "category": "基础方法",
+    "groupId": "GEO",
+    "lectureId": "GEO-L02",
+    "lecturePath": "/geo/L02",
+    "status": "未开始",
+    "completedDate": null,
+    "prerequisites": [
+      "geo_vec"
+    ],
+    "subsequents": [
+      "geo_sim",
+      "geo_xform"
+    ]
+  },
+  {
+    "notionPageId": "00000000-0000-4000-8000-000000000025",
+    "nodeId": "geo_sim",
+    "title": "第3讲 · 比例与相似",
+    "category": "基础方法",
+    "groupId": "GEO",
+    "lectureId": "GEO-L03",
+    "lecturePath": "/geo/L03",
+    "status": "未开始",
+    "completedDate": null,
+    "prerequisites": [
+      "geo_trig"
+    ],
+    "subsequents": [
+      "geo_area"
+    ]
+  },
+  {
+    "notionPageId": "00000000-0000-4000-8000-000000000026",
+    "nodeId": "geo_area",
+    "title": "第4讲 · 面积与体积估算",
+    "category": "基础方法",
+    "groupId": "GEO",
+    "lectureId": "GEO-L04",
+    "lecturePath": "/geo/L04",
+    "status": "未开始",
+    "completedDate": null,
+    "prerequisites": [
+      "geo_sim",
+      "mea_uncert"
+    ],
+    "subsequents": []
+  },
+  {
+    "notionPageId": "00000000-0000-4000-8000-000000000027",
+    "nodeId": "geo_xform",
+    "title": "第5讲 · 坐标变换",
+    "category": "基础方法",
+    "groupId": "GEO",
+    "lectureId": "GEO-L05",
+    "lecturePath": "/geo/L05",
+    "status": "未开始",
+    "completedDate": null,
+    "prerequisites": [
+      "geo_vec",
+      "geo_trig"
     ],
     "subsequents": []
   },
@@ -197,6 +433,41 @@
       "mea_spread",
       "dat_group"
     ],
+    "subsequents": [
+      "pln_level"
+    ]
+  },
+  {
+    "notionPageId": "00000000-0000-4000-8000-000000000028",
+    "nodeId": "pln_level",
+    "title": "第4讲 · 资源平衡",
+    "category": "应用实践",
+    "groupId": "PLN",
+    "lectureId": "PLN-L04",
+    "lecturePath": "/pln/L04",
+    "status": "未开始",
+    "completedDate": null,
+    "prerequisites": [
+      "pln_buffer"
+    ],
+    "subsequents": [
+      "pln_retro"
+    ]
+  },
+  {
+    "notionPageId": "00000000-0000-4000-8000-000000000029",
+    "nodeId": "pln_retro",
+    "title": "第5讲 · 复盘与迭代",
+    "category": "应用实践",
+    "groupId": "PLN",
+    "lectureId": "PLN-L05",
+    "lecturePath": "/pln/L05",
+    "status": "未开始",
+    "completedDate": null,
+    "prerequisites": [
+      "pln_level",
+      "exp_record"
+    ],
     "subsequents": []
   },
   {
@@ -213,7 +484,8 @@
       "mea_spread"
     ],
     "subsequents": [
-      "dat_group"
+      "dat_group",
+      "dat_clean"
     ]
   },
   {
@@ -230,7 +502,303 @@
       "dat_tidy"
     ],
     "subsequents": [
-      "pln_buffer"
+      "pln_buffer",
+      "dat_pivot",
+      "vis_choose"
     ]
+  },
+  {
+    "notionPageId": "00000000-0000-4000-8000-000000000030",
+    "nodeId": "dat_clean",
+    "title": "第3讲 · 缺失值与清洗",
+    "category": "应用实践",
+    "groupId": "DAT",
+    "lectureId": "DAT-L03",
+    "lecturePath": "/dat/L03",
+    "status": "未开始",
+    "completedDate": null,
+    "prerequisites": [
+      "dat_tidy"
+    ],
+    "subsequents": [
+      "dat_pivot"
+    ]
+  },
+  {
+    "notionPageId": "00000000-0000-4000-8000-000000000031",
+    "nodeId": "dat_pivot",
+    "title": "第4讲 · 透视与重塑",
+    "category": "应用实践",
+    "groupId": "DAT",
+    "lectureId": "DAT-L04",
+    "lecturePath": "/dat/L04",
+    "status": "未开始",
+    "completedDate": null,
+    "prerequisites": [
+      "dat_group",
+      "dat_clean"
+    ],
+    "subsequents": [
+      "dat_repro"
+    ]
+  },
+  {
+    "notionPageId": "00000000-0000-4000-8000-000000000032",
+    "nodeId": "dat_repro",
+    "title": "第5讲 · 可复现的整理流程",
+    "category": "应用实践",
+    "groupId": "DAT",
+    "lectureId": "DAT-L05",
+    "lecturePath": "/dat/L05",
+    "status": "未开始",
+    "completedDate": null,
+    "prerequisites": [
+      "dat_pivot"
+    ],
+    "subsequents": [
+      "exp_record"
+    ]
+  },
+  {
+    "notionPageId": "00000000-0000-4000-8000-000000000033",
+    "nodeId": "vis_choose",
+    "title": "第1讲 · 选对图表",
+    "category": "应用实践",
+    "groupId": "VIS",
+    "lectureId": "VIS-L01",
+    "lecturePath": "/vis/L01",
+    "status": "已完成",
+    "completedDate": "2026-01-20",
+    "prerequisites": [
+      "dat_group"
+    ],
+    "subsequents": [
+      "vis_axes",
+      "vis_color",
+      "wrt_caption"
+    ]
+  },
+  {
+    "notionPageId": "00000000-0000-4000-8000-000000000034",
+    "nodeId": "vis_axes",
+    "title": "第2讲 · 坐标轴与刻度",
+    "category": "应用实践",
+    "groupId": "VIS",
+    "lectureId": "VIS-L02",
+    "lecturePath": "/vis/L02",
+    "status": "未开始",
+    "completedDate": null,
+    "prerequisites": [
+      "vis_choose",
+      "mea_plots"
+    ],
+    "subsequents": [
+      "vis_mislead"
+    ]
+  },
+  {
+    "notionPageId": "00000000-0000-4000-8000-000000000035",
+    "nodeId": "vis_color",
+    "title": "第3讲 · 颜色与对比",
+    "category": "应用实践",
+    "groupId": "VIS",
+    "lectureId": "VIS-L03",
+    "lecturePath": "/vis/L03",
+    "status": "未开始",
+    "completedDate": null,
+    "prerequisites": [
+      "vis_choose"
+    ],
+    "subsequents": [
+      "vis_story"
+    ]
+  },
+  {
+    "notionPageId": "00000000-0000-4000-8000-000000000036",
+    "nodeId": "vis_mislead",
+    "title": "第4讲 · 会误导的图",
+    "category": "应用实践",
+    "groupId": "VIS",
+    "lectureId": "VIS-L04",
+    "lecturePath": "/vis/L04",
+    "status": "未开始",
+    "completedDate": null,
+    "prerequisites": [
+      "vis_axes",
+      "prb_dist"
+    ],
+    "subsequents": [
+      "vis_story"
+    ]
+  },
+  {
+    "notionPageId": "00000000-0000-4000-8000-000000000037",
+    "nodeId": "vis_story",
+    "title": "第5讲 · 用数据讲故事",
+    "category": "应用实践",
+    "groupId": "VIS",
+    "lectureId": "VIS-L05",
+    "lecturePath": "/vis/L05",
+    "status": "未开始",
+    "completedDate": null,
+    "prerequisites": [
+      "vis_color",
+      "vis_mislead",
+      "wrt_lead"
+    ],
+    "subsequents": []
+  },
+  {
+    "notionPageId": "00000000-0000-4000-8000-000000000038",
+    "nodeId": "exp_question",
+    "title": "第1讲 · 可检验的问题",
+    "category": "方法训练",
+    "groupId": "EXP",
+    "lectureId": "EXP-L01",
+    "lecturePath": "/exp/L01",
+    "status": "未开始",
+    "completedDate": null,
+    "prerequisites": [
+      "log_cond"
+    ],
+    "subsequents": [
+      "exp_control"
+    ]
+  },
+  {
+    "notionPageId": "00000000-0000-4000-8000-000000000039",
+    "nodeId": "exp_control",
+    "title": "第2讲 · 变量与对照",
+    "category": "方法训练",
+    "groupId": "EXP",
+    "lectureId": "EXP-L02",
+    "lecturePath": "/exp/L02",
+    "status": "未开始",
+    "completedDate": null,
+    "prerequisites": [
+      "exp_question"
+    ],
+    "subsequents": [
+      "exp_random"
+    ]
+  },
+  {
+    "notionPageId": "00000000-0000-4000-8000-000000000040",
+    "nodeId": "exp_random",
+    "title": "第3讲 · 随机化与重复",
+    "category": "方法训练",
+    "groupId": "EXP",
+    "lectureId": "EXP-L03",
+    "lecturePath": "/exp/L03",
+    "status": "未开始",
+    "completedDate": null,
+    "prerequisites": [
+      "exp_control",
+      "prb_sample"
+    ],
+    "subsequents": [
+      "exp_record"
+    ]
+  },
+  {
+    "notionPageId": "00000000-0000-4000-8000-000000000041",
+    "nodeId": "exp_record",
+    "title": "第4讲 · 记录与复现",
+    "category": "方法训练",
+    "groupId": "EXP",
+    "lectureId": "EXP-L04",
+    "lecturePath": "/exp/L04",
+    "status": "未开始",
+    "completedDate": null,
+    "prerequisites": [
+      "exp_random",
+      "dat_repro"
+    ],
+    "subsequents": [
+      "pln_retro",
+      "exp_conclude"
+    ]
+  },
+  {
+    "notionPageId": "00000000-0000-4000-8000-000000000042",
+    "nodeId": "exp_conclude",
+    "title": "第5讲 · 从结果到结论",
+    "category": "方法训练",
+    "groupId": "EXP",
+    "lectureId": "EXP-L05",
+    "lecturePath": "/exp/L05",
+    "status": "未开始",
+    "completedDate": null,
+    "prerequisites": [
+      "exp_record",
+      "prb_corr"
+    ],
+    "subsequents": []
+  },
+  {
+    "notionPageId": "00000000-0000-4000-8000-000000000043",
+    "nodeId": "wrt_lead",
+    "title": "第1讲 · 先写结论",
+    "category": "方法训练",
+    "groupId": "WRT",
+    "lectureId": "WRT-L01",
+    "lecturePath": "/wrt/L01",
+    "status": "未开始",
+    "completedDate": null,
+    "prerequisites": [],
+    "subsequents": [
+      "vis_story",
+      "wrt_struct"
+    ]
+  },
+  {
+    "notionPageId": "00000000-0000-4000-8000-000000000044",
+    "nodeId": "wrt_struct",
+    "title": "第2讲 · 段落与结构",
+    "category": "方法训练",
+    "groupId": "WRT",
+    "lectureId": "WRT-L02",
+    "lecturePath": "/wrt/L02",
+    "status": "未开始",
+    "completedDate": null,
+    "prerequisites": [
+      "wrt_lead"
+    ],
+    "subsequents": [
+      "wrt_caption"
+    ]
+  },
+  {
+    "notionPageId": "00000000-0000-4000-8000-000000000045",
+    "nodeId": "wrt_caption",
+    "title": "第3讲 · 图表的说明文字",
+    "category": "方法训练",
+    "groupId": "WRT",
+    "lectureId": "WRT-L03",
+    "lecturePath": "/wrt/L03",
+    "status": "未开始",
+    "completedDate": null,
+    "prerequisites": [
+      "wrt_struct",
+      "vis_choose"
+    ],
+    "subsequents": [
+      "wrt_review"
+    ]
+  },
+  {
+    "notionPageId": "00000000-0000-4000-8000-000000000046",
+    "nodeId": "wrt_review",
+    "title": "第4讲 · 审稿与修改",
+    "category": "方法训练",
+    "groupId": "WRT",
+    "lectureId": "WRT-L04",
+    "lecturePath": "/wrt/L04",
+    "status": "未开始",
+    "completedDate": null,
+    "prerequisites": [
+      "wrt_caption"
+    ],
+    "subsequents": []
   }
 ]

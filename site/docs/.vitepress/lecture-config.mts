@@ -87,6 +87,16 @@ export class LectureConfigError extends Error {
  * `options.groupIds`: the course group ids of groups.mts; when given, `access.groups` keys are checked against them
  * (the build always passes them, `defineLectureConfig` cannot know them).
  */
+function isValidHttpUrl(val: string): boolean {
+  if (!/^https?:\/\//i.test(val)) return false
+  try {
+    const u = new URL(val)
+    return u.protocol === 'http:' || u.protocol === 'https:'
+  } catch {
+    return false
+  }
+}
+
 export function validateLectureConfig(config: LectureConfig, options: { groupIds?: readonly string[] } = {}): LectureConfig {
   validateI18n(config.i18n)
   validateHome(config.home)
@@ -120,6 +130,17 @@ export function validateLectureConfig(config: LectureConfig, options: { groupIds
       }
       if (option.type === 'path' && !(typeof given === 'string' && /^\/\S*$/.test(given))) {
         throw new LectureConfigError(`${where} = ${JSON.stringify(given)} must be a path starting with "/" and without spaces, e.g. ${JSON.stringify(option.default)}`)
+      }
+      if (option.type === 'url') {
+        const ok =
+          typeof given === 'string' &&
+          !/\s/.test(given) &&
+          (given === '' || /^\/(?!\/)\S*$/.test(given) || isValidHttpUrl(given))
+        if (!ok) {
+          throw new LectureConfigError(
+            `${where} = ${JSON.stringify(given)} must be a valid path starting with "/" or an http(s) URL without spaces`,
+          )
+        }
       }
     }
   }

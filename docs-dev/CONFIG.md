@@ -21,8 +21,15 @@
 | `progress.endpoint` | 路径 | `/api/db` | `rest` 适配器的基础路径（同源，其下是 `/progress`、`/progress/batch`） |
 | `progress.notionSync` | 布尔 | `false` | 进度写入后经现有 Notion 同步代理回写 Notion |
 | `auth.sessionEndpoint` | 路径 | `/api/auth/session` | 身份接口（`auth.adapter = 'none'` 时前端不请求） |
+| `auth.loginUrl` | URL / 路径 | `""` | 登录门户地址（如 `/login?rd={rd}` 或 `https://auth.example.com/?rd={rd}`）。`{rd}` 会被替换为 URL 编码的当前页面完整地址，供登录后回跳；留空则回退到当前页面 |
 
-示例：`modules: { progress: { adapter: 'rest', notionSync: true } }`。写错键名或类型时构建失败，报错里会列出可选项。客户端通过 `themeConfig.lectureModules`（已填好默认值）读取这些设置。
+示例：`modules: { progress: { adapter: 'rest', notionSync: true }, auth: { loginUrl: '/login?rd={rd}' } }`。写错键名或类型时构建失败，报错里会列出可选项。客户端通过 `themeConfig.lectureModules`（已填好默认值）读取这些设置。
+
+关于 `auth.loginUrl` 与 `{rd}` 占位符：
+- 适用于部署在认证网关（如 Authelia / OAuth2-Proxy / Keycloak）后的站点，或由自建登录页提供认证的场景。
+- 地址既可以是同源相对路径（例如 `/login?rd={rd}`），也可以是跨域绝对地址（例如 `https://auth.example.com/?rd={rd}`）。
+- 当读者在前端触发登录跳转（如未登录读者访问 `/dashboard` 管理面板，或网关 401/403 后的引导）时，前端会将 `{rd}` 替换为经过 `encodeURIComponent` 的当前页面完整 URL。
+- 若留空（默认 `""`），则回退到跳转当前页面（刷新重入）；该项仅在 `site.config.ts` / `lecture.config.ts` 的 `modules.auth.loginUrl` 配置（不以 `//` 开头）。
 
 进度 store 的行为（读取规则、发件箱与重试、写入被拒、换人、V1 迁移）与排查方法见 [PROGRESS.md](./PROGRESS.md)。
 

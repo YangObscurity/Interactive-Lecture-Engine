@@ -285,6 +285,18 @@
           ],
           "hex": "#4a5560"
         }
+      },
+      "canvas": {
+        "$value": {
+          "colorSpace": "srgb",
+          "components": [
+            0.9529,
+            0.9569,
+            0.9647
+          ],
+          "hex": "#f3f4f6"
+        },
+        "$description": "map stage (home-canvas prototype --canvas)"
       }
     },
     "dark": {
@@ -476,6 +488,18 @@
           ],
           "hex": "#aeb8c2"
         }
+      },
+      "canvas": {
+        "$value": {
+          "colorSpace": "srgb",
+          "components": [
+            0.0706,
+            0.0784,
+            0.0941
+          ],
+          "hex": "#121418"
+        },
+        "$description": "map stage (home-canvas prototype --canvas)"
       }
     },
     "sepia": {

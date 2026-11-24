@@ -5,12 +5,12 @@ import { buildCurriculumFromDisk } from '../../docs/.vitepress/curriculum/node.m
 import { mergeCurriculum } from '../../docs/.vitepress/curriculum/split.ts'
 import { resolveGroups } from '../../docs/.vitepress/groups-source.mts'
 import type { CurriculumData } from '../../docs/.vitepress/curriculum/data.ts'
-import { DEMO_ACCESS_JSON, DEMO_ENV, demoContentPaths, setEnv, syncDemoDocs } from './demo-content'
+import { DEMO_ACCESS_JSON, DEMO_ENV, DEMO_GROUP_ORDER, DEMO_RESTRICTED_IDS, demoContentPaths, demoInlineIds, setEnv, syncDemoDocs } from './demo-content'
 import type { DemoDocs } from './demo-content'
 
 /**
  * The configuration the access e2e builds, on the engine's demo content (templates/demo-content, access.e2e.json:
- * MEA and LOG inline, PLN `authenticated`, DAT the gateway group `staff`): the inline data loader must not contain a
+ * PLN `authenticated`, DAT the gateway group `staff`, every other group inline): the inline data loader must not contain a
  * title or a lecture id of PLN / DAT, the tier slices must, and merging them gives the full curriculum of the build.
  * The demo lectures are synced into a temporary docs folder; the data loader reads it through a resolveContent that
  * points `docsRoot` there (TEST_DEMO_DOCS_ROOT), so neither site/docs nor the owner's content is read.
@@ -28,7 +28,7 @@ vi.mock('../../docs/.vitepress/content/paths.mts', async (importOriginal) => {
 })
 
 const SITE = path.resolve(__dirname, '../..')
-const INLINE = ['MEA', 'LOG']
+const INLINE = demoInlineIds(DEMO_GROUP_ORDER)
 let demo: DemoDocs
 let restoreBase: () => void
 let restoreCase: (() => void) | undefined
@@ -85,7 +85,7 @@ describe('curriculum with access tiers (the access e2e configuration on the demo
           expect(text).not.toContain(l.id)
         }
       }
-      // the inline part has MEA and LOG and the edges inside them
+      // the inline part has every public group and the edges inside them
       expect(inline[bucket]?.stats.lectures).toBeGreaterThan(0)
       expect(inline[bucket]?.stats.edges).toBeGreaterThan(0)
       for (const id of INLINE) expect(text).toContain(id)
@@ -95,7 +95,7 @@ describe('curriculum with access tiers (the access e2e configuration on the demo
   it('every restricted tier slice has its group titles and lecture ids, and merging them gives the full curriculum of the build', async () => {
     const { plan, build } = await setup()
     const inline = (await loader.load()) as Record<string, CurriculumData>
-    expect(plan.tiers.map((t) => t.groupIds)).toEqual([['PLN'], ['DAT']])
+    expect(plan.tiers.map((t) => t.groupIds)).toEqual(DEMO_RESTRICTED_IDS.map((id) => [id]))
     for (const bucket of ['root', 'en']) {
       const slices = plan.tiers.map((t) => curriculumSliceOf(build, plan, t.id, bucket)).filter((s) => s !== undefined)
       expect(slices).toHaveLength(2)
@@ -115,7 +115,7 @@ describe('curriculum with access tiers (the access e2e configuration on the demo
     restoreCase = setEnv({ LECTURE_BUILD_GROUPS: undefined, LECTURE_ACCESS_JSON: undefined })
     const inline = (await loader.load()) as Record<string, CurriculumData>
     const { GROUPS } = await resolveGroups()
-    expect(GROUPS.map((g) => g.id)).toEqual(['MEA', 'LOG', 'PLN', 'DAT'])
+    expect(GROUPS.map((g) => g.id)).toEqual([...DEMO_GROUP_ORDER])
     expect(inline.root?.groups.map((g) => g.id)).toEqual(GROUPS.map((g) => g.id))
     expect(inline.root?.stats.edges).toBeGreaterThan(0)
   })

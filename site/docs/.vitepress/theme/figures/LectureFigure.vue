@@ -37,19 +37,15 @@ const items = computed(() => decoded.value?.items ?? [])
 const isGallery = computed(() => items.value.length > 1)
 const primary = computed(() => items.value[0] ?? null)
 
+// the visible number is the build-time label ("图 5-2", figures/numbering.ts: one sequence with the page's charts); a gallery
+// shows its range ("图 6-1–6-2"). No "说明" suffix: the figcaption already is the caption for screen readers (S6Y audit-spec #11)
 const figureLabel = computed(() => {
   const first = primary.value
   if (!first) return ''
-  if (!isGallery.value) {
-    return first.kind === 'table'
-      ? t('lecture.table.captionLabel', { i: first.num })
-      : t('lecture.fig.captionLabel', { i: first.num })
-  }
+  if (!isGallery.value) return first.label
   const last = items.value[items.value.length - 1]!
-  const range = first.num === last.num ? String(first.num) : `${first.num}–${last.num}`
-  return first.kind === 'table'
-    ? t('lecture.table.captionLabel', { i: range })
-    : t('lecture.fig.captionLabel', { i: range })
+  if (first.num === last.num) return first.label
+  return `${first.label}–${last.label.replace(/^\D+/, '')}`
 })
 
 const captionText = computed(() => {
@@ -91,11 +87,16 @@ function isSvgFile(src: string): boolean {
   return src.toLowerCase().split(/[?#]/, 1)[0]!.endsWith('.svg')
 }
 
+/** Viewer title: number then caption, like the figcaption ("图 5-2 刻度尺读数"; spec board 07). */
+function viewerTitle(item: (typeof items.value)[number]): string {
+  return [item.label, item.caption].filter(Boolean).join(' ')
+}
+
 function slidePayload(item: (typeof items.value)[number]) {
   return JSON.stringify({
     kind: 'figure' as const,
     id: item.id,
-    title: `${item.label} · ${item.caption}`,
+    title: viewerTitle(item),
     src: withBase(item.src),
     width: item.width,
     height: item.height,
@@ -113,7 +114,7 @@ function openViewerAt(itemIndex: number, ev: Event): void {
     {
       kind: 'figure',
       id: item.id,
-      title: `${item.label} · ${item.caption}`,
+      title: viewerTitle(item),
       src: withBase(item.src),
       width: item.width,
       height: item.height,

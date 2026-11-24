@@ -1,0 +1,6 @@
+{
+  "c1": {
+    "type": "echarts",
+    "code": "{\n  \"title\": {\n    \"text\": \"等待时间统计\",\n    \"left\": 8\n  },\n  \"tooltip\": {\n    \"trigger\": \"axis\"\n  },\n  \"legend\": {\n    \"bottom\": 0\n  },\n  \"grid\": {\n    \"top\": 72,\n    \"bottom\": 64,\n    \"left\": 56\n  },\n  \"xAxis\": {\n    \"type\": \"category\",\n    \"data\": [\n      \"9时\",\n      \"10时\",\n      \"11时\",\n      \"12时\",\n      \"13时\"\n    ]\n  },\n  \"yAxis\": {\n    \"type\": \"value\",\n    \"name\": \"平均等待 / 分钟\",\n    \"min\": 0\n  },\n  \"series\": [\n    {\n      \"name\": \"每个窗口各排一队（第一周）\",\n      \"type\": \"line\",\n      \"symbolSize\": 8,\n      \"itemStyle\": {\n        \"color\": \"#EA580C\"\n      },\n      \"lineStyle\": {\n        \"color\": \"#EA580C\"\n      },\n      \"data\": [\n        5,\n        8.2,\n        12.3,\n        11.6,\n        5.4\n      ]\n    },\n    {\n      \"name\": \"单一长队（第二周）\",\n      \"type\": \"line\",\n      \"symbolSize\": 8,\n      \"itemStyle\": {\n        \"color\": \"#2563EB\"\n      },\n      \"lineStyle\": {\n        \"color\": \"#2563EB\"\n      },\n      \"data\": [\n        4.1,\n        6,\n        8.4,\n        7.9,\n        4.6\n      ]\n    }\n  ]\n}"
+  }
+}

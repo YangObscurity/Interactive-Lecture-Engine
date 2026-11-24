@@ -22,6 +22,20 @@ export const BG: Record<`${ThemeId}-${Mode}`, string> = {
   'datasheet-dark': '#0F1D17',
 }
 
+/** --lec-canvas (the map stage) per theme-mode: the home-canvas prototype's `--canvas` (S6Y AH #6). */
+export const CANVAS: Record<`${ThemeId}-${Mode}`, string> = {
+  'reader-light': '#F3F4F6',
+  'reader-dark': '#121418',
+  'datasheet-light': '#ECEEEA',
+  'datasheet-dark': '#0A140F',
+}
+
+/** `#RRGGBB` -> the computed-style form `rgb(r, g, b)`. */
+export function hexRgb(hex: string): string {
+  const n = parseInt(hex.replace('#', ''), 16)
+  return `rgb(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255})`
+}
+
 export interface ReaderPrefsInit {
   theme?: ThemeId
   tint?: string
@@ -53,4 +67,5 @@ export async function expectThemeActive(page: Page, theme: ThemeId, mode: Mode):
   await expect(page.locator('html')).toHaveAttribute('data-lec-theme', theme)
   await expect(page.locator('html')).toHaveClass(mode === 'dark' ? /\bdark\b/ : /^(?!.*\bdark\b)/)
   expect((await lecVar(page, '--lec-bg')).toUpperCase()).toBe(BG[`${theme}-${mode}`])
+  expect((await lecVar(page, '--lec-canvas')).toUpperCase()).toBe(CANVAS[`${theme}-${mode}`])
 }

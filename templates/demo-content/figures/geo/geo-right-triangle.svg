@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="480" height="250" viewBox="0 0 480 250" font-family="sans-serif">
+  <rect x="0" y="0" width="480" height="250" fill="#F8FAFC"/>
+  <polygon points="70,210 390,210 390,50" fill="#ECFEFF" stroke="#0E7490" stroke-width="3"/>
+  <polyline points="370,210 370,190 390,190" fill="none" stroke="#0E7490" stroke-width="2"/>
+  <path d="M 130 210 A 60 60 0 0 0 123.7 183.2" fill="none" stroke="#DC2626" stroke-width="2"/>
+  <text x="146" y="200" font-size="16" text-anchor="middle" fill="#B91C1C">θ</text>
+  <text x="230" y="234" font-size="14" text-anchor="middle" fill="#334155">邻边 b</text>
+  <text x="404" y="135" font-size="14" text-anchor="start" fill="#334155">对边 a</text>
+  <text x="214" y="118" font-size="14" text-anchor="end" fill="#334155">斜边 c</text>
+  <text x="30" y="40" font-size="14" text-anchor="start" fill="#334155">sin θ = a / c</text>
+  <text x="30" y="62" font-size="14" text-anchor="start" fill="#334155">cos θ = b / c</text>
+  <text x="30" y="84" font-size="14" text-anchor="start" fill="#334155">tan θ = a / b</text>
+</svg>

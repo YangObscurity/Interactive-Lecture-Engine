@@ -2,12 +2,11 @@
  * renderers/echarts.ts — ECharts option JSON → chart (lazy `import('echarts/core')`, tree-shaken to used charts/components).
  *
  * Rendering supports light and dark themes (FE-030).
- * SVG renderer first, canvas fallback; animation off; toolbox;
+ * SVG renderer first, canvas fallback; animation off; no toolbox unless the author writes one (export is in the viewer);
  * confined tooltip; layout normalisation; SVG viewBox fix for print/export.
  */
 import { CHART_ECHARTS_GRID, CHART_FONT } from '../../../site.config.mts'
 import { currentLang, translate } from '../../../i18n/index.ts'
-import type { MessageKey } from '../../../i18n/index.ts'
 import { chartBody, fixEchartsSvgViewbox, showError } from '../dom'
 import { figExtras } from '../state'
 import type { Disposer, EChartsInstanceLike } from '../state'
@@ -373,22 +372,22 @@ export async function renderEcharts(fig: HTMLElement, code: string, env: RenderE
 
   opt.animation = false
   opt.textStyle = Object.assign({}, isObj(opt.textStyle) ? opt.textStyle : {}, { fontFamily: CHART_FONT })
-  const L = (key: MessageKey): string => translate(currentLang(), key)
-  const authorTools = isObj(opt.toolbox) ? opt.toolbox : {}
-  const feature: Obj = isObj(authorTools.feature)
-    ? authorTools.feature
-    : {
-        saveAsImage: { title: L('chart.echarts.saveImage'), pixelRatio: 3 },
-        dataView: { title: L('chart.echarts.dataView'), readOnly: true, lang: [L('chart.echarts.dataViewTitle'), L('chart.modal.close'), L('chart.echarts.refresh')] },
-        restore: { title: L('chart.echarts.restore') },
-      }
-  const toolCount = Object.values(feature).filter((f) => !isObj(f) || f.show !== false).length
-  const row = toolboxPlacement(fig, body, toolCount)
-  opt.toolbox = Object.assign({ right: row.right, top: row.top, itemSize: TOOL_ICON, itemGap: TOOL_ICON_GAP, padding: TOOL_PAD }, authorTools, { feature })
-  // an author who placed or hid the toolbox keeps it; the layout only avoids the row the engine placed
-  const engineRow = authorTools.show !== false && authorTools.right == null && authorTools.left == null && authorTools.top == null && authorTools.bottom == null
+  // spec board 07: the figure shows no always-on buttons (export lives in the viewer's tool bar, charts/modal.ts), so the
+  // engine no longer adds the ECharts toolbox (S6Y audit-spec #8). An author's own `toolbox` with features is kept.
+  const authorTools = isObj(opt.toolbox) ? opt.toolbox : null
+  let toolRow: ToolRow | undefined
+  if (authorTools && authorTools.show !== false && isObj(authorTools.feature)) {
+    const toolCount = Object.values(authorTools.feature).filter((f) => !isObj(f) || f.show !== false).length
+    const row = toolboxPlacement(fig, body, toolCount)
+    opt.toolbox = Object.assign({ right: row.right, top: row.top, itemSize: TOOL_ICON, itemGap: TOOL_ICON_GAP, padding: TOOL_PAD }, authorTools)
+    // an author who placed the toolbox keeps it; the layout only avoids the row the engine placed
+    const engineRow = authorTools.right == null && authorTools.left == null && authorTools.top == null && authorTools.bottom == null
+    if (engineRow && toolCount > 0) toolRow = row
+  } else {
+    opt.toolbox = { show: false }
+  }
   opt.tooltip = Object.assign({ confine: true }, isObj(opt.tooltip) ? opt.tooltip : {})
-  normalizeEchartsLayout(opt, body.clientWidth || 660, body.clientHeight || 430, engineRow && toolCount > 0 ? row : undefined)
+  normalizeEchartsLayout(opt, body.clientWidth || 660, body.clientHeight || 430, toolRow)
 
   ensureDarkTheme(echarts)
   const isDark = isDarkTheme()
@@ -401,6 +400,10 @@ export async function renderEcharts(fig: HTMLElement, code: string, env: RenderE
   } catch {
     /* ignore */
   }
+
+  // the "loading" placeholder (charts/page.ts) goes before ECharts measures the box: left in place it pushed the chart down
+  // by its own height, which clipped the x axis in the viewer where the placeholder is not hidden (S6Y audit-spec #10)
+  for (const pending of Array.from(body.querySelectorAll(':scope > .chart-pending'))) pending.remove()
 
   let chart: EChartsInstanceLike
   try {

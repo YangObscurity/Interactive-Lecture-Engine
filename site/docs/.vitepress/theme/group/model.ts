@@ -244,13 +244,57 @@ export function anchor(r: Box, o: Box): [number, number, number, number] {
 
 const half = (v: number): number => Math.round(v * 2) / 2
 
-/** SVG path data of the line from box `a` to box `b`: a cubic curve, or right angles with a stub of 10 px at both ends. */
-export function edgePath(a: Box, b: Box, style: EdgeStyle): string {
+/** Room kept between a line routed under a row and the chips of the next row (px). */
+const UNDER_MAX = 10
+
+/**
+ * The boxes of `others` that sit on the row of `a` and `b` (both on one row) between them: a side-to-side line from `a` to `b`
+ * would run across their text.
+ */
+export function between(a: Box, b: Box, others: readonly Box[]): Box[] {
+  const left = a.x < b.x ? a : b
+  const right = left === a ? b : a
+  const cy = (a.y + a.h / 2 + b.y + b.h / 2) / 2
+  return others.filter((o) => Math.abs(o.y + o.h / 2 - cy) < Math.max(a.h, b.h) / 2 && o.x + o.w > left.x + left.w && o.x < right.x)
+}
+
+/**
+ * The line under a row: from the bottom edge of `a` down, along under the chips in between, up into the bottom edge of `b`
+ * (spec decision 2026-11-23 21:47: two chips of one row that are not neighbours are joined under the row, never across a chip).
+ * The depth is half the free space under the row (the next row of chips, or nothing: then 2 x UNDER_MAX), at most UNDER_MAX.
+ */
+function underPath(a: Box, b: Box, others: readonly Box[], style: EdgeStyle): string {
+  const p: [number, number] = [a.x + a.w / 2, a.y + a.h]
+  const q: [number, number] = [b.x + b.w / 2, b.y + b.h]
+  const bottom = Math.max(p[1], q[1])
+  const x0 = Math.min(p[0], q[0])
+  const x1 = Math.max(p[0], q[0])
+  const below = others.filter((o) => o.y >= bottom && o.x < x1 && o.x + o.w > x0).map((o) => o.y - bottom)
+  const free = below.length ? Math.min(...below) : 2 * UNDER_MAX
+  const depth = Math.max(2, Math.min(UNDER_MAX, free / 2))
+  if (style === 'orthogonal') {
+    const y = bottom + depth
+    return `M${half(p[0])} ${half(p[1])}L${half(p[0])} ${half(y)}L${half(q[0])} ${half(y)}L${half(q[0])} ${half(q[1])}`
+  }
+  // a cubic with both control points at the same depth bends 3/4 of the way there
+  const d = depth / 0.75
+  return `M${half(p[0])} ${half(p[1])}C${half(p[0])} ${half(bottom + d)} ${half(q[0])} ${half(bottom + d)} ${half(q[0])} ${half(q[1])}`
+}
+
+/**
+ * SVG path data of the line from box `a` to box `b`: a cubic curve, or right angles with a stub of 10 px at both ends. When the
+ * two share a row and `others` (the other chips of the map) has a chip between them, the line goes under the row instead.
+ * For cross-row curves, the vertical control-point offset is capped at half the vertical gap between the two anchors so a wide
+ * horizontal span never bends the curve back into the start or end row's chips.
+ */
+export function edgePath(a: Box, b: Box, style: EdgeStyle, others: readonly Box[] = []): string {
   const p = anchor(a, b)
   const q = anchor(b, a)
+  if (p[3] === 0 && between(a, b, others).length > 0) return underPath(a, b, others, style)
   if (style === 'orthogonal') {
-    const p1: [number, number] = [p[0] + p[2] * 10, p[1] + p[3] * 10]
-    const q1: [number, number] = [q[0] + q[2] * 10, q[1] + q[3] * 10]
+    const stub = p[3] !== 0 ? Math.min(10, Math.abs(q[1] - p[1]) / 2) : 10
+    const p1: [number, number] = [p[0] + p[2] * stub, p[1] + p[3] * stub]
+    const q1: [number, number] = [q[0] + q[2] * stub, q[1] + q[3] * stub]
     let pts: Array<[number, number]>
     if (p[3] !== 0) {
       const my = (p1[1] + q1[1]) / 2
@@ -261,7 +305,8 @@ export function edgePath(a: Box, b: Box, style: EdgeStyle): string {
     }
     return 'M' + pts.map((t) => `${half(t[0])} ${half(t[1])}`).join('L')
   }
-  const d = Math.max(28, Math.hypot(q[0] - p[0], q[1] - p[1]) * 0.35)
+  const rawD = Math.max(28, Math.hypot(q[0] - p[0], q[1] - p[1]) * 0.35)
+  const d = p[3] !== 0 ? Math.max(2, Math.min(rawD, Math.abs(q[1] - p[1]) / 2)) : rawD
   return `M${half(p[0])} ${half(p[1])}C${half(p[0] + p[2] * d)} ${half(p[1] + p[3] * d)} ${half(q[0] + q[2] * d)} ${half(q[1] + q[3] * d)} ${half(q[0])} ${half(q[1])}`
 }
 

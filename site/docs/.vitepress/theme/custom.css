@@ -282,7 +282,7 @@ html.reading-mode .reading-mode-nav-btn .rm-text {
 }
 
 .vp-doc div[class*='language-'] {
-  overflow-x: auto;
+  overflow: hidden;
 }
 
 /* ================= 正文引用标记（正文不允许出现链接） =================
@@ -541,6 +541,17 @@ html.reading-mode .reading-mode-nav-btn .rm-text {
 .hb-atlas .lec-map {
   border: 1px solid var(--lec-border);
   border-radius: var(--lec-radius-2, 8px);
+}
+/* S6Y (DECISIONS, map width): on a phone the home map runs edge to edge, like the home-canvas prototype's stage;
+   on a desktop it stays in the content column */
+@media (max-width: 700px) {
+  .hb-atlas .lec-map {
+    width: 100vw;
+    margin-left: calc(50% - 50vw);
+    border-left: 0;
+    border-right: 0;
+    border-radius: 0;
+  }
 }
 .hb-grid {
   display: grid;
@@ -1685,8 +1696,10 @@ details.custom-block > :not(summary) {
 
 
 
-/* ================= 全局超链接排版优化（彻底清除原生生硬下划线） ================= */
-.vp-doc a {
+/* ================= 全局超链接排版优化（彻底清除原生生硬下划线） =================
+   概念链接 `a.lec-term` 除外：它的强调色点线（reader）/ 虚线（datasheet）下划线是规格板 11.1 的契约，见 styles/concepts.css
+   （S6Y audit-spec #4：此处的 !important 曾把它压掉，两种皮肤都看不出是链接）。:where() 让选择器权重保持 `.vp-doc a`。 */
+.vp-doc a:where(:not(.lec-term)) {
   text-decoration: none !important;
   font-weight: 500;
   color: var(--vp-c-brand-1);
@@ -1694,7 +1707,7 @@ details.custom-block > :not(summary) {
   transition: color 0.18s ease, border-color 0.18s ease, opacity 0.18s ease;
 }
 
-.vp-doc a:hover {
+.vp-doc a:where(:not(.lec-term)):hover {
   text-decoration: none !important;
   color: var(--vp-c-brand-2, var(--vp-c-brand-1));
   border-bottom-color: var(--lec-accent);

@@ -198,4 +198,11 @@ html.reading-mode .reading-mode-nav-btn .rm-text {
     display: none;
   }
 }
+
+/* S6Y decision (1) 2026-11-23: wide reading means nothing on a phone, so the toggle is not shown up to 768px */
+@media (max-width: 768px) {
+  .reading-mode-nav-wrapper {
+    display: none;
+  }
+}
 </style>

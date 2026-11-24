@@ -363,7 +363,7 @@ describe('in-use module detection', () => {
     companion: { adapter: 'off' },
     graph: { source: 'merge' },
     contentSync: { adapter: 'none' },
-    auth: { adapter: 'none', sessionEndpoint: '/api/auth/session' },
+    auth: { adapter: 'none', sessionEndpoint: '/api/auth/session', loginUrl: '' },
   }
 
   it('detects site modules always in use', () => {
@@ -413,5 +413,16 @@ describe('in-use module detection', () => {
     const inUse = getInUseModules(resolved, baseSiteModules)
     expect(inUse.has('deploy')).toBe(true)
     expect(inUse.has('mirror')).toBe(false)
+  })
+})
+
+describe('auth.loginUrl doctor validation', () => {
+  it('accepts site-relative paths and https URLs while rejecting protocol-relative URLs', () => {
+    const loginUrlSetting = SETTINGS.find((s) => s.key === 'auth.loginUrl')
+    expect(loginUrlSetting).toBeDefined()
+    expect(validate(loginUrlSetting!, '/login?rd={rd}')).toEqual({ valid: true })
+    expect(validate(loginUrlSetting!, 'https://auth.example.com/?rd={rd}')).toEqual({ valid: true })
+    expect(validate(loginUrlSetting!, '//evil.com/login').valid).toBe(false)
+    expect(validate(loginUrlSetting!, '/login with spaces').valid).toBe(false)
   })
 })

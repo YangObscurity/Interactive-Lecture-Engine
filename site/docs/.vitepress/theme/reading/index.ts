@@ -2,5 +2,6 @@ export { readingModeFeature, applyReadingMode, READING_MODE_CLASS } from './read
 export { readingProgressFeature, recentReads, groupResume, clearRead, type ReadEntry } from './readingProgress'
 export { citesFeature } from './cites'
 export { mathCopyFeature } from './mathCopy'
+export { codeHeaderFeature, codeCopyFeature } from './codeHeader'
 export { figureXrefsFeature } from './figureXrefs'
 export { conceptsFeature } from './concepts'

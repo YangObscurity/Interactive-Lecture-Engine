@@ -3,6 +3,7 @@ import { defineAsyncComponent, ref, computed, watch, nextTick, onMounted, onUnmo
 import { useT } from '../../../i18n/useT.ts'
 import { ICONS } from './icons'
 import { aiState } from './aiState'
+import { BYOK_CHANGED_EVENT, extractEndpointHost, readByokConfig } from './byokClient'
 import type { ChatMessage, ScopeType, SendPayload } from './types'
 import ChatInput from './ChatInput.vue'
 
@@ -83,23 +84,52 @@ const statusGlyph = computed<string>(() => {
   }
 })
 
-// 顶栏讲次徽章显示文本 (绑定真实状态而非假"就绪")
-const lectureBadgeText = computed(() => {
-  const scopeId = props.lectureId
-    ? props.lectureId.toUpperCase()
-    : props.groupId
-      ? props.groupId.toUpperCase()
-      : t('ai.globalName')
-  if (
-    props.statusState === 'unavailable' ||
-    props.statusState === 'unconfigured' ||
-    props.statusState === 'rate-limited' ||
-    props.statusState === 'byok-failed'
-  ) {
-    return t('ai.statusOffline', { id: scopeId })
-  }
-  return t('ai.statusReady', { id: scopeId })
+// S6Y F6 (audit-spec #16, spec board 14): the header names the companion, the lecture and where requests go
+// (服务端代理 / 自带模型：host); one state line under it says how that route is doing. The state is said once only.
+const byokHost = ref('')
+function refreshByokHost(): void {
+  byokHost.value = extractEndpointHost(readByokConfig().baseUrl) || '-'
+}
+
+const routeLabel = computed<string>(() => {
+  const st = props.statusState
+  if (st === 'byok-ok' || st === 'byok-failed' || st === 'byok-unverified') return t('ai.sourceByok', { host: byokHost.value })
+  if (st === 'mock') return t('ai.sourceMock')
+  return t('ai.routeProxy')
 })
+
+/** Backend states in which nothing can be asked of it: quick actions are disabled with this line as the reason. */
+const backendOff = computed(() => props.statusState === 'unavailable' || props.statusState === 'unconfigured')
+
+const stateText = computed<string>(() => {
+  switch (props.statusState) {
+    case 'ok':
+    case 'byok-ok':
+    case 'mock':
+      return t('ai.stateConnected')
+    case 'unavailable':
+      return t('ai.stateOffline')
+    case 'unconfigured':
+      return t('ai.stateUnconfigured')
+    case 'rate-limited':
+      return props.sourceLabel || t('ai.sourceChecking')
+    case 'byok-unverified':
+      return t('ai.stateByokUnverified')
+    case 'byok-failed':
+      return t('ai.stateByokFailed')
+    default:
+      return t('ai.sourceChecking')
+  }
+})
+
+const stateTone = computed(() => {
+  const st = props.statusState
+  if (st === 'ok' || st === 'byok-ok' || st === 'mock') return 'on'
+  if (st === 'checking' || st === 'byok-unverified') return 'wait'
+  return 'off'
+})
+
+const quickReason = computed(() => (backendOff.value ? t('ai.quickOffReason', { state: stateText.value }) : ''))
 
 // 空白态辅助问候语 (真实反映在线/BYOK/离线状态)
 const emptyGreetingText = computed(() => {
@@ -194,6 +224,8 @@ function getScopeBadge(scope?: ScopeType): string {
 
 onMounted(() => {
   scrollToBottom(false)
+  refreshByokHost()
+  if (typeof window !== 'undefined') window.addEventListener(BYOK_CHANGED_EVENT, refreshByokHost)
   const el = messageListRef.value
   if (el) {
     el.addEventListener('scroll', checkScrollPosition, { passive: true })
@@ -201,6 +233,7 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+  if (typeof window !== 'undefined') window.removeEventListener(BYOK_CHANGED_EVENT, refreshByokHost)
   const el = messageListRef.value
   if (el) {
     el.removeEventListener('scroll', checkScrollPosition)
@@ -214,17 +247,16 @@ onUnmounted(() => {
     <!-- 1. 顶部栏 (Header) -->
     <header class="chat-header">
       <div class="header-left">
-        <div class="lecture-badge">
-          <span class="badge-icon" v-html="ICONS.chipCore"></span>
-          <span class="badge-text">{{ lectureId ? lectureId.toUpperCase() : t('ai.title') }}</span>
-        </div>
+        <!-- S6Y F6 (spec board 14 .ai-head): 伴读 · lecture · where the requests go -->
+        <h4 class="chat-title">{{ t('ai.title') }}</h4>
+        <span v-if="lectureId || groupId" class="lecture-badge">{{ (lectureId || groupId).toUpperCase() }}</span>
         <span
           class="ai-src-badge"
           :data-ai-status="statusState || 'checking'"
           data-ai-source
         >
           <span class="ai-status-glyph" aria-hidden="true" v-html="statusGlyph"></span>
-          <span>{{ sourceLabel || t('ai.sourceChecking') }}</span>
+          <span data-ai-route>{{ routeLabel }}</span>
         </span>
       </div>
 
@@ -252,6 +284,8 @@ onUnmounted(() => {
         </button>
       </div>
     </header>
+    <!-- S6Y F6 (spec board 14 .state): the one line that says how the route is doing -->
+    <div class="chat-state" :class="`is-${stateTone}`" role="status" data-ai-state><i aria-hidden="true"></i>{{ stateText }}</div>
 
     <!-- 2. 消息展示区 (Message List, FE-020 aria-live) -->
     <div ref="messageListRef" class="chat-messages-area" aria-live="polite" aria-atomic="false">
@@ -259,10 +293,6 @@ onUnmounted(() => {
       <div v-if="!messages || messages.length === 0" class="clean-empty-state">
         <div class="core-vector-badge">
           <span class="badge-vector" v-html="ICONS.chipCore"></span>
-        </div>
-        <div class="empty-status-line">
-          <span class="ai-status-glyph" aria-hidden="true" v-html="statusGlyph"></span>
-          <span class="status-name">{{ lectureBadgeText }}</span>
         </div>
         <p class="empty-subtle-greeting">
           {{ emptyGreetingText }}
@@ -406,6 +436,7 @@ onUnmounted(() => {
     </div>
 
     <!-- 3. 输入控制区 (Input Bar) -->
+    <p v-if="quickReason" class="chat-quick-reason" data-ai-quick-reason>{{ quickReason }}</p>
     <ChatInput
       :lecture-id="lectureId"
       :group-id="groupId"
@@ -413,6 +444,7 @@ onUnmounted(() => {
       :is-streaming="isStreaming"
       :disabled="disabled"
       :can-upload="canUpload"
+      :quick-disabled-reason="quickReason"
       @send="emit('send', $event)"
       @stop="emit('stop')"
       @upload-pptx="emit('uploadPptx', $event)"
@@ -452,27 +484,60 @@ onUnmounted(() => {
   gap: 8px;
 }
 
-.lecture-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 3px 8px;
-  border-radius: var(--lec-radius-1);
-  background: var(--lec-bg);
-  border: 1px solid var(--lec-border);
-  font-size: 11.5px;
-  font-weight: 600;
+/* S6Y F6: spec board 14 .ai-head h4 (14px) and .ctx (mono 11.5px, muted) */
+.chat-title {
+  margin: 0;
+  font-family: var(--lec-font-heading);
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.4;
   color: var(--lec-text);
 }
 
-.badge-icon {
-  display: inline-flex;
-  color: var(--lec-accent);
+.lecture-badge {
+  font-family: var(--lec-font-mono);
+  font-size: 11.5px;
+  font-weight: 400;
+  color: var(--lec-text-muted);
 }
 
-.badge-icon :deep(svg) {
-  width: 13px;
-  height: 13px;
+/* spec board 14 .state: one line under the header, danger tint when the route is down */
+.chat-state {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  border-bottom: 1px solid var(--lec-border);
+  color: var(--lec-text-muted);
+  flex-shrink: 0;
+}
+.chat-state i {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex: none;
+  border: var(--lec-line-mid) solid currentColor;
+}
+.chat-state.is-on {
+  color: var(--lec-done-text);
+}
+.chat-state.is-on i {
+  background: var(--lec-done);
+  border-color: var(--lec-done);
+}
+.chat-state.is-off {
+  color: var(--lec-danger);
+  background: var(--lec-danger-tint);
+}
+
+.chat-quick-reason {
+  margin: 0;
+  padding: 6px 12px 0;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--lec-text-muted);
 }
 
 .ai-src-badge {

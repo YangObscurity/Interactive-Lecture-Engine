@@ -29,8 +29,8 @@ defineProps<CanvasNodeProps>()
 
 <style scoped>
 .n { cursor: pointer; }
-.n:focus-visible { outline: var(--lec-line-heavy) solid var(--lec-accent); outline-offset: 2px; }
-.n:focus-visible .p { stroke: var(--lec-accent); stroke-width: var(--lec-line-heavy); }
+.n:focus-visible { outline: var(--lec-line-heavy, 2px) solid var(--lec-accent); outline-offset: 2px; }
+.n:focus-visible .p { stroke: var(--lec-accent); stroke-width: var(--lec-line-heavy, 2px); }
 .n:focus-visible .pname { fill: var(--lec-accent); font-weight: 700; }
 .pin-hit { fill: transparent; stroke: none; }
 .p { fill: var(--lec-bg); stroke: var(--lec-border); stroke-width: 1.5; }
@@ -42,8 +42,9 @@ defineProps<CanvasNodeProps>()
 .n.read .pname, .n.reading .pname { fill: var(--lec-text); }
 .n.hover .p { stroke: var(--lec-accent); stroke-width: 2.5; }
 .n.hover .pname { fill: var(--lec-accent); text-decoration: underline; }
-.n.locked .p { fill: var(--lec-accent); stroke: var(--lec-accent); }
-.n.locked .pname { fill: var(--lec-accent); font-weight: 700; }
+.n.locked .p-half { display: none; }
+.n.locked .p { fill: var(--lec-accent); stroke: var(--lec-accent); stroke-width: 2.5; }
+.n.locked .pname { fill: var(--lec-accent); font-weight: 700; text-decoration: underline; }
 .n.match .p { stroke: var(--lec-accent); stroke-width: 3; }
 .n.match .pname { fill: var(--lec-accent); font-weight: 700; }
 :is(.cv-dim) .n:not(.on) { opacity: 0.28; }

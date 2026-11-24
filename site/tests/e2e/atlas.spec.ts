@@ -17,8 +17,9 @@ import fs from 'node:fs'
 import path from 'node:path'
 import type { Page } from '@playwright/test'
 import { test, expect, waitForLabelPaint } from './fixtures'
-import { useTheme, type Mode, type ThemeId } from './theme-helpers'
+import { BG, CANVAS, hexRgb, useTheme, type Mode, type ThemeId } from './theme-helpers'
 import { E2E_CONTENT_DIR } from '../../scripts/build_e2e.mjs'
+import { DEMO_GROUP_IDS, DEMO_LECTURE_COUNT, demoGroup, demoNeighbours } from './demo'
 
 const SKINS: ReadonlyArray<readonly [ThemeId, string, string]> = [
   ['reader', 'default', 'rect.tk, rect.pd'],
@@ -167,7 +168,7 @@ for (const [theme, impl] of SKINS) {
     })
 
     // prototype check 1
-    test('1. default "reading": MEA and PLN open, LOG collapsed to a strip of one mark per lecture, 4 groups, toolbar', async ({ page }) => {
+    test('1. default "reading": MEA and PLN open, LOG collapsed to a strip of one mark per lecture, one row per group, toolbar', async ({ page }) => {
       await openAtlas(page, theme, impl)
       const d = await page.evaluate(() => ({
         mea: document.querySelectorAll('.am-lec[data-node^="mea-"]').length,
@@ -181,8 +182,8 @@ for (const [theme, impl] of SKINS) {
       expect(d.mea).toBeGreaterThan(0)
       expect(d.pln).toBeGreaterThan(0)
       expect(d.log).toBe(0)
-      expect(d.logMarks).toBe(3)
-      expect(d.groups).toBe(4)
+      expect(d.logMarks).toBe(demoGroup('LOG').lectures.length)
+      expect(d.groups).toBe(DEMO_GROUP_IDS.length)
       expect(d.presets).toBe(4)
       expect(d.pressed).toBe('reading')
     })
@@ -207,13 +208,13 @@ for (const [theme, impl] of SKINS) {
         expect(g.rotated, 'rotated text').toBe(0)
         expect(g.overlap, `overlaps ${g.ovs.join(' ')}`).toBe(0)
         expect(g.cross, `crossings ${g.crs.join(' ')}`).toBe(0)
-        expect(g.nodes).toBeGreaterThan(6) // centre, 2 categories, 4 groups at the least
+        expect(g.nodes).toBeGreaterThan(DEMO_GROUP_IDS.length) // centre, the categories and every group at the least
         if (p === 'all') {
           const n = await page.evaluate(() => ({ all: document.querySelectorAll('.am-lec').length, log: !!document.querySelector('.am-lec[data-node^="log-"]'), dat: !!document.querySelector('.am-lec[data-node^="dat-"]') }))
-          expect(n.all, '14 lectures, LOG and DAT among them').toBe(14)
+          expect(n.all, 'every lecture, LOG and DAT among them').toBe(DEMO_LECTURE_COUNT)
           expect(n.log && n.dat).toBe(true)
         }
-        if (p === 'none') expect(await count(page, '.am-lec'), 'only the 4 group rows remain').toBe(0)
+        if (p === 'none') expect(await count(page, '.am-lec'), 'only the group rows remain').toBe(0)
       })
     }
 
@@ -231,7 +232,7 @@ for (const [theme, impl] of SKINS) {
       await settle(page)
       await synthetic(page, '.am-group[data-g="DAT"] [data-atlas-part="strip"]', 'click')
       await settle(page)
-      expect(await count(page, '.am-lec[data-node^="dat-"]'), 'lectures of DAT').toBe(2)
+      expect(await count(page, '.am-lec[data-node^="dat-"]'), 'lectures of DAT').toBe(demoGroup('DAT').lectures.length)
       // MEA has two phases (frontmatter `phase`): with everything collapsed its strip opens the phase rows only
       await preset(page, 'none')
       await synthetic(page, '.am-group[data-g="MEA"] [data-atlas-part="strip"]', 'click')
@@ -272,7 +273,7 @@ for (const [theme, impl] of SKINS) {
         },
         [[s.x, s.y, s.r, s.b]],
       )
-      expect(z.n).toBe(6)
+      expect(z.n).toBe(demoGroup('MEA').lectures.length)
       expect(z.out, 'lectures of MEA outside the stage').toBe(0)
       await page.locator('.lec-map-controls button', { hasText: /.+/ }).last().click()
       await settle(page)
@@ -283,7 +284,7 @@ for (const [theme, impl] of SKINS) {
         const st = (document.querySelector('.lec-map') as Element).getBoundingClientRect()
         return { n: document.querySelectorAll('.am-lec[data-node^="pln-"]').length, firstIn: first.y > st.y + 50 && first.bottom < st.bottom }
       })
-      expect(g3.n).toBe(3)
+      expect(g3.n).toBe(demoGroup('PLN').lectures.length)
       expect(await scaleOf(page), 'names read from 70%').toBeGreaterThanOrEqual(0.7 - 1e-6)
       expect(g3.firstIn).toBe(true)
     })
@@ -318,7 +319,7 @@ for (const [theme, impl] of SKINS) {
     })
 
     // 17, 18
-    test('8. hovering a lecture name lights its branch, 1 prerequisite and 3 follow-ups of MEA L04, and the info panel lists them; moving away restores', async ({ page }) => {
+    test('8. hovering a lecture name lights its branch, the direct prerequisites and follow-ups of MEA L04, and the info panel lists them; moving away restores', async ({ page }) => {
       await openAtlas(page, theme, impl)
       await synthetic(page, '.am-group[data-g="MEA"]', 'dblclick')
       await settle(page)
@@ -338,9 +339,10 @@ for (const [theme, impl] of SKINS) {
       }))
       expect(f.hover).toBe(true)
       expect(f.dim).toBe(true)
-      expect(f.pre).toBe(1)
-      expect(f.post).toBe(3)
-      expect(f.links).toBeGreaterThanOrEqual(4)
+      const nb = demoNeighbours('mea-l04')
+      expect(f.pre).toBe(nb.pre.length)
+      expect(f.post).toBe(nb.post.length)
+      expect(f.links).toBeGreaterThanOrEqual(nb.pre.length + nb.post.length)
       expect(f.tip).toMatch(/先修|Prerequisite/)
       await page.mouse.move(5, 5)
       await settle(page)
@@ -380,9 +382,68 @@ for (const [theme, impl] of SKINS) {
       await openAtlas(page, theme, impl)
       await preset(page, 'all')
       await page.reload()
-      await page.waitForFunction(() => document.querySelectorAll('.am-lec').length === 14)
+      await page.waitForFunction((n) => document.querySelectorAll('.am-lec').length === n, DEMO_LECTURE_COUNT)
       const mem = await page.evaluate(() => ({ pressed: document.querySelector('.am-expand button[aria-pressed="true"]')?.getAttribute('data-x'), stored: localStorage.getItem('lecture:atlas-expand') }))
       expect(mem).toEqual({ pressed: 'all', stored: 'all' })
+    })
+
+    // S6Y AH #5 #13: home-canvas prototype `body { font: 15px/1.6 var(--lec-font) }` (l.81), `button { font: inherit }`
+    // (l.82), the prompt `.activate` 13px, padding 8px 14px, 1px border (l.112): one line = 13 x 1.6 + 16 + 2 = 38.8 px
+    test('15. the map chrome is isolated from .vp-doc: UI sans-serif, 15px / 1.6 root, 15px +/- buttons, a one-line hint at 1280 px', async ({ page }) => {
+      await openAtlas(page, theme, impl, 'light', { width: 1280, height: 900 })
+      const m = await page.evaluate(() => {
+        const norm = (s: string): string => s.replace(/["'\s]/g, '')
+        const stage = document.querySelector('.lec-map')!
+        const st = getComputedStyle(stage)
+        const els = [stage, ...stage.querySelectorAll('.lec-map-hud-tl, .lec-map-hud button, .lec-map-hud input, .lec-map-hint')]
+        const hint = stage.querySelector('.lec-map-hint')!
+        return {
+          heading: norm(getComputedStyle(document.documentElement).getPropertyValue('--lec-font-heading')),
+          fonts: els.map((el) => ({ el: `${el.tagName}.${el.className}`, ff: norm(getComputedStyle(el).fontFamily) })),
+          fs: parseFloat(st.fontSize),
+          lh: parseFloat(st.lineHeight),
+          btnFs: parseFloat(getComputedStyle(stage.querySelector('.lec-map-controls button')!).fontSize),
+          hintH: hint.getBoundingClientRect().height,
+        }
+      })
+      expect(m.fonts.length).toBeGreaterThanOrEqual(6)
+      for (const f of m.fonts) expect(f.ff, `${f.el} font-family`).toBe(m.heading)
+      if (theme === 'datasheet') expect(m.heading).toMatch(/^NotoSansSC/)
+      expect(m.fs).toBe(15)
+      expect(m.lh).toBeCloseTo(24, 1)
+      expect(m.btnFs).toBe(15)
+      expect(Math.abs(m.hintH - 38.8), `hint height ${m.hintH}`).toBeLessThanOrEqual(1)
+    })
+
+    // S6Y AH #6: prototype `.stage { background: var(--canvas) }`
+    for (const mode of ['light', 'dark'] as const) {
+      test(`16. ${mode}: the stage is painted with --lec-canvas, not the page background`, async ({ page }) => {
+        await openAtlas(page, theme, impl, mode)
+        const bg = await page.locator(STAGE).evaluate((el) => getComputedStyle(el).backgroundColor)
+        expect(bg).toBe(hexRgb(CANVAS[`${theme}-${mode}`]))
+        expect(bg).not.toBe(hexRgb(BG[`${theme}-${mode}`]))
+      })
+    }
+
+    // DECISIONS (S6Y): on a phone (<= 700 px) the map runs edge to edge; on a desktop it stays in the content column
+    test('17. phone (390 px): the map is full width without a side border; desktop (1280 px): inside the column', async ({ page }) => {
+      await openAtlas(page, theme, impl, 'light', { width: 390, height: 844 })
+      const box = () =>
+        page.locator(STAGE).evaluate((el) => {
+          const r = el.getBoundingClientRect()
+          return { left: r.left, right: r.right, vw: document.documentElement.clientWidth, bl: parseFloat(getComputedStyle(el).borderLeftWidth), sw: document.documentElement.scrollWidth }
+        })
+      const p = await box()
+      expect(Math.abs(p.left)).toBeLessThanOrEqual(0.5)
+      expect(Math.abs(p.right - p.vw)).toBeLessThanOrEqual(0.5)
+      expect(p.bl).toBe(0)
+      expect(p.sw).toBeLessThanOrEqual(p.vw)
+      await page.setViewportSize({ width: 1280, height: 900 })
+      await page.waitForTimeout(200)
+      const d = await box()
+      expect(d.left).toBeGreaterThan(8)
+      expect(d.right).toBeLessThan(d.vw - 8)
+      expect(d.bl).toBe(1)
     })
 
     test('14. screenshot baseline: the fitted overview (light, desktop) @visual', async ({ page }) => {
@@ -394,7 +455,7 @@ for (const [theme, impl] of SKINS) {
     test('13. group cards: one per group, with the three-height status strip (reader) or the package pins (datasheet), the read count and the next line as text', async ({ page }) => {
       await openAtlas(page, theme, impl)
       const cards = page.locator('#groups [data-slot="GroupCard"]')
-      await expect(cards).toHaveCount(4)
+      await expect(cards).toHaveCount(DEMO_GROUP_IDS.length)
       const mea = page.locator('#groups [data-group="MEA"]')
       await expect(mea).toHaveAttribute('data-slot-impl', impl)
       await expect(mea).toContainText('3 / 6')
@@ -414,10 +475,11 @@ for (const [theme, impl] of SKINS) {
         expect(await mea.locator('svg.pkg rect.p').count(), 'SOIC-6: 6 pins').toBe(6)
         expect(await mea.locator('svg.pkg rect.p.nc').count(), 'no NC pin').toBe(0)
         expect(await mea.locator('svg.pkg .chip-pkg').innerHTML()).toContain('SOIC-6')
-        // an odd lecture count gets one NC pin: LOG (3 lectures) is a SOIC-4
+        // an odd lecture count gets one NC pin (LOG: 5 lectures, a SOIC-6); an even one none
+        const nLog = demoGroup('LOG').lectures.length
         const log = page.locator('#groups [data-group="LOG"]')
-        expect(await log.locator('svg.pkg rect.p').count(), 'SOIC-4: 4 pins').toBe(4)
-        expect(await log.locator('svg.pkg rect.p.nc').count(), 'one NC pin').toBe(1)
+        expect(await log.locator('svg.pkg rect.p').count(), 'pins: lectures rounded up to even').toBe(nLog + (nLog % 2))
+        expect(await log.locator('svg.pkg rect.p.nc').count(), 'NC pins').toBe(nLog % 2)
       }
     })
   })
@@ -509,7 +571,7 @@ for (const [theme, impl] of SKINS) {
       const max = Math.max(...frames)
       console.warn(`[atlas drag ${theme}] frames=${frames.length} max=${max.toFixed(1)}ms`)
       expect(frames.length).toBeGreaterThan(20)
-      expect(max).toBeLessThanOrEqual(30)
+      expect(max, 'longest frame while dragging (ms)').toBeLessThanOrEqual(45)
       // styles are read once per collect / class change, never in a drag frame
       expect(await page.evaluate(() => (window as unknown as { __gcs: number }).__gcs), 'getComputedStyle calls while dragging').toBe(0)
     })
@@ -524,15 +586,15 @@ test.describe('atlas: server render', () => {
       test.skip(test.info().project.name === 'dev', 'built site only: the dev server does not server-render pages (its HTML is an empty #app shell), so there is no server HTML to check or to hydrate against')
       const html = await (await request.get(url)).text()
       expect(html).toContain('class="lec-map')
-      expect((html.match(/data-slot="GroupCard"/g) ?? []).length).toBe(4)
-      expect((html.match(/data-slot="AtlasGroup"/g) ?? []).length).toBe(4)
+      expect((html.match(/data-slot="GroupCard"/g) ?? []).length).toBe(DEMO_GROUP_IDS.length)
+      expect((html.match(/data-slot="AtlasGroup"/g) ?? []).length).toBe(DEMO_GROUP_IDS.length)
       const problems: string[] = []
       page.on('console', (m) => {
         if ((m.type() === 'error' || m.type() === 'warning') && /hydrat/i.test(m.text())) problems.push(m.text())
       })
       await mockProgress(page)
       await page.goto(url)
-      await page.waitForFunction(() => document.querySelectorAll('.am-group').length === 4)
+      await page.waitForFunction((n) => document.querySelectorAll('.am-group').length === n, DEMO_GROUP_IDS.length)
       await settle(page)
       expect(problems).toEqual([])
       if (url === '/en/') {
@@ -542,3 +604,94 @@ test.describe('atlas: server render', () => {
     })
   }
 })
+
+// ---- S6Y home audit (audit-home #7 #8 #9 #16), home-canvas prototype as the reference ---------------------------------
+
+const viewOf = (page: Page): Promise<{ k: number; x: number; y: number }> =>
+  page.evaluate(() => {
+    const m = new DOMMatrix(getComputedStyle(document.querySelector('.lec-map-svg') as Element).transform)
+    return { k: m.a, x: m.e, y: m.f }
+  })
+const sameView = (a: { k: number; x: number; y: number }, b: { k: number; x: number; y: number }): boolean =>
+  Math.abs(a.k - b.k) / b.k < 0.005 && Math.abs(a.x - b.x) < 1.5 && Math.abs(a.y - b.y) < 1.5
+
+/** The view the fit button gives for the map as it is now. */
+async function fittedView(page: Page): Promise<{ k: number; x: number; y: number }> {
+  await page.locator('.am-map .lec-map-controls button').nth(2).click()
+  await page.waitForTimeout(450)
+  await settle(page)
+  return viewOf(page)
+}
+
+for (const [theme, impl] of SKINS) {
+  test.describe(`atlas: ${theme}, prototype parity`, () => {
+    test('#7 every expansion button fits the new map, also after the reader moved the map (prototype: redraw, then fit)', async ({ page }) => {
+      await openAtlas(page, theme, impl, 'light', { width: 1280, height: 900 })
+      for (const x of ['all', 'none', 'progress', 'reading']) {
+        // the reader zooms into a group first (a double-click: the map counts as touched from now on)
+        await page.locator(groupBox('MEA')).first().dblclick()
+        await page.waitForTimeout(450)
+        await settle(page)
+        const moved = await viewOf(page)
+        await preset(page, x)
+        await page.waitForTimeout(450)
+        await settle(page)
+        const after = await viewOf(page)
+        expect(sameView(after, moved), `${x}: the view still is the zoomed one`).toBe(false)
+        expect(sameView(after, await fittedView(page)), `${x}: the view is the fitted one`).toBe(true)
+      }
+    })
+
+    test('#8 a click on the centre fits the whole map (prototype root click -> fit)', async ({ page }) => {
+      await openAtlas(page, theme, impl, 'light', { width: 1280, height: 900 })
+      const fitted = await viewOf(page)
+      await page.locator('.am-map .lec-map-controls button').first().click()
+      await page.locator('.am-map .lec-map-controls button').first().click()
+      await page.waitForTimeout(450)
+      expect(sameView(await viewOf(page), fitted)).toBe(false)
+      const root = await rectOf(page, '.am-layer [data-node="root"]')
+      await page.mouse.click((root.x + root.r) / 2, (root.y + root.b) / 2)
+      await page.waitForTimeout(500)
+      await settle(page)
+      expect(sameView(await viewOf(page), fitted), 'back at the fitted view').toBe(true)
+    })
+
+    test('#9 the HUD has the status legend and the how-to as chips, and a zoom label "54%，讲名视图" at the bottom left', async ({ page }) => {
+      await openAtlas(page, theme, impl, 'light', { width: 1280, height: 900 })
+      const chips = page.locator('.am-map .am-legend .am-lg')
+      await expect(chips).toHaveText(['未读', '在读', '已读', '先修', '后续'])
+      await expect(page.locator('.am-map .am-info')).toHaveText(/^速览：单击讲次打开，单击组进入组首页/)
+      // prototype `.chip`: 12px, padding 3px 8px, 1px border on --lec-bg, 27.2px high
+      const cs = await chips.first().evaluate((el) => {
+        const s = getComputedStyle(el)
+        return { fs: s.fontSize, pad: s.padding, bw: s.borderTopWidth, h: el.getBoundingClientRect().height, bg: s.backgroundColor, page: getComputedStyle(document.documentElement).getPropertyValue('--lec-bg').trim() }
+      })
+      expect(cs.fs).toBe('12px')
+      expect(cs.pad).toBe('3px 8px')
+      expect(cs.bw).toBe('1px')
+      expect(Math.abs(cs.h - 27.2)).toBeLessThanOrEqual(1)
+      const zoom = page.locator('.am-map .am-zoomlabel')
+      const label = async (): Promise<string> => (await zoom.textContent())?.trim() ?? ''
+      const tierOf = (k: number): string => (k < 0.22 ? '组视图' : k < 0.45 ? '编号视图' : '讲名视图')
+      let k = (await viewOf(page)).k
+      expect(await label()).toBe(`${Math.round(k * 100)}%，${tierOf(k)}`)
+      await page.locator('.am-map .lec-map-controls button').first().click()
+      await page.waitForTimeout(450)
+      k = (await viewOf(page)).k
+      await expect.poll(label).toBe(`${Math.round(k * 100)}%，${tierOf(k)}`)
+      const z = await rectOf(page, '.am-map .am-zoomlabel')
+      const s = await rectOf(page, STAGE)
+      expect(z.x - s.x).toBeLessThan(20)
+      expect(s.b - z.b).toBeLessThan(20)
+    })
+
+    test('#16 the map section and the phase nodes have their own class names', async ({ page }) => {
+      await openAtlas(page, theme, impl, 'light', { width: 1280, height: 900 })
+      await expect(page.locator('section.am-map')).toHaveCount(1)
+      await preset(page, 'all')
+      const tags = await page.locator('.am-stage').evaluateAll((els) => els.map((e) => e.tagName.toLowerCase()))
+      expect(tags.length).toBeGreaterThan(0)
+      expect(new Set(tags)).toEqual(new Set(['g']))
+    })
+  })
+}

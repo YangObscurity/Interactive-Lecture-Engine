@@ -259,6 +259,17 @@
       }
     },
     {
+      "key": "auth.loginUrl",
+      "module": "auth",
+      "kind": "site",
+      "type": "url",
+      "default": "",
+      "description": {
+        "zh": "登录页面地址（同源路径如 /login?rd={rd} 或绝对 URL 如 https://auth.example.com/?rd={rd}），{rd} 为 URL 编码的回跳地址；留空则回退到当前页面",
+        "en": "Login portal address (same-origin path like /login?rd={rd} or absolute URL like https://auth.example.com/?rd={rd}); {rd} is replaced with the URL-encoded current page URL; empty falls back to the current page"
+      }
+    },
+    {
       "key": "NOTION_TOKEN",
       "module": "notion",
       "kind": "secret",

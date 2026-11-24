@@ -118,11 +118,22 @@ export function localizeFigureCaption(entry: FigureEntry, localeKey: string): st
   return entry.caption.zh || entry.caption.en
 }
 
+/**
+ * The source line under a figure: "出处：<论文>，原文 Fig. 3，第 2 页" / "Source: <paper>, original Fig. 3, p. 2".
+ * `source.number` is the paper's own figure number and is labelled as such, so it can't be mistaken for the engine's
+ * per-lecture number (图 5-2, figures/numbering.ts). No middle-dot joins (spec board 17; S6Y audit-spec #23).
+ */
 export function formatFigureSource(entry: FigureEntry, localeKey: string): string {
-  const bits: string[] = [entry.source.paper]
-  if (entry.source.number) bits.push(entry.source.number)
-  if (entry.source.page !== undefined && entry.source.page !== '') {
-    bits.push(localeKey === 'en' ? `p. ${entry.source.page}` : `第 ${entry.source.page} 页`)
+  const en = localeKey === 'en'
+  const hasPage = entry.source.page !== undefined && entry.source.page !== ''
+  if (en) {
+    let s = `Source: ${entry.source.paper}`
+    if (entry.source.number) s += `, original ${entry.source.number}`
+    if (hasPage) s += `, p. ${entry.source.page}`
+    return s
   }
-  return bits.join(' · ')
+  let s = `出处：${entry.source.paper}`
+  if (entry.source.number) s += `，原文 ${entry.source.number}`
+  if (hasPage) s += `，第 ${entry.source.page} 页`
+  return s
 }

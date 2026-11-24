@@ -34,6 +34,9 @@ export interface ReaderPrefs {
 /** Build-time facts the client needs (emitted by the theme plugin as `virtual:lecture-theme`). */
 export interface ThemeRuntime {
   defaultTheme: string
+  defaultTint?: string | null
+  defaultBase?: string | null
+  customTint?: string | null
   /** Enabled themes, default first. */
   themes: Array<{ id: string; label: string; tints: string[] }>
 }
@@ -66,7 +69,8 @@ export interface PrefAttrs {
 export function prefAttrs(prefs: ReaderPrefs, rt: ThemeRuntime): PrefAttrs {
   const theme = rt.themes.find((t) => t.id === prefs.theme) ?? rt.themes.find((t) => t.id === rt.defaultTheme)
   const id = theme?.id ?? rt.defaultTheme
-  const tint = prefs.tint && theme?.tints.includes(prefs.tint) ? prefs.tint : null
+  const defaultTint = rt.defaultTint && theme?.tints.includes(rt.defaultTint) ? rt.defaultTint : null
+  const tint = (prefs.tint && theme?.tints.includes(prefs.tint) ? prefs.tint : null) ?? (prefs.tint === undefined ? defaultTint : null)
   const size = prefs.fontSize && prefs.fontSize !== DEFAULT_PROSE_SIZE ? String(prefs.fontSize) : null
   return { 'data-lec-theme': id, 'data-lec-tint': tint, 'data-lec-size': size, 'data-lec-font': prefs.bodyFont ?? null }
 }
@@ -118,6 +122,30 @@ export function applyPrefs(root: HTMLElement, prefs: ReaderPrefs, rt: ThemeRunti
 }
 
 /**
+ * S6Y F6 (audit-spec #12): which body font a theme uses when the reader chose none. Every theme compiles
+ * `--lec-font-body` (its default) next to `--lec-font-body-serif` / `--lec-font-body-sans` (compile.ts), so the default
+ * is whichever of the two the body font equals; a theme whose default is neither counts as sans unless it ends in `serif`.
+ */
+export function defaultBodyFont(style: Pick<CSSStyleDeclaration, 'getPropertyValue'>): BodyFont {
+  const norm = (n: string) => style.getPropertyValue(n).trim().replace(/\s*,\s*/g, ',')
+  const body = norm('--lec-font-body')
+  if (body && body === norm('--lec-font-body-sans')) return 'sans'
+  if (body && body === norm('--lec-font-body-serif')) return 'serif'
+  return /(^|,)\s*serif$/.test(body) ? 'serif' : 'sans'
+}
+
+/**
+ * S6Y F6 (audit-spec #22): VitePress renders its appearance switch on the server with `aria-checked="false"`; after a reload
+ * in dark mode hydration keeps that stale attribute (Vue does not patch attribute mismatches in production), so the switch
+ * reads "off" to a screen reader while the page is dark. Write the real state onto the switches after hydration and on
+ * every change of `isDark`.
+ */
+export function syncAppearanceSwitch(dark: boolean, doc: Document | undefined = typeof document === 'undefined' ? undefined : document): void {
+  if (!doc) return
+  for (const el of doc.querySelectorAll('.VPSwitchAppearance')) el.setAttribute('aria-checked', dark ? 'true' : 'false')
+}
+
+/**
  * Inline <head> script source. All allowed values are baked in as literals, so the script never
  * writes anything that did not pass the same whitelist as `prefAttrs`, `customTint`, `themeLayer`,
  * and `groupDesc`. Applies all before first paint to prevent FOUC / hydration mismatch.
@@ -133,15 +161,18 @@ export function headScript(rt: ThemeRuntime): string {
     `try{s=window.localStorage}catch(e){s=null}` +
     `try{if(s)p=JSON.parse(s.getItem(${JSON.stringify(PREFS_STORAGE_KEY)})||'{}')||{}}catch(e){}` +
     `var t=Object.prototype.hasOwnProperty.call(T,p.theme)?p.theme:D;d.setAttribute('data-lec-theme',t);` +
-    `var tn=T[t].indexOf(p.tint)>=0?p.tint:null;` +
+    `var defT=${JSON.stringify(rt.defaultTint ?? null)};` +
+    `var dtn=(defT&&T[t].indexOf(defT)>=0)?defT:null;` +
+    `var tn=p.tint!==undefined?(T[t].indexOf(p.tint)>=0?p.tint:null):dtn;` +
     `try{if(tn)d.setAttribute('data-lec-tint',tn);` +
+    `if(${JSON.stringify(rt.defaultBase === 'dark')}&&(!s||!s.getItem('vitepress-theme-appearance')))d.classList.add('dark');` +
     `if(S.indexOf(p.fontSize)>=0)d.setAttribute('data-lec-size',String(p.fontSize));` +
     `if(p.bodyFont==='serif'||p.bodyFont==='sans')d.setAttribute('data-lec-font',p.bodyFont)}catch(e){}` +
     `try{if(s&&s.getItem(${JSON.stringify(STORAGE_KEYS.groupDesc)})==='0')d.setAttribute('data-lec-desc','closed');` +
     `else if(s)d.setAttribute('data-lec-desc','open')}catch(e){}` +
     `try{if(s){var lr=s.getItem(${JSON.stringify(STORAGE_KEYS.readerThemeLayer)});if(lr){var lo=JSON.parse(lr);` +
     `if(lo&&typeof lo==='object'&&lo.modes&&typeof lo.modes==='object'){` +
-    `var ap=s.getItem('vitepress-theme-appearance'),dk=d.classList.contains('dark')||ap==='dark'||((!ap||ap==='auto')&&window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches);` +
+    `var ap=s.getItem('vitepress-theme-appearance'),dk=d.classList.contains('dark')||ap==='dark'||((!ap||ap==='auto')&&((${JSON.stringify(rt.defaultBase === 'dark')})||(window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches)));` +
     `var mk=dk?'dark':(tn&&lo.modes[tn]?tn:'light'),mv=lo.modes[mk]||lo.modes.light;` +
     `if(mv&&typeof mv==='object'){for(var i=0;i<O.length;i++){var k=O[i],v=mv[k];if(typeof v==='string'&&/^#[0-9a-fA-F]{3,8}$/.test(v))d.style.setProperty('--lec-'+k,v)}}}}}}catch(e){}` +
     `try{if(s&&t==='reader'){var cr=s.getItem(${JSON.stringify(STORAGE_KEYS.readerCustomTint)});if(cr){var co=JSON.parse(cr);` +

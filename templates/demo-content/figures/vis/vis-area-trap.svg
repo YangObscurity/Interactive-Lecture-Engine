@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="560" height="260" viewBox="0 0 560 260">
+  <rect x="0" y="0" width="560" height="260" fill="#F8FAFC"/>
+  <text x="140" y="28" font-size="16" text-anchor="middle" fill="#334155">用高度表示 2 倍</text>
+  <text x="420" y="28" font-size="16" text-anchor="middle" fill="#334155">把边长放大 2 倍</text>
+  <line x1="280" y1="44" x2="280" y2="236" stroke="#CBD5E1" stroke-width="2" stroke-dasharray="6 6"/>
+  <line x1="40" y1="220" x2="240" y2="220" stroke="#334155" stroke-width="2"/>
+  <rect x="70" y="160" width="50" height="60" fill="#94A3B8"/>
+  <rect x="160" y="100" width="50" height="120" fill="#DB2777"/>
+  <text x="95" y="242" font-size="14" text-anchor="middle" fill="#334155">去年 1</text>
+  <text x="185" y="242" font-size="14" text-anchor="middle" fill="#334155">今年 2</text>
+  <text x="185" y="92" font-size="14" text-anchor="middle" fill="#9D174D">看起来 2 倍</text>
+  <line x1="300" y1="220" x2="540" y2="220" stroke="#334155" stroke-width="2"/>
+  <rect x="320" y="160" width="60" height="60" fill="#94A3B8"/>
+  <rect x="400" y="100" width="120" height="120" fill="#DB2777"/>
+  <text x="350" y="242" font-size="14" text-anchor="middle" fill="#334155">去年 1</text>
+  <text x="460" y="242" font-size="14" text-anchor="middle" fill="#334155">今年 2</text>
+  <text x="460" y="92" font-size="14" text-anchor="middle" fill="#9D174D">看起来 4 倍</text>
+</svg>

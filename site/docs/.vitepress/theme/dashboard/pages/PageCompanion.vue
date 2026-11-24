@@ -6,7 +6,7 @@
  * read-only in every mode). Restoring a default or an earlier version shows the diff first and is written as a new version
  * (a commit when the content folder is its own git repository). Online everything is read-only.
  */
-import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useT } from '../../../i18n/useT.ts'
 import type { MessageKey } from '../../../i18n/index.ts'
 import {
@@ -33,6 +33,7 @@ import DbUnavailable from '../DbUnavailable.vue'
 import PlaceholderEditor from '../PlaceholderEditor.vue'
 import CompanionTools from './CompanionTools.vue'
 import { PLACEHOLDER_SETS, fillTemplate, moveItem, usedTokens } from '../placeholders'
+import { READER_LIMIT_DEFAULTS, shortDateTime } from '../dashboardData'
 import { ask, dashboardState, isReadOnly, registerModel, say, tabOf, touchModels, type DashboardPageId } from '../useDashboard'
 
 const emit = defineEmits<{ tab: [tab: string]; go: [page: DashboardPageId, tab?: string] }>()
@@ -162,6 +163,9 @@ function addAction(): void {
   draft.value.actions.push({ id, label: { zh: '', en: '' }, template: { zh: '{lecture}', en: '{lecture}' }, needsSelection: false, surfaces: ['panel'], enabled: false })
   openActions.add(id)
   touch()
+  // the prototype puts the focus into the new action's name (audit #30)
+  const at = draft.value.actions.length - 1
+  void nextTick(() => document.querySelector<HTMLElement>(`[data-qa-label="${at}.zh"]`)?.focus())
 }
 function duplicate(i: number): void {
   if (draft.value.actions.length >= PROMPT_LIMITS.maxActions) return
@@ -547,7 +551,7 @@ const meta = computed<Array<[string, string]>>(() => [
             <tbody>
               <template v-for="(c, i) in history.commits" :key="c.hash">
                 <tr :class="{ cur: i === 0 }" :data-companion-commit="c.short">
-                  <td :data-l="t('dsh.common.time')" class="db-mono">{{ new Date(c.date).toLocaleString() }}</td>
+                  <td :data-l="t('dsh.common.time')" class="db-mono">{{ shortDateTime(c.date) }}</td>
                   <td :data-l="t('dsh.cp.commit')"><code>{{ c.short }}</code> <span v-if="i === 0" class="db-tag">{{ t('dsh.cp.current') }}</span></td>
                   <td :data-l="t('dsh.cp.author')">{{ c.author }}</td>
                   <td :data-l="t('dsh.cp.message')">{{ c.subject }}</td>
@@ -587,6 +591,16 @@ const meta = computed<Array<[string, string]>>(() => [
           </div>
           <div class="db-pbody db-sep db-muted">{{ t('dsh.cp.limitsReadOnly') }}</div>
         </template>
+        <div v-if="isReadOnly || !(runtime?.limits.limits.length)" class="db-pbody db-sep" data-companion-limits-source>
+          <p>{{ t('dsh.cp.limitsSourceLead') }}</p>
+          <dl class="db-kv">
+            <template v-for="l in READER_LIMIT_DEFAULTS" :key="l.key">
+              <dt>{{ limitLabel(l.key) }}</dt>
+              <dd><code>{{ l.key }}</code> · {{ t('dsh.cp.limitsSourceLine', { def: l.def, min: l.min, max: l.max }) }}</dd>
+            </template>
+          </dl>
+          <p class="db-muted">{{ t('dsh.cp.limitsHowTo') }}</p>
+        </div>
       </section>
     </template>
 

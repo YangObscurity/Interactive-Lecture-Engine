@@ -1,15 +1,16 @@
 <script setup lang="ts">
 /**
- * CompanionTools.vue — 伴读 › 工具 (prototype v3.4, K4): how tools are called (self-hosted loop or Dify), the engine
- * tool switches and the external MCP servers of content/ai-tools.json (on/off switches only, saved on the local dev
- * server with the dev token), and the recent tool calls. Call statistics, trial runs, tool discovery and the call log
- * need lecture-api endpoints that do not exist yet: they are shown as unavailable, never with sample numbers.
+ * CompanionTools.vue — 伴读 › 工具 (prototype v3.4, K4, S6Z-4): how tools are called (self-hosted loop or Dify), the engine
+ * tool switches and the external MCP servers of content/ai-tools.json (on/off switches, adding/removing servers in local
+ * author mode with strict validation and secret protection). Call statistics, trial runs, tool discovery and the call log
+ * need lecture-api runtime endpoints that do not exist yet: they are shown as unavailable, never with fake metrics.
  */
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useT } from '../../../i18n/useT.ts'
 import type { MessageKey } from '../../../i18n/index.ts'
 import { fetchTools, saveToolSwitches, type ToolsPayload } from '../../api/devDashboard'
 import DbUnavailable from '../DbUnavailable.vue'
+import { shortDateTime } from '../dashboardData'
 import { dashboardState, isReadOnly, registerModel, say, touchModels, type DashboardPageId } from '../useDashboard'
 
 const emit = defineEmits<{ go: [page: DashboardPageId, tab?: string] }>()
@@ -23,22 +24,46 @@ const ENGINE: ReadonlyArray<[string, MessageKey, MessageKey]> = [
   ['get_lecture_summary', 'dsh.tl.t.getLectureSummary', 'dsh.tl.d.getLectureSummary'],
 ]
 
-type Switches = { engine: Record<string, boolean>; servers: Record<string, { enabled: boolean; tools: Record<string, boolean> }> }
+interface ServerDraftItem {
+  id: string
+  name: string
+  url: string
+  enabled: boolean
+  headers: Array<{ name: string; env: string; set: boolean }>
+  tools: Record<string, boolean>
+  timeoutMs?: number | null
+}
 
 const view = ref<ToolsPayload | null>(null)
-const draft = ref<Switches>({ engine: {}, servers: {} })
+const draft = ref<{ engine: Record<string, boolean> }>({ engine: {} })
+const serversDraft = ref<ServerDraftItem[]>([])
 const open = ref<Set<string>>(new Set())
 const saving = ref(false)
 const status = ref('')
+const savedNote = ref('')
 
-function switchesOf(v: ToolsPayload): Switches {
-  return {
-    engine: { ...v.engine },
-    servers: Object.fromEntries(v.servers.map((s) => [s.id, { enabled: s.enabled, tools: { ...s.tools } }])),
-  }
-}
-const saved = computed<Switches | null>(() => (view.value ? switchesOf(view.value) : null))
-const dirty = computed(() => !!saved.value && JSON.stringify(saved.value) !== JSON.stringify(draft.value))
+// Add server drawer / form state
+const showAddServer = ref(false)
+const newServerId = ref('')
+const newServerName = ref('')
+const newServerUrl = ref('')
+const newServerHdr = ref('Authorization')
+const newServerEnv = ref('')
+const addServerError = ref('')
+
+// Delete server confirmation state
+const confirmDeleteId = ref<string | null>(null)
+
+const savedEngine = computed(() => view.value?.engine ?? {})
+const savedServers = computed(() => view.value?.servers ?? [])
+
+const dirty = computed(() => {
+  if (!view.value) return false
+  const engineChanged = JSON.stringify(savedEngine.value) !== JSON.stringify(draft.value.engine)
+  const serversChanged = JSON.stringify(savedServers.value) !== JSON.stringify(serversDraft.value)
+  return engineChanged || serversChanged
+})
+
 const engineOn = computed(() => ENGINE.filter(([id]) => draft.value.engine[id]).length)
 const provider = computed(() => view.value?.settings.provider ?? 'off')
 
@@ -47,24 +72,28 @@ function flipEngine(id: string): void {
   draft.value.engine[id] = !draft.value.engine[id]
   touchModels()
 }
+
 function flipServer(id: string): void {
-  const s = draft.value.servers[id]
+  const s = serversDraft.value.find((x) => x.id === id)
   if (!s || isReadOnly.value) return
   s.enabled = !s.enabled
   touchModels()
 }
+
 function flipServerTool(id: string, k: string): void {
-  const s = draft.value.servers[id]
+  const s = serversDraft.value.find((x) => x.id === id)
   if (!s || isReadOnly.value) return
   s.tools[k] = !s.tools[k]
   touchModels()
 }
+
 function toggleOpen(id: string): void {
   const next = new Set(open.value)
   if (next.has(id)) next.delete(id)
   else next.add(id)
   open.value = next
 }
+
 const hostOf = (u: string) => {
   try {
     return new URL(u).host
@@ -73,25 +102,132 @@ const hostOf = (u: string) => {
   }
 }
 
+function resetAddForm(): void {
+  newServerId.value = ''
+  newServerName.value = ''
+  newServerUrl.value = ''
+  newServerHdr.value = 'Authorization'
+  newServerEnv.value = ''
+  addServerError.value = ''
+  showAddServer.value = false
+}
+
+function submitAddServer(): void {
+  addServerError.value = ''
+  const name = newServerName.value.trim()
+  const url = newServerUrl.value.trim()
+  const hdr = newServerHdr.value.trim() || 'Authorization'
+  const env = newServerEnv.value.trim()
+
+  // Reject actual secret tokens before format regexes so clear secret guidance wins
+  const suspectPatterns = [/sk-[a-zA-Z0-9_-]{10,}/, /bearer\s+/i, /ghp_[a-zA-Z0-9]{20,}/, /eyJ[a-zA-Z0-9_-]{15,}/]
+  for (const val of [name, url, hdr, env]) {
+    for (const pat of suspectPatterns) {
+      if (pat.test(val)) {
+        addServerError.value = t('dsh.tl.errSecretRejected')
+        return
+      }
+    }
+  }
+
+  if (!name) {
+    addServerError.value = t('dsh.tl.errNameRequired')
+    return
+  }
+  let parsedUrl: URL | null = null
+  try {
+    parsedUrl = new URL(url)
+  } catch {
+    parsedUrl = null
+  }
+  if (!parsedUrl || parsedUrl.protocol !== 'https:' || !parsedUrl.hostname || /\s/.test(url)) {
+    addServerError.value = t('dsh.tl.errUrlInvalid')
+    return
+  }
+  if (!/^[A-Za-z][A-Za-z0-9-]*$/.test(hdr)) {
+    addServerError.value = t('dsh.tl.errHdrInvalid')
+    return
+  }
+  if (!/^[A-Z][A-Z0-9_]*$/.test(env)) {
+    addServerError.value = t('dsh.tl.errEnvInvalid')
+    return
+  }
+
+  let id = newServerId.value.trim().toLowerCase()
+  if (id) {
+    if (!/^[a-z0-9-]+$/.test(id)) {
+      addServerError.value = t('dsh.tl.errIdInvalid')
+      return
+    }
+  } else {
+    id = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || ('srv-' + Date.now().toString(36).slice(-4))
+  }
+
+  if (serversDraft.value.some((s) => s.id === id)) {
+    addServerError.value = t('dsh.tl.errIdExists')
+    return
+  }
+
+  serversDraft.value.push({
+    id,
+    name,
+    url,
+    enabled: false,
+    headers: [{ name: hdr, env, set: false }],
+    tools: {},
+    timeoutMs: 8000,
+  })
+  open.value.add(id)
+  resetAddForm()
+  touchModels()
+  say(t('dsh.tl.srvAddedDraft', { name, env }))
+}
+
+function promptDeleteServer(s: { id: string }): void {
+  confirmDeleteId.value = s.id
+}
+
+function confirmDeleteServer(id: string): void {
+  const s = serversDraft.value.find((x) => x.id === id)
+  const name = s?.name ?? id
+  serversDraft.value = serversDraft.value.filter((x) => x.id !== id)
+  open.value.delete(id)
+  confirmDeleteId.value = null
+  touchModels()
+  say(t('dsh.tl.srvDeletedDraft', { name }))
+}
+
 async function save(): Promise<boolean> {
   if (!dirty.value || isReadOnly.value) return true
   saving.value = true
   status.value = ''
-  const r = await saveToolSwitches(dashboardState.token, draft.value)
+  const r = await saveToolSwitches(dashboardState.token, {
+    engine: draft.value.engine,
+    servers: serversDraft.value,
+  })
   saving.value = false
   if ('error' in r) {
     status.value = t('dsh.tl.saveFailed', { e: r.error })
     return false
   }
   view.value = r.tools
-  draft.value = switchesOf(r.tools)
+  draft.value.engine = { ...r.tools.engine }
+  serversDraft.value = JSON.parse(JSON.stringify(r.tools.servers))
+  savedNote.value = t('dsh.common.savedAt', { time: shortDateTime(Date.now()) })
   touchModels()
   say(t('dsh.tl.saved'))
   return true
 }
+
 function discard(): void {
-  if (saved.value) draft.value = JSON.parse(JSON.stringify(saved.value)) as Switches
+  if (view.value) {
+    draft.value.engine = { ...view.value.engine }
+    serversDraft.value = JSON.parse(JSON.stringify(view.value.servers))
+  }
+  confirmDeleteId.value = null
+  resetAddForm()
   status.value = ''
+  savedNote.value = ''
   touchModels()
 }
 
@@ -102,7 +238,8 @@ onMounted(async () => {
   const v = await fetchTools()
   if (v) {
     view.value = v
-    draft.value = switchesOf(v)
+    draft.value.engine = { ...v.engine }
+    serversDraft.value = JSON.parse(JSON.stringify(v.servers))
     if (v.servers[0]) open.value = new Set([v.servers[0].id])
     touchModels()
   }
@@ -117,6 +254,7 @@ onBeforeUnmount(() => unregister?.())
     <template v-else-if="view">
       <p v-if="view.source !== 'content'" class="db-banner" data-tools-example>{{ t('dsh.tl.fromExample') }}</p>
 
+      <!-- How tools are called -->
       <section class="db-panel" data-tools-how>
         <header>
           <h3>{{ t('dsh.tl.howTitle') }}</h3>
@@ -144,13 +282,14 @@ onBeforeUnmount(() => unregister?.())
         <div class="db-pbody db-sep"><button type="button" class="db-btn sm" @click="emit('go', 'look', 'modules')">{{ t('dsh.tl.toLimits') }}</button></div>
       </section>
 
+      <!-- Engine tools switches -->
       <section class="db-panel" data-tools-engine>
         <header><h3>{{ t('dsh.tl.engineTitle') }}</h3><span class="db-hm">{{ t('dsh.tl.engineHint', { on: engineOn, n: ENGINE.length }) }}</span></header>
         <div class="db-tw">
           <table class="db-t">
             <thead><tr><th>{{ t('dsh.tl.colTool') }}</th><th>{{ t('dsh.tl.colWhat') }}</th><th>{{ t('dsh.tl.colSwitch') }}</th><th class="n">{{ t('dsh.tl.colUses') }}</th></tr></thead>
             <tbody>
-              <tr v-for="[id, title, desc] in ENGINE" :key="id" :class="{ dirty: saved && saved.engine[id] !== draft.engine[id] }" :data-tool="id">
+              <tr v-for="[id, title, desc] in ENGINE" :key="id" :class="{ dirty: savedEngine[id] !== draft.engine[id] }" :data-tool="id">
                 <td :data-l="t('dsh.tl.colTool')"><b>{{ t(title) }}</b> <code class="db-tok">{{ id }}</code></td>
                 <td :data-l="t('dsh.tl.colWhat')">{{ t(desc) }}</td>
                 <td :data-l="t('dsh.tl.colSwitch')">
@@ -164,6 +303,7 @@ onBeforeUnmount(() => unregister?.())
         <div class="db-pbody db-sep"><DbUnavailable id="tools-stats" :what="t('dsh.tl.statsWhat')" :why="t('dsh.tl.statsWhy')" /></div>
       </section>
 
+      <!-- Dify mode panel -->
       <section v-if="provider === 'dify'" class="db-panel" data-tools-dify>
         <header><h3>{{ t('dsh.tl.difyMcpTitle') }}</h3></header>
         <div class="db-pbody"><p>{{ t('dsh.tl.difyMcpText') }}</p></div>
@@ -177,16 +317,17 @@ onBeforeUnmount(() => unregister?.())
         </div>
       </section>
 
+      <!-- External MCP servers (S6Z-4) -->
       <section v-else class="db-panel" data-tools-servers>
-        <header><h3>{{ t('dsh.tl.serversTitle') }}</h3><span class="db-hm">{{ t('dsh.tl.serversHint', { n: view.servers.length }) }}</span></header>
-        <div v-if="!view.servers.length" class="db-empty"><b>{{ t('dsh.tl.serversNone') }}</b><span>{{ t('dsh.tl.serversNoneHint') }}</span></div>
-        <div v-for="s in view.servers" :key="s.id" class="db-srv" :data-tools-server="s.id">
+        <header><h3>{{ t('dsh.tl.serversTitle') }}</h3><span class="db-hm">{{ t('dsh.tl.serversHint', { n: serversDraft.length }) }}</span></header>
+        <div v-if="!serversDraft.length" class="db-empty"><b>{{ t('dsh.tl.serversNone') }}</b><span>{{ t('dsh.tl.serversNoneHint') }}</span></div>
+        <div v-for="s in serversDraft" :key="s.id" class="db-srv" :data-tools-server="s.id">
           <div class="db-srv-h">
-            <button type="button" class="db-btn sm db-srv-x" :aria-expanded="open.has(s.id)" @click="toggleOpen(s.id)">{{ s.name }}</button>
+            <button type="button" class="db-btn sm db-srv-x" :aria-expanded="open.has(s.id)" :data-server-expand="s.id" @click="toggleOpen(s.id)">{{ s.name }}</button>
             <span class="db-mono db-muted db-grow">{{ hostOf(s.url) }}</span>
-            <span class="db-stat"><span class="dm" :data-k="draft.servers[s.id]?.enabled ? 'half' : 'off'" aria-hidden="true"></span>{{ draft.servers[s.id]?.enabled ? t('dsh.tl.srvState') : t('dsh.tl.srvOff') }}</span>
-            <span class="db-muted">{{ t('dsh.tl.srvTools', { on: Object.values(draft.servers[s.id]?.tools ?? {}).filter(Boolean).length, n: Object.keys(s.tools).length }) }}</span>
-            <button type="button" class="db-sw" role="switch" :aria-checked="!!draft.servers[s.id]?.enabled" :aria-label="t('dsh.tl.srvSwitch', { name: s.name })" :data-server-switch="s.id" @click="flipServer(s.id)"><i></i>{{ draft.servers[s.id]?.enabled ? t('dsh.tl.srvOn') : t('dsh.tl.srvOff') }}</button>
+            <span class="db-stat"><span class="dm" :data-k="s.enabled ? 'half' : 'off'" aria-hidden="true"></span>{{ s.enabled ? t('dsh.tl.srvState') : t('dsh.tl.srvOff') }}</span>
+            <span class="db-muted">{{ t('dsh.tl.srvTools', { on: Object.values(s.tools ?? {}).filter(Boolean).length, n: Object.keys(s.tools ?? {}).length }) }}</span>
+            <button type="button" class="db-sw" role="switch" :aria-checked="!!s.enabled" :aria-label="t('dsh.tl.srvSwitch', { name: s.name })" :data-server-switch="s.id" @click="flipServer(s.id)"><i></i>{{ s.enabled ? t('dsh.tl.srvOn') : t('dsh.tl.srvOff') }}</button>
           </div>
           <div v-if="open.has(s.id)" class="db-srv-b">
             <dl class="db-kv">
@@ -194,7 +335,7 @@ onBeforeUnmount(() => unregister?.())
               <dd class="db-mono">{{ s.url }}</dd>
               <dt>{{ t('dsh.tl.header') }}</dt>
               <dd>
-                <template v-if="s.headers.length">
+                <template v-if="s.headers && s.headers.length">
                   <div v-for="h in s.headers" :key="h.name">
                     {{ t('dsh.tl.headerFrom', { h: h.name, env: h.env }) }}
                     <span class="db-stat"><span class="dm" :data-k="h.set ? 'ok' : 'warn'" aria-hidden="true"></span>{{ h.set ? t('dsh.tl.envSet') : t('dsh.tl.envUnset') }}</span>
@@ -203,28 +344,79 @@ onBeforeUnmount(() => unregister?.())
                 <span v-else class="db-muted">{{ t('dsh.tl.noHeader') }}</span>
               </dd>
             </dl>
-            <table v-if="Object.keys(s.tools).length" class="db-t">
+            <table v-if="Object.keys(s.tools ?? {}).length" class="db-t">
               <thead><tr><th>{{ t('dsh.tl.colTool') }}</th><th>{{ t('dsh.tl.colSwitch') }}</th></tr></thead>
               <tbody>
                 <tr v-for="k in Object.keys(s.tools)" :key="k">
                   <td :data-l="t('dsh.tl.colTool')"><code class="db-tok">{{ k }}</code></td>
-                  <td :data-l="t('dsh.tl.colSwitch')"><button type="button" class="db-sw" role="switch" :aria-checked="!!draft.servers[s.id]?.tools[k]" :aria-label="t('dsh.tl.switchLabel', { name: k })" :data-server-tool="`${s.id}/${k}`" @click="flipServerTool(s.id, k)"><i></i>{{ draft.servers[s.id]?.tools[k] ? t('dsh.tl.on') : t('dsh.tl.off') }}</button></td>
+                  <td :data-l="t('dsh.tl.colSwitch')"><button type="button" class="db-sw" role="switch" :aria-checked="!!s.tools[k]" :aria-label="t('dsh.tl.switchLabel', { name: k })" :data-server-tool="`${s.id}/${k}`" @click="flipServerTool(s.id, k)"><i></i>{{ s.tools[k] ? t('dsh.tl.on') : t('dsh.tl.off') }}</button></td>
                 </tr>
               </tbody>
             </table>
             <p v-else class="db-muted">{{ t('dsh.tl.srvNoTools') }}</p>
+
+            <div class="db-btns" style="margin-top: 8px">
+              <button type="button" class="db-btn sm" :data-server-discover="s.id" @click="say(t('dsh.tl.manageWhy'))">{{ t('dsh.tl.srvDiscover') }}</button>
+              <button type="button" class="db-btn sm db-btn-danger" :data-server-delete="s.id" @click="promptDeleteServer(s)">{{ t('dsh.tl.srvDelete') }}</button>
+            </div>
+
+            <!-- Delete confirmation box -->
+            <div v-if="confirmDeleteId === s.id" class="db-srv-confirm" :data-server-delete-confirm="s.id">
+              <p><b>{{ t('dsh.tl.srvDeleteConfirm', { name: s.name }) }}</b></p>
+              <p class="db-muted db-small">{{ t('dsh.tl.srvDeleteConfirmBody') }}</p>
+              <div class="db-btns" style="margin-top: 8px">
+                <button type="button" class="db-btn sm db-btn-danger" :data-server-delete-yes="s.id" @click="confirmDeleteServer(s.id)">{{ t('dsh.tl.srvDeleteYes') }}</button>
+                <button type="button" class="db-btn sm" :data-server-delete-no="s.id" @click="confirmDeleteId = null">{{ t('dsh.tl.srvDeleteNo') }}</button>
+              </div>
+            </div>
           </div>
         </div>
+
+        <!-- Add External MCP Server drawer / form -->
+        <div v-if="!isReadOnly" class="db-pbody db-sep">
+          <button v-if="!showAddServer" type="button" class="db-btn sm" data-add-server-btn @click="showAddServer = true">{{ t('dsh.tl.addServer') }}</button>
+          <div v-else class="db-addsrv" data-add-server-form>
+            <h4 style="margin: 0 0 12px">{{ t('dsh.tl.addServerTitle') }}</h4>
+            <div class="db-frow one">
+              <label for="as-name" class="db-fl">{{ t('dsh.tl.srvName') }}</label>
+              <div class="db-fld"><input id="as-name" v-model="newServerName" class="db-in" :placeholder="t('dsh.tl.srvNamePh')" data-add-server-name /></div>
+            </div>
+            <div class="db-frow one">
+              <label for="as-id" class="db-fl">{{ t('dsh.tl.srvId') }}<small>{{ t('dsh.tl.srvIdHint') }}</small></label>
+              <div class="db-fld"><input id="as-id" v-model="newServerId" class="db-in db-mono" :placeholder="t('dsh.tl.srvIdPh')" data-add-server-id /></div>
+            </div>
+            <div class="db-frow one">
+              <label for="as-url" class="db-fl">{{ t('dsh.tl.srvUrl') }}<small>{{ t('dsh.tl.srvUrlHint') }}</small></label>
+              <div class="db-fld"><input id="as-url" v-model="newServerUrl" class="db-in db-mono" :placeholder="t('dsh.tl.srvUrlPh')" spellcheck="false" data-add-server-url /></div>
+            </div>
+            <div class="db-frow one">
+              <label for="as-hdr" class="db-fl">{{ t('dsh.tl.srvHdr') }}<small>{{ t('dsh.tl.srvHdrHint') }}</small></label>
+              <div class="db-fld"><input id="as-hdr" v-model="newServerHdr" class="db-in db-mono" spellcheck="false" data-add-server-hdr /></div>
+            </div>
+            <div class="db-frow one">
+              <label for="as-env" class="db-fl">{{ t('dsh.tl.srvEnv') }}<small>{{ t('dsh.tl.srvEnvHint') }}</small></label>
+              <div class="db-fld"><input id="as-env" v-model="newServerEnv" class="db-in db-mono" :placeholder="t('dsh.tl.srvEnvPh')" spellcheck="false" data-add-server-env /></div>
+            </div>
+            <div v-if="addServerError" class="db-err db-small" style="padding: 4px 0 8px" data-add-server-error>{{ addServerError }}</div>
+            <div class="db-btns" style="margin-top: 8px">
+              <button type="button" class="db-btn sm primary" data-add-server-submit @click="submitAddServer">{{ t('dsh.tl.srvAddSave') }}</button>
+              <button type="button" class="db-btn sm" data-add-server-cancel @click="resetAddForm">{{ t('dsh.tl.srvCancel') }}</button>
+            </div>
+          </div>
+        </div>
+
         <div class="db-pbody db-sep"><DbUnavailable id="tools-manage" :what="t('dsh.tl.manageWhat')" :why="t('dsh.tl.manageWhy')" /></div>
       </section>
 
+      <!-- Recent tool calls log -->
       <section class="db-panel" data-tools-log>
         <header><h3>{{ t('dsh.tl.logTitle') }}</h3><span class="db-hm">{{ t('dsh.tl.logHint') }}</span></header>
         <div class="db-pbody"><DbUnavailable id="tools-log" :what="t('dsh.tl.logTitle')" :why="t('dsh.tl.logWhy')" /></div>
       </section>
 
+      <!-- Savebar -->
       <div class="db-savebar" data-savebar="tools">
-        <span class="db-st" :class="{ 'db-err': !!status }" data-tools-status>{{ status || (dirty ? t('dsh.common.unsavedChanges') : t('dsh.common.allSaved')) }}</span>
+        <span class="db-st" :class="{ 'db-err': !!status }" data-tools-status>{{ status || (dirty ? t('dsh.common.unsavedChanges') : savedNote || t('dsh.common.allSaved')) }}</span>
         <button type="button" class="db-btn" :disabled="!dirty" data-tools-discard @click="discard">{{ t('dsh.common.discard') }}</button>
         <button type="button" class="db-btn primary" :disabled="!dirty || saving" data-tools-save @click="save">{{ saving ? t('dsh.common.saving') : t('dsh.tl.save') }}</button>
       </div>

@@ -128,6 +128,29 @@ describe('shipped theme packs', () => {
     expect(r.value?.shared['font-mono']).toBe(reader().shared['font-mono'])
     expect(r.value?.shared['font-body']).toContain('Noto Serif SC Variable')
   })
+
+  it('--lec-canvas (S6Y AH #6): the map stage colours of the home-canvas prototype; tints and packs without it fall back to their own bg', () => {
+    const rr = resolveTheme(reader()).value!
+    const rd = resolveTheme(datasheet(), reader()).value!
+    // prototype `--canvas`: reader #F3F4F6 / #121418, datasheet #ECEEEA / #0A140F
+    expect([rr.modes.light?.canvas, rr.modes.dark?.canvas]).toEqual(['#F3F4F6', '#121418'])
+    expect([rd.modes.light?.canvas, rd.modes.dark?.canvas]).toEqual(['#ECEEEA', '#0A140F'])
+    // a tint preset does not inherit the light canvas (grey on sepia): it falls back to its own bg
+    expect(rr.modes.sepia?.canvas).toBe(SPEC.reader.sepia.bg)
+    expect(rr.modes.green?.canvas).toBe(SPEC.reader.green.bg)
+    // a pack that does not define it keeps today's look: canvas = bg
+    const src = clone(reader())
+    delete src.modes.light!.canvas
+    delete src.modes.dark!.canvas
+    const r = resolveTheme(src)
+    expect(r.issues).toEqual([])
+    expect(r.value?.modes.light?.canvas).toBe(SPEC.reader.light.bg)
+    expect(r.value?.modes.dark?.canvas).toBe(SPEC.reader.dark.bg)
+    const css = compileThemes([rr], { defaultTheme: 'reader' })
+    expect(css).toContain('--lec-canvas: #F3F4F6;')
+    expect(css).toContain('--lec-canvas: #121418;')
+    expect(CONTRACT_NAMES.has('--lec-canvas')).toBe(true)
+  })
 })
 
 describe('validator', () => {

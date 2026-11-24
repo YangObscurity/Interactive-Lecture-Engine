@@ -73,9 +73,13 @@ export function enlargeHtml(type: string): string {
   )
 }
 
-/** Inline body click → full screen, except ECharts (clicks belong to ECharts' own interactions). */
-export function enlargeOnBodyClick(fig: HTMLElement): boolean {
-  return fig.dataset.type !== 'echarts'
+/**
+ * Inline body click → full screen, for every chart type (spec board 07: "点图或图标打开全站共用的查看器"). ECharts included
+ * (S6Y audit-spec #9): in the text the chart is a picture to look at; its own interactions (legend, tooltip, zoom) are
+ * there in the viewer, where the body is moved out of the figure so this handler no longer sees its clicks.
+ */
+export function enlargeOnBodyClick(_fig: HTMLElement): boolean {
+  return true
 }
 
 export interface ToolHandlers {

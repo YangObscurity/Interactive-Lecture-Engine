@@ -14,10 +14,10 @@ import DbHead from '../DbHead.vue'
 import DbUnavailable from '../DbUnavailable.vue'
 import OverviewGroupDetail from './OverviewGroupDetail.vue'
 import { checkState, dashboardState, ensureCheckRun, isReadOnly, runChecks, type DashboardPageId } from '../useDashboard'
-import { groupIssueCounts, todoFromChecks, type DashGroup } from '../dashboardData'
+import { groupIssueCounts, shortDateTime, todoFromChecks, type DashGroup } from '../dashboardData'
 
-const props = defineProps<{ overview: AdminOverviewResponse | null; health: AdminHealthResponse | null; access?: DevAccessSummary | null }>()
-const emit = defineEmits<{ go: [page: DashboardPageId, tab?: string] }>()
+const props = defineProps<{ overview: AdminOverviewResponse | null; health: AdminHealthResponse | null; access?: DevAccessSummary | null; healthError?: string }>()
+const emit = defineEmits<{ go: [page: DashboardPageId, tab?: string]; retry: [] }>()
 const { t } = useT()
 const { theme } = useData<{ groups?: DashGroup[]; totals?: { lectures?: number; charts?: number } }>()
 
@@ -55,6 +55,11 @@ const todo = computed(() => {
   if (sinceBuild.value) items.push({ k: 'half', title: t('dsh.ov.todoStale'), detail: t('dsh.ov.todoStaleDetail', { n: sinceBuild.value }), go: ['runtime', 'logs'] })
   return items
 })
+/** Online: the admin API could not be read; that is a failure item, never "everything is fine" (audit #3). */
+const adminFailed = computed(() => isReadOnly.value && !!props.healthError)
+const todoCount = computed(() => todo.value.length + (adminFailed.value ? 1 : 0))
+/** Local: no report yet; while the first run is going the to-do list is unknown, not empty (audit #8). */
+const checksPending = computed(() => !isReadOnly.value && !report.value)
 
 function progressOf(g: DashGroup): number | null {
   const row = props.overview?.byGroup.find((r) => r.group_id === g.id)
@@ -70,19 +75,14 @@ function badgeOf(g: DashGroup): { k: 'bad' | 'warn' | 'ok' | 'off'; text: string
   return { k: 'ok', text: t('dsh.ov.badgeOk') }
 }
 
-const pad = (n: number) => String(n).padStart(2, '0')
-
 /** Who can read a group (local only: the access block of site.config.ts). */
 function tierOf(g: DashGroup): string | null {
   const row = props.access?.groups.find((x) => x.id === g.id)
   if (!row) return null
   return row.read === 'public' ? t('dsh.ac.public') : row.read === 'authenticated' ? t('dsh.ac.login') : t('dsh.ac.acl')
 }
-/** `11-21 16:02` (the prototype's short time). */
-function shortTime(iso: string): string {
-  const d = new Date(iso)
-  return Number.isNaN(d.getTime()) ? iso : `${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
-}
+/** `11-21 16:02` (the prototype's short time; one formatter for the whole Dashboard). */
+const shortTime = (iso: string): string => shortDateTime(iso)
 /** The common folder of a commit's files (`graph/`), or the file itself when there is one. */
 function whereOf(files: readonly string[]): string {
   if (!files.length) return '—'
@@ -126,13 +126,24 @@ onBeforeUnmount(() => skinObserver?.disconnect())
       <div><b>{{ charts }}</b><span>{{ t('dsh.ov.figCharts') }}</span></div>
       <div v-if="overview" data-admin-overview><b data-admin-metric="users">{{ overview.totals.users }}</b><span>{{ t('dsh.ov.figReaders') }}</span><small>{{ t('dsh.ov.figActive', { n: overview.recentActivity.progressUpdatedLast24h }) }}</small></div>
       <div v-else><b>—</b><span>{{ t('dsh.ov.figReaders') }}</span><small>{{ t('dsh.ov.figReadersLocal') }}</small></div>
-      <div><b>{{ todo.length }}</b><span>{{ t('dsh.ov.figTodo') }}</span><small>{{ checkState.running ? t('dsh.chk.running') : '' }}</small></div>
+      <div data-overview-figtodo><b>{{ todoCount }}</b><span>{{ t('dsh.ov.figTodo') }}</span><small>{{ checkState.running ? t('dsh.chk.running') : '' }}</small></div>
     </div>
 
     <div class="db-cols">
       <section class="db-panel" data-overview-todo>
-        <header><h3>{{ t('dsh.ov.todoTitle') }}</h3><span class="db-hm">{{ t('dsh.common.nItems', { n: todo.length }) }}</span></header>
-        <div v-if="todo.length" class="db-wl">
+        <header><h3>{{ t('dsh.ov.todoTitle') }}</h3><span class="db-hm">{{ checksPending && !todoCount ? t('dsh.chk.running') : t('dsh.common.nItems', { n: todoCount }) }}</span></header>
+        <div v-if="todoCount" class="db-wl">
+          <div v-if="adminFailed" class="db-wi" data-todo="admin-error">
+            <span class="dm" data-k="bad" aria-hidden="true"></span>
+            <div>
+              <div class="db-wt">{{ t('dsh.ov.todoAdminError') }}</div>
+              <div class="db-wd">{{ healthError }} {{ t('dsh.ov.todoAdminErrorDetail') }}</div>
+            </div>
+            <div class="db-btns">
+              <button type="button" class="db-btn sm" data-todo-retry @click="emit('retry')">{{ t('dsh.common.retry') }}</button>
+              <button type="button" class="db-btn sm" @click="emit('go', 'runtime', 'health')">{{ t('dsh.common.goThere') }}</button>
+            </div>
+          </div>
           <div v-for="(item, i) in todo" :key="i" class="db-wi">
             <span class="dm" :data-k="item.k" aria-hidden="true"></span>
             <div>
@@ -145,7 +156,10 @@ onBeforeUnmount(() => skinObserver?.disconnect())
             </div>
           </div>
         </div>
-        <div v-else class="db-empty">
+        <div v-if="checksPending" class="db-empty" :data-overview-todo-running="checkState.running ? '1' : undefined" data-overview-todo-pending>
+          <span><span class="dm" data-k="off" aria-hidden="true"></span>{{ checkState.running ? t('dsh.ov.todoRunning') : checkState.error ? t('dsh.chk.runFailed') : t('dsh.chk.notRun') }}</span>
+        </div>
+        <div v-else-if="!todoCount" class="db-empty">
           <b>{{ t('dsh.ov.todoNone') }}</b>
           <span>{{ isReadOnly ? t('dsh.ov.todoNoneOnline') : t('dsh.ov.todoNoneLocal') }}</span>
         </div>
@@ -159,7 +173,7 @@ onBeforeUnmount(() => skinObserver?.disconnect())
         <div class="db-pbody">
           <dl class="db-kv">
             <dt>{{ t('dsh.ov.lastBuild') }}</dt>
-            <dd data-overview-build-row="build">{{ lastBuild ? new Date(lastBuild).toLocaleString() : isReadOnly ? t('dsh.ov.onlyLocal') : t('dsh.ov.noBuild') }}</dd>
+            <dd data-overview-build-row="build">{{ lastBuild ? shortTime(lastBuild) : isReadOnly ? t('dsh.ov.onlyLocal') : t('dsh.ov.noBuild') }}</dd>
             <dt>{{ t('dsh.ov.contentCommit') }}</dt>
             <dd data-overview-build-row="commit">
               <template v-if="latestChange">

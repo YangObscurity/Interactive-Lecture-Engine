@@ -1,0 +1,40 @@
+{
+  "version": 1,
+  "group": "prb",
+  "figures": [
+    {
+      "id": "prb-dice-grid",
+      "file": "prb-dice-grid.svg",
+      "kind": "figure",
+      "width": 480,
+      "height": 260,
+      "caption": {
+        "zh": "两颗骰子的 36 个等可能结果，和为 7 的 6 格标红",
+        "en": "The 36 equally likely outcomes of two dice; the six cells summing to 7 are highlighted"
+      },
+      "source": {
+        "paper": "Original Example Diagram",
+        "number": "Fig. 1",
+        "page": 1
+      },
+      "sha256": "887da22cd778"
+    },
+    {
+      "id": "prb-scatter",
+      "file": "prb-scatter.svg",
+      "kind": "figure",
+      "width": 480,
+      "height": 260,
+      "caption": {
+        "zh": "日均气温与冷饮销量的散点图，虚线为趋势",
+        "en": "Scatter plot of daily mean temperature against cold-drink sales, with a dashed trend line"
+      },
+      "source": {
+        "paper": "Original Example Diagram",
+        "number": "Fig. 2",
+        "page": 1
+      },
+      "sha256": "ff43b730e1d8"
+    }
+  ]
+}

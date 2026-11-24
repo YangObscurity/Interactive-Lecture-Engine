@@ -11,7 +11,7 @@ import { fetchSnippet, type CheckIssue, type Snippet } from '../../api/devDashbo
 import DbHead from '../DbHead.vue'
 import DbUnavailable from '../DbUnavailable.vue'
 import { checkState, dashboardState, ensureCheckRun, isReadOnly, runChecks, say } from '../useDashboard'
-import { agentBrief, groupIssuesByCode } from '../dashboardData'
+import { agentBrief, groupIssuesByCode, shortDateTime } from '../dashboardData'
 
 const { t } = useT()
 const report = computed(() => checkState.run?.report ?? null)
@@ -91,7 +91,7 @@ const levelMark = (l: CheckIssue['level']) => (l === 'fail' ? 'bad' : l === 'war
 const meta = computed<Array<[string, string]>>(() =>
   checkState.run
     ? [
-        [t('dsh.chk.lastRun'), new Date(checkState.run.at).toLocaleString()],
+        [t('dsh.chk.lastRun'), shortDateTime(checkState.run.at)],
         [t('dsh.chk.duration'), `${(checkState.run.ms / 1000).toFixed(1)} s`],
         ...(checkState.run.only?.length ? [[t('dsh.chk.rerun'), checkState.run.only.map(catLabel).join(', ')] as [string, string]] : []),
       ]

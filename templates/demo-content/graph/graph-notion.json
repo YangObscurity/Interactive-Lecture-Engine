@@ -53,6 +53,84 @@
     "min": 30,
     "url": "https://example.com/demo/log_proofs"
   },
+  "log_sets": {
+    "desc": "示例说明：集合与量词。",
+    "diff": 3,
+    "min": 30,
+    "url": "https://example.com/demo/log_sets"
+  },
+  "log_counter": {
+    "desc": "示例说明：反例与归谬。",
+    "diff": 3,
+    "min": 30,
+    "url": "https://example.com/demo/log_counter"
+  },
+  "prb_freq": {
+    "desc": "示例说明：随机与频率。",
+    "diff": 1,
+    "min": 20,
+    "url": "https://example.com/demo/prb_freq"
+  },
+  "prb_cond": {
+    "desc": "示例说明：条件概率。",
+    "diff": 2,
+    "min": 25,
+    "url": "https://example.com/demo/prb_cond"
+  },
+  "prb_expect": {
+    "desc": "示例说明：期望值。",
+    "diff": 2,
+    "min": 25,
+    "url": "https://example.com/demo/prb_expect"
+  },
+  "prb_dist": {
+    "desc": "示例说明：分布与直方图。",
+    "diff": 2,
+    "min": 25,
+    "url": "https://example.com/demo/prb_dist"
+  },
+  "prb_sample": {
+    "desc": "示例说明：抽样与估计。",
+    "diff": 3,
+    "min": 30,
+    "url": "https://example.com/demo/prb_sample"
+  },
+  "prb_corr": {
+    "desc": "示例说明：相关与因果。",
+    "diff": 3,
+    "min": 30,
+    "url": "https://example.com/demo/prb_corr"
+  },
+  "geo_vec": {
+    "desc": "示例说明：坐标与向量。",
+    "diff": 1,
+    "min": 20,
+    "url": "https://example.com/demo/geo_vec"
+  },
+  "geo_trig": {
+    "desc": "示例说明：角度与三角。",
+    "diff": 2,
+    "min": 25,
+    "url": "https://example.com/demo/geo_trig"
+  },
+  "geo_sim": {
+    "desc": "示例说明：比例与相似。",
+    "diff": 2,
+    "min": 25,
+    "url": "https://example.com/demo/geo_sim"
+  },
+  "geo_area": {
+    "desc": "示例说明：面积与体积估算。",
+    "diff": 3,
+    "min": 30,
+    "url": "https://example.com/demo/geo_area"
+  },
+  "geo_xform": {
+    "desc": "示例说明：坐标变换。",
+    "diff": 3,
+    "min": 30,
+    "url": "https://example.com/demo/geo_xform"
+  },
   "pln_split": {
     "desc": "示例说明：拆分任务。",
     "diff": 1,
@@ -71,6 +149,18 @@
     "min": 25,
     "url": "https://example.com/demo/pln_buffer"
   },
+  "pln_level": {
+    "desc": "示例说明：资源平衡。",
+    "diff": 3,
+    "min": 30,
+    "url": "https://example.com/demo/pln_level"
+  },
+  "pln_retro": {
+    "desc": "示例说明：复盘与迭代。",
+    "diff": 3,
+    "min": 30,
+    "url": "https://example.com/demo/pln_retro"
+  },
   "dat_tidy": {
     "desc": "示例说明：一行一条记录。",
     "diff": 1,
@@ -82,5 +172,107 @@
     "diff": 2,
     "min": 25,
     "url": "https://example.com/demo/dat_group"
+  },
+  "dat_clean": {
+    "desc": "示例说明：缺失值与清洗。",
+    "diff": 2,
+    "min": 25,
+    "url": "https://example.com/demo/dat_clean"
+  },
+  "dat_pivot": {
+    "desc": "示例说明：透视与重塑。",
+    "diff": 3,
+    "min": 30,
+    "url": "https://example.com/demo/dat_pivot"
+  },
+  "dat_repro": {
+    "desc": "示例说明：可复现的整理流程。",
+    "diff": 3,
+    "min": 30,
+    "url": "https://example.com/demo/dat_repro"
+  },
+  "vis_choose": {
+    "desc": "示例说明：选对图表。",
+    "diff": 1,
+    "min": 20,
+    "url": "https://example.com/demo/vis_choose"
+  },
+  "vis_axes": {
+    "desc": "示例说明：坐标轴与刻度。",
+    "diff": 2,
+    "min": 25,
+    "url": "https://example.com/demo/vis_axes"
+  },
+  "vis_color": {
+    "desc": "示例说明：颜色与对比。",
+    "diff": 2,
+    "min": 25,
+    "url": "https://example.com/demo/vis_color"
+  },
+  "vis_mislead": {
+    "desc": "示例说明：会误导的图。",
+    "diff": 3,
+    "min": 30,
+    "url": "https://example.com/demo/vis_mislead"
+  },
+  "vis_story": {
+    "desc": "示例说明：用数据讲故事。",
+    "diff": 3,
+    "min": 30,
+    "url": "https://example.com/demo/vis_story"
+  },
+  "exp_question": {
+    "desc": "示例说明：可检验的问题。",
+    "diff": 1,
+    "min": 20,
+    "url": "https://example.com/demo/exp_question"
+  },
+  "exp_control": {
+    "desc": "示例说明：变量与对照。",
+    "diff": 2,
+    "min": 25,
+    "url": "https://example.com/demo/exp_control"
+  },
+  "exp_random": {
+    "desc": "示例说明：随机化与重复。",
+    "diff": 2,
+    "min": 25,
+    "url": "https://example.com/demo/exp_random"
+  },
+  "exp_record": {
+    "desc": "示例说明：记录与复现。",
+    "diff": 3,
+    "min": 30,
+    "url": "https://example.com/demo/exp_record"
+  },
+  "exp_conclude": {
+    "desc": "示例说明：从结果到结论。",
+    "diff": 3,
+    "min": 30,
+    "url": "https://example.com/demo/exp_conclude"
+  },
+  "wrt_lead": {
+    "desc": "示例说明：先写结论。",
+    "diff": 1,
+    "min": 20,
+    "url": "https://example.com/demo/wrt_lead"
+  },
+  "wrt_struct": {
+    "desc": "示例说明：段落与结构。",
+    "diff": 2,
+    "min": 25,
+    "url": "https://example.com/demo/wrt_struct"
+  },
+  "wrt_caption": {
+    "desc": "示例说明：图表的说明文字。",
+    "diff": 3,
+    "min": 30,
+    "url": "https://example.com/demo/wrt_caption"
+  },
+  "wrt_review": {
+    "desc": "示例说明：审稿与修改。",
+    "diff": 3,
+    "min": 30,
+    "url": "https://example.com/demo/wrt_review"
   }
 }

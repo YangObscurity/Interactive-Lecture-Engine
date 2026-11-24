@@ -14,6 +14,7 @@ import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useT } from '../../i18n/useT.ts'
 import type { MessageKey } from '../../i18n/index.ts'
 import { segmentTemplate, unknownTokens, type Segment } from './placeholders.ts'
+import { say } from './useDashboard'
 
 /** `{name}` as text (a template literal with braces confuses the template parser). */
 const brace = (n: string): string => '{' + n + '}'
@@ -167,10 +168,60 @@ function onInput(e: Event): void {
   emitValue(serialize(el))
 }
 
+const isChip = (n: Node | null | undefined): n is HTMLElement => n instanceof HTMLElement && n.classList.contains('pe-chip')
+
+/**
+ * Backspace / Delete next to a block removes the whole block (and its zero-width caret stop) in one key press, as in the
+ * prototype's keydown (line 1408). Without this the first Backspace after a typed block only ate the zero-width
+ * character behind it (audit #5).
+ */
+function chipNextToCaret(key: 'Backspace' | 'Delete'): { chip: HTMLElement; zw: Text | null } | null {
+  const el = box.value
+  const sel = window.getSelection()
+  if (!el || !sel || !sel.isCollapsed || !sel.anchorNode || !el.contains(sel.anchorNode)) return null
+  const n = sel.anchorNode
+  const o = sel.anchorOffset
+  if (key === 'Backspace') {
+    if (n.nodeType === Node.TEXT_NODE) {
+      const text = n as Text
+      if (o === 1 && text.data[0] === ZW && isChip(text.previousSibling)) return { chip: text.previousSibling, zw: text }
+      if (o === 0 && isChip(text.previousSibling)) return { chip: text.previousSibling, zw: null }
+    } else if (n === el && o > 0) {
+      const c = el.childNodes[o - 1]
+      if (isChip(c)) return { chip: c, zw: null }
+    }
+    return null
+  }
+  if (n.nodeType === Node.TEXT_NODE && o === (n as Text).data.length && isChip(n.nextSibling)) {
+    const z = n.nextSibling.nextSibling
+    return { chip: n.nextSibling, zw: z && z.nodeType === Node.TEXT_NODE && (z as Text).data[0] === ZW ? (z as Text) : null }
+  }
+  return null
+}
+
 function onKeydown(e: KeyboardEvent): void {
   if (e.key === 'Enter') {
     e.preventDefault()
     document.execCommand('insertLineBreak')
+    return
+  }
+  if (e.key === 'Backspace' || e.key === 'Delete') {
+    const hit = chipNextToCaret(e.key)
+    if (!hit || !box.value) return
+    e.preventDefault()
+    const name = hit.chip.dataset.ph ?? ''
+    const sel = window.getSelection()
+    const r = document.createRange()
+    // keep the caret where the block was
+    if (hit.chip.previousSibling) r.setStartAfter(hit.chip.previousSibling)
+    else r.setStart(box.value, 0)
+    hit.chip.remove()
+    if (hit.zw) hit.zw.deleteData(0, 1)
+    r.collapse(true)
+    sel?.removeAllRanges()
+    sel?.addRange(r)
+    emitValue(serialize(box.value))
+    say(t('dsh.pe.deleted', { name: tokenLabel(name) }))
   }
 }
 
@@ -324,6 +375,7 @@ onMounted(() => {
       <span v-for="w in warnings" :key="w" class="db-warn"><span class="dm" data-k="warn" aria-hidden="true"></span>{{ w }}</span>
       <span v-if="empty && required" class="db-err"><span class="dm" data-k="bad" aria-hidden="true"></span>{{ t('dsh.common.requiredEmpty') }}</span>
       <span v-else-if="empty" class="db-muted"><span class="dm" data-k="off" aria-hidden="true"></span>{{ emptyText || t('dsh.common.notFilled') }}</span>
+      <span v-if="length > max" class="db-err" data-pe-over><span class="dm" data-k="bad" aria-hidden="true"></span>{{ t('dsh.common.overLimit') }}</span>
       <span class="pe-count" :class="{ 'db-err': length > max }">{{ length }} / {{ max }}</span>
     </div>
   </div>

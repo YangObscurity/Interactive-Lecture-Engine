@@ -17,7 +17,7 @@ import { configureCompanionPrompts } from '../prompts/store.ts'
 import { chartsFeature, chartsAppFeature } from './charts/index'
 import { createLifecycle } from './core/lifecycle'
 import { beginBodyHydration, endBodyHydration, waitForBodyHydration } from './core/bodyHydration'
-import { readingModeFeature, readingProgressFeature, citesFeature, mathCopyFeature, figureXrefsFeature, conceptsFeature } from './reading'
+import { readingModeFeature, readingProgressFeature, citesFeature, mathCopyFeature, codeHeaderFeature, codeCopyFeature, figureXrefsFeature, conceptsFeature } from './reading'
 import { configureConceptsRuntime } from './reading/concepts'
 import { quizFeature } from './reading/quiz'
 import { slotRuntime } from './slots'
@@ -59,6 +59,7 @@ import DashboardLink from './components/DashboardLink.vue'
 import LangHint from './components/LangHint.vue'
 import LectureTitleHost from './components/LectureTitleHost.vue'
 import NavCourseMenuHost from './components/NavCourseMenuHost.vue'
+import NotFound from './components/NotFound.vue'
 import AiSidebar from './components/ai/AiSidebar.vue'
 import SelectionToolbar from './components/ai/SelectionToolbar.vue'
 import LectureProgressCard from './components/ai/LectureProgressCard.vue'
@@ -94,7 +95,9 @@ export default {
       'nav-screen-content-after': () => [h(LangSwitch, { screen: true }), h(DashboardLink, { screen: true })],
       'doc-before': () => [h(LangHint), h(LectureTitleHost), h(ConceptHeaderBar)],
       'layout-bottom': () => (companionRuntime().enabled ? [h(AiSidebar), h(SelectionToolbar)] : null),
-      'doc-after': () => [h(LectureProgressCard), h(ConceptRelatedFooter)]
+      'doc-after': () => [h(LectureProgressCard), h(ConceptRelatedFooter)],
+      // S6Y F6 (audit-spec #15): the engine's own, localized 404 instead of VitePress' English default
+      'not-found': () => h(NotFound)
     })
   },
   // 首页与组内页都用组件渲染，数据来自 themeConfig.groups（groups.mts 单一来源）
@@ -148,8 +151,8 @@ export default {
       if (l && l !== getRootLang()) setReaderLang(l)
     }
     const lc = createLifecycle(
-      [readingModeFeature, readingProgressFeature, chartsFeature, quizFeature, figureXrefsFeature, conceptsFeature],
-      [citesFeature, mathCopyFeature, chartsAppFeature]
+      [readingModeFeature, readingProgressFeature, chartsFeature, quizFeature, figureXrefsFeature, conceptsFeature, codeHeaderFeature],
+      [citesFeature, mathCopyFeature, codeCopyFeature, chartsAppFeature]
     )
     const unregister = registerDebugPanel('lifecycle', {
       describe: () => lc.state(),

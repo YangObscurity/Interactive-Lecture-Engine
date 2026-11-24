@@ -1,0 +1,6 @@
+{
+  "c1": {
+    "type": "mermaid",
+    "code": "flowchart TB\n  subgraph Q[四边形]\n    subgraph R[矩形]\n      subgraph S[正方形]\n        s1[边长 2 的正方形]\n      end\n      r1[长 3、宽 2 的矩形]\n    end\n    q1[只有一组对边平行的梯形]\n  end"
+  }
+}

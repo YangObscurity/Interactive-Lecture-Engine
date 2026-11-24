@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="480" height="260" viewBox="0 0 480 260" font-family="sans-serif">
+  <rect x="0" y="0" width="480" height="260" fill="#F8FAFC"/>
+  <line x1="60" y1="220" x2="450" y2="220" stroke="#334155" stroke-width="1.5"/>
+  <line x1="60" y1="220" x2="60" y2="24" stroke="#334155" stroke-width="1.5"/>
+  <line x1="60.0" y1="220" x2="60.0" y2="225" stroke="#334155"/>
+  <text x="60.0" y="240" font-size="12" text-anchor="middle" fill="#334155">20</text>
+  <line x1="168.3" y1="220" x2="168.3" y2="225" stroke="#334155"/>
+  <text x="168.3" y="240" font-size="12" text-anchor="middle" fill="#334155">25</text>
+  <line x1="276.7" y1="220" x2="276.7" y2="225" stroke="#334155"/>
+  <text x="276.7" y="240" font-size="12" text-anchor="middle" fill="#334155">30</text>
+  <line x1="385.0" y1="220" x2="385.0" y2="225" stroke="#334155"/>
+  <text x="385.0" y="240" font-size="12" text-anchor="middle" fill="#334155">35</text>
+  <line x1="55" y1="220.0" x2="60" y2="220.0" stroke="#334155"/>
+  <text x="51" y="224.0" font-size="12" text-anchor="end" fill="#334155">0</text>
+  <line x1="55" y1="154.7" x2="60" y2="154.7" stroke="#334155"/>
+  <text x="51" y="158.7" font-size="12" text-anchor="end" fill="#334155">60</text>
+  <line x1="55" y1="89.3" x2="60" y2="89.3" stroke="#334155"/>
+  <text x="51" y="93.3" font-size="12" text-anchor="end" fill="#334155">120</text>
+  <line x1="55" y1="24.0" x2="60" y2="24.0" stroke="#334155"/>
+  <text x="51" y="28.0" font-size="12" text-anchor="end" fill="#334155">180</text>
+  <line x1="81.7" y1="208.0" x2="428.3" y2="51.2" stroke="#DC2626" stroke-width="2" stroke-dasharray="6 4"/>
+  <circle cx="103.3" cy="191.7" r="4.5" fill="#1E3A8A" fill-opacity="0.8"/>
+  <circle cx="125.0" cy="197.1" r="4.5" fill="#1E3A8A" fill-opacity="0.8"/>
+  <circle cx="146.7" cy="175.4" r="4.5" fill="#1E3A8A" fill-opacity="0.8"/>
+  <circle cx="168.3" cy="173.2" r="4.5" fill="#1E3A8A" fill-opacity="0.8"/>
+  <circle cx="190.0" cy="149.2" r="4.5" fill="#1E3A8A" fill-opacity="0.8"/>
+  <circle cx="211.7" cy="155.8" r="4.5" fill="#1E3A8A" fill-opacity="0.8"/>
+  <circle cx="233.3" cy="137.2" r="4.5" fill="#1E3A8A" fill-opacity="0.8"/>
+  <circle cx="255.0" cy="140.5" r="4.5" fill="#1E3A8A" fill-opacity="0.8"/>
+  <circle cx="276.7" cy="112.2" r="4.5" fill="#1E3A8A" fill-opacity="0.8"/>
+  <circle cx="298.3" cy="113.3" r="4.5" fill="#1E3A8A" fill-opacity="0.8"/>
+  <circle cx="320.0" cy="94.8" r="4.5" fill="#1E3A8A" fill-opacity="0.8"/>
+  <circle cx="341.7" cy="98.0" r="4.5" fill="#1E3A8A" fill-opacity="0.8"/>
+  <circle cx="363.3" cy="71.9" r="4.5" fill="#1E3A8A" fill-opacity="0.8"/>
+  <circle cx="385.0" cy="73.0" r="4.5" fill="#1E3A8A" fill-opacity="0.8"/>
+  <circle cx="406.7" cy="56.7" r="4.5" fill="#1E3A8A" fill-opacity="0.8"/>
+  <text x="255" y="252" font-size="13" text-anchor="middle" fill="#334155">日均气温（℃）</text>
+  <text x="18" y="122" font-size="13" text-anchor="middle" fill="#334155" transform="rotate(-90 18 122)">冷饮销量（箱）</text>
+</svg>

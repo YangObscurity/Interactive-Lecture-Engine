@@ -19,6 +19,8 @@ const props = withDefaults(
     disabled?: boolean
     canUpload?: boolean
     placeholder?: string
+    /** S6Y F6 (audit-spec #28): set while the backend is unreachable; every quick action is disabled and says why */
+    quickDisabledReason?: string
   }>(),
   {
     lectureId: '',
@@ -27,7 +29,8 @@ const props = withDefaults(
     isStreaming: false,
     disabled: false,
     canUpload: false,
-    placeholder: ''
+    placeholder: '',
+    quickDisabledReason: ''
   }
 )
 
@@ -175,20 +178,21 @@ const quickActionItems = computed(() => {
   return actionsForSurface(companionPromptsRef.value, 'panel').map((action) => {
     const needsSelection = action.needsSelection
     const selectionBlocked = needsSelection && !hasEffectiveSelection.value
-    const disabled = Boolean(props.disabled || props.isStreaming || selectionBlocked)
+    const offReason = props.quickDisabledReason
+    const disabled = Boolean(props.disabled || props.isStreaming || selectionBlocked || offReason)
     const label = action.label[pLang]
     return {
       id: action.id,
       label,
       needsSelection,
       disabled,
-      title: selectionBlocked ? t('ai.quickActionNeedsSelection') : label,
+      title: offReason || (selectionBlocked ? t('ai.quickActionNeedsSelection') : label),
     }
   })
 })
 
 function handleQuickAction(actionId: string) {
-  if (props.disabled || props.isStreaming) return
+  if (props.disabled || props.isStreaming || props.quickDisabledReason) return
   const cleanSel = hasEffectiveSelection.value ? props.selectedText.trim() : undefined
   const payload: SendPayload = {
     query: '',

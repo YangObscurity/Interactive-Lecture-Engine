@@ -696,12 +696,17 @@ onBeforeUnmount(() => {
   .export-chevron {
     display: none;
   }
+  /* S6Y F6 (audit-spec #27, decision 1): same 36x36 icon button as the settings button (ReaderSettingsPanel.vue) */
   .lecture-export-btn {
-    width: 40px;
-    height: 40px;
+    width: 36px;
+    height: 36px;
     padding: 0;
     justify-content: center;
     gap: 0;
+    border-color: var(--lec-border);
+    border-radius: var(--lec-radius-1);
+    background: var(--lec-surface);
+    color: var(--lec-text-muted);
   }
 }
 

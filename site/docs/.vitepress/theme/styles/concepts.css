@@ -31,20 +31,27 @@ html[data-lec-theme='datasheet'] .vp-doc a.lec-term {
   text-decoration-color: var(--lec-warning);
 }
 
-/* On-demand hover preview card (non-interactive tooltip surface; zero shadow, hard border) */
+/* Hover / focus preview card (spec board 11.1 `.tcard`: 21em at 13 px = 273 px, term + English, summary, "打开概念页 →";
+   zero shadow, hard border). The pointer can move onto it to use the link (reading/concepts.ts keeps it open). */
 .lec-tcard {
   position: fixed;
   z-index: 90;
-  width: min(22rem, calc(100vw - 1.5rem));
+  box-sizing: border-box;
+  display: grid;
+  gap: 4px;
+  width: min(21em, calc(100vw - 1.5rem));
   padding: var(--lec-space-3) var(--lec-space-4);
   background: var(--lec-surface);
   color: var(--lec-text);
   border: var(--lec-line-hair) solid var(--lec-border);
   border-radius: var(--lec-radius-2);
-  font-family: var(--lec-font-body);
-  font-size: 0.875rem;
-  line-height: 1.55;
-  pointer-events: none;
+  font-family: var(--lec-font-heading);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.lec-tcard[hidden] {
+  display: none;
 }
 
 /* datasheet: heavy top rule in the text colour, square lower corners (spec board 11.1) */
@@ -53,55 +60,44 @@ html[data-lec-theme='datasheet'] .lec-tcard {
   border-radius: 0 0 var(--lec-radius-1) var(--lec-radius-1);
 }
 
+/* spec board `.tcard h5` (15 px bold) with `small` (12 px mono, muted, 6 px after the term) */
 .lec-tcard-head {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: var(--lec-space-2);
-  margin-bottom: var(--lec-space-1);
+  margin: 0;
+  line-height: 1.4;
 }
 
 .lec-tcard-term {
   font-family: var(--lec-font-heading);
   font-weight: 700;
-  font-size: 0.96rem;
+  font-size: 15px;
   color: var(--lec-text);
 }
 
 .lec-tcard-en {
+  margin-left: 6px;
   font-family: var(--lec-font-mono);
-  font-size: 0.75rem;
+  font-size: 12px;
+  font-weight: 400;
   color: var(--lec-text-muted);
-}
-
-.lec-tcard-meta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--lec-space-2);
-  margin-bottom: var(--lec-space-2);
-  font-size: 0.75rem;
-  color: var(--lec-text-muted);
-}
-
-.lec-tcard-tag {
-  display: inline-flex;
-  align-items: center;
-  padding: 1px var(--lec-space-2);
-  border: var(--lec-line-hair) solid var(--lec-border);
-  border-radius: var(--lec-radius-1);
-  background: var(--lec-bg);
 }
 
 .lec-tcard-summary {
   margin: 0;
+  font-family: var(--lec-font-body);
+  line-height: 1.75;
   color: var(--lec-text);
 }
 
-.lec-tcard-aliases {
-  margin: var(--lec-space-2) 0 0;
-  font-size: 0.75rem;
-  color: var(--lec-text-muted);
+.lec-tcard-open {
+  justify-self: start;
+  font-size: 12.5px;
+  color: var(--lec-accent);
+  text-decoration: none;
+}
+
+.lec-tcard-open:hover,
+.lec-tcard-open:focus-visible {
+  text-decoration: underline;
 }
 
 /* Concept page header & layout (§5.2.5) */
@@ -178,6 +174,53 @@ html[data-lec-theme='datasheet'] .lec-tcard {
 .lec-concept-meta-item strong {
   color: var(--lec-text);
   font-weight: 600;
+}
+
+/* Concept page spec table (spec board 11.1 "页头沿用 06 的题名区与规格表"; S6Y audit-spec #6). Same DOM class as the lecture title
+   block (`.lec-tb-spec`), so each skin's theme.css draws it the same way: reader a quiet panel, datasheet the ruled table.
+   The base box is set here, on the header root, because the title block's own rules are scoped to its component. */
+.lec-concept-header table.lec-tb-spec {
+  display: table;
+  width: 100%;
+  margin: var(--lec-space-3) 0 0;
+  border-collapse: collapse;
+  font-family: var(--lec-font-heading);
+  font-size: 13px;
+  line-height: 1.6;
+}
+.lec-concept-header .lec-tb-spec th,
+.lec-concept-header .lec-tb-spec td {
+  padding: 6px var(--lec-space-3);
+  text-align: left;
+  vertical-align: top;
+  border-left: 0;
+  border-bottom: 0;
+}
+.lec-concept-header .lec-tb-spec th {
+  width: 1%;
+  white-space: nowrap;
+  font-weight: 400;
+  color: var(--lec-text-muted);
+}
+html[data-lec-theme='datasheet'] .lec-concept-header .lec-tb-spec th {
+  font-weight: 600;
+}
+.lec-concept-header .lec-tb-spec td {
+  color: var(--lec-text);
+  overflow-wrap: anywhere;
+}
+.lec-concept-header .lec-tb-spec td.num {
+  font-family: var(--lec-font-mono);
+  font-variant-numeric: tabular-nums;
+}
+.lec-concept-header .lec-tb-none {
+  color: var(--lec-text-muted);
+}
+@media (max-width: 560px) {
+  .lec-concept-header .lec-tb-spec th,
+  .lec-concept-header .lec-tb-spec td {
+    padding: 5px 8px;
+  }
 }
 
 .lec-concept-status {

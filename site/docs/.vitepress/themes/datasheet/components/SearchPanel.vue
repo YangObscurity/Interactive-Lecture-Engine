@@ -152,7 +152,7 @@ watch(
 
       <section v-for="(grp, gi) in groups" :key="grp.groupId" class="sp-grp" role="group" :aria-labelledby="`lec-sp-grp-${gi}`">
         <h4 :id="`lec-sp-grp-${gi}`" role="presentation">
-          <span>{{ grp.groupId }} {{ grp.groupTitle }}</span>
+          <span>{{ grp.groupId === 'CONCEPTS' || grp.groupId === 'SITE' ? grp.groupTitle : `${grp.groupId} ${grp.groupTitle}` }}</span>
           <em>{{ grp.countLabel }}</em>
         </h4>
         <a
@@ -213,14 +213,17 @@ watch(
   background: var(--lec-surface);
   color: var(--lec-text);
   font-family: var(--lec-font-body);
+  /* S6Y F1: own line height instead of VitePress' 24px (spec board controls: 1.6) */
+  line-height: 1.6;
   overflow: hidden;
 }
 
+/* S6Y F1: spec board 04.2 .sp-in (8px 12px) with a framed 15px input (6px 8px) -> 51px */
 .sp-in {
   display: flex;
   align-items: center;
   gap: var(--lec-space-2);
-  padding: 11px 14px;
+  padding: var(--lec-space-2) var(--lec-space-3);
   border-bottom: var(--lec-line-hair) solid var(--lec-border);
 }
 
@@ -232,13 +235,22 @@ watch(
 .sp-input {
   flex: 1;
   min-width: 0;
-  border: 0;
+  border: var(--lec-line-hair) solid var(--lec-border);
+  border-radius: var(--lec-radius-1);
   outline: none;
-  background: transparent;
+  background: var(--lec-bg);
   color: var(--lec-text);
   font: inherit;
-  font-size: 16px;
-  line-height: 1.4;
+  font-size: 15px;
+  line-height: 20px;
+  min-height: 34px;
+  box-sizing: border-box;
+  padding: 6px 8px;
+}
+
+.sp-input:focus-visible {
+  outline: var(--lec-line-heavy) solid var(--lec-accent);
+  outline-offset: 0;
 }
 
 .sp-input::placeholder {
@@ -367,12 +379,11 @@ watch(
   margin: 4px 0 0;
   padding: 6px 10px 4px;
   border-top: var(--lec-line-hair) solid var(--lec-text);
-  font-family: var(--lec-font-mono);
-  font-size: 10.5px;
-  font-weight: 600;
-  letter-spacing: 0.08em;
+  /* spec board 04.2 `.sp-res h4`: 12.5 px bold, no all-caps eyebrow (S6Y audit-spec #18) */
+  font-family: var(--lec-font-heading);
+  font-size: 12.5px;
+  font-weight: 700;
   color: var(--lec-text);
-  text-transform: uppercase;
 }
 
 .sp-grp:first-child h4 {
@@ -380,6 +391,10 @@ watch(
 }
 
 .sp-grp h4 em {
+  margin-left: auto;
+  font-family: var(--lec-font-mono);
+  font-size: 11.5px;
+  font-weight: 400;
   font-style: normal;
   color: var(--lec-text-muted);
 }
@@ -390,7 +405,8 @@ watch(
   column-gap: 10px;
   row-gap: 2px;
   align-items: baseline;
-  padding: 9px 10px;
+  /* S6Y F1: spec board 04.2 .sp-hit 6px 12px */
+  padding: 6px var(--lec-space-3);
   border-left: 3px solid transparent;
   cursor: pointer;
   text-decoration: none;
@@ -511,6 +527,11 @@ watch(
 
   .sp-res {
     max-height: none;
+  }
+
+  /* phones keep 16px in the input (spec board 04.2; smaller makes iOS zoom in) */
+  .sp-input {
+    font-size: 16px;
   }
 
   .sp-scope-btn {

@@ -18,8 +18,22 @@ export const DEMO_CONTENT_DIR = path.resolve(SITE_DIR, '..', 'templates', 'demo-
 /** The environment that makes resolveContent / resolveGroups read the demo content. */
 export const DEMO_ENV = { LECTURE_CONTENT_DIR: DEMO_CONTENT_DIR } as const
 
-/** The demo's access tiers (MEA and LOG inline, PLN `authenticated`, DAT the gateway group `staff`), as LECTURE_ACCESS_JSON. */
+/** The demo's access tiers (PLN `authenticated`, DAT the gateway group `staff`, every other group inline), as LECTURE_ACCESS_JSON. */
 export const DEMO_ACCESS_JSON = JSON.stringify(JSON.parse(fs.readFileSync(path.join(DEMO_CONTENT_DIR, 'access.e2e.json'), 'utf8')))
+
+/** The groups access.e2e.json restricts, in the order it lists them (PLN, DAT). */
+export const DEMO_RESTRICTED_IDS: readonly string[] = Object.keys((JSON.parse(DEMO_ACCESS_JSON) as { groups?: Record<string, unknown> }).groups ?? {})
+
+/**
+ * The demo's groups in the order groups.ts declares them (S6X: 9 groups in 3 categories). The tests that check the
+ * order the engine reads take it from here; everything else (counts, inline groups) is derived from the content.
+ */
+export const DEMO_GROUP_ORDER = ['MEA', 'LOG', 'PRB', 'GEO', 'PLN', 'DAT', 'VIS', 'EXP', 'WRT'] as const
+
+/** The groups of `ids` the access e2e build ships inline (not restricted by access.e2e.json), in the given order. */
+export function demoInlineIds(ids: readonly string[]): string[] {
+  return ids.filter((id) => !DEMO_RESTRICTED_IDS.includes(id))
+}
 
 export function demoContentPaths(): ContentPaths {
   return resolveContent({ env: DEMO_ENV })
