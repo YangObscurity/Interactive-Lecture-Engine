@@ -8,7 +8,7 @@
 .github/
 .coderabbit.yaml
 cubic.yaml
-.greptile/
+.greptile/config.json
 AGENTS.md
 README.md
 LICENSE
