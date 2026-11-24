@@ -1,0 +1,225 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag name (e.g. v2.0.0 or v2026.11.24)'
+        required: true
+        type: string
+      prerelease:
+        description: 'Mark as prerelease'
+        required: false
+        default: false
+        type: boolean
+      draft:
+        description: 'Save as draft release'
+        required: false
+        default: false
+        type: boolean
+
+concurrency:
+  group: release-${{ github.event_name == 'push' && github.ref_name || inputs.tag }}
+  cancel-in-progress: false
+
+permissions: {}
+
+jobs:
+  prepare:
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.meta.outputs.tag }}
+      prerelease: ${{ steps.meta.outputs.prerelease }}
+      draft: ${{ steps.meta.outputs.draft }}
+    steps:
+      - name: Validate release tag and branch
+        id: meta
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+          REF_NAME: ${{ github.ref_name }}
+          INPUT_TAG: ${{ inputs.tag }}
+          INPUT_PRERELEASE: ${{ inputs.prerelease }}
+          INPUT_DRAFT: ${{ inputs.draft }}
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+
+          if [ "$EVENT_NAME" = "push" ]; then
+            TAG="$REF_NAME"
+            PRERELEASE="false"
+            if [[ "$TAG" == *-* ]]; then
+              PRERELEASE="true"
+            fi
+            DRAFT="false"
+          else
+            if [ "$REF" != "refs/heads/main" ]; then
+              echo "::error::Manual releases may only be triggered from main (got $REF)"
+              exit 1
+            fi
+            TAG="$INPUT_TAG"
+            PRERELEASE="$INPUT_PRERELEASE"
+            DRAFT="$INPUT_DRAFT"
+          fi
+
+          if ! printf '%s' "$TAG" | grep -Eq '^v[0-9]+\.[0-9]+(\.[0-9]+)*(-[0-9A-Za-z.-]+)?$'; then
+            echo "::error::Invalid release tag '$TAG' (expected e.g. v2.0.0 or v2026.11.24)"
+            exit 1
+          fi
+
+          if gh release view "$TAG" --repo "$GH_REPO" >/dev/null 2>&1; then
+            echo "::error::Release '$TAG' already exists"
+            exit 1
+          fi
+
+          if [ "$EVENT_NAME" != "push" ] && gh api "repos/${GH_REPO}/git/ref/tags/${TAG}" >/dev/null 2>&1; then
+            echo "::error::Git tag '$TAG' already exists; push the tag or choose a new version"
+            exit 1
+          fi
+
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "prerelease=$PRERELEASE" >> "$GITHUB_OUTPUT"
+          echo "draft=$DRAFT" >> "$GITHUB_OUTPUT"
+
+  build_server:
+    needs: prepare
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: server/package-lock.json
+      - name: Build and verify lecture-api server
+        working-directory: server
+        run: |
+          npm ci
+          npm run typecheck
+          npm run lint
+          npm test
+          npm run build
+      - name: Package lecture-api and content template archives
+        env:
+          TAG: ${{ needs.prepare.outputs.tag }}
+        run: |
+          set -euo pipefail
+          mkdir -p release-assets
+          STAGE="$(mktemp -d)"
+          trap 'rm -rf "$STAGE"' EXIT
+
+          API_DIR="$STAGE/lecture-api-${TAG}"
+          mkdir -p "$API_DIR"
+          cp -a server/dist server/migrations server/scripts server/deploy "$API_DIR/"
+          cp -a server/package.json server/package-lock.json server/tsconfig.json server/tsconfig.typecheck.json server/.env.example server/README.md "$API_DIR/"
+          tar czf "release-assets/lecture-api-${TAG}.tar.gz" -C "$STAGE" "lecture-api-${TAG}"
+
+          TPL_DIR="$STAGE/content-template-${TAG}"
+          mkdir -p "$TPL_DIR"
+          cp -a templates/. "$TPL_DIR/"
+          tar czf "release-assets/content-template-${TAG}.tar.gz" -C "$STAGE" "content-template-${TAG}"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: release-server-and-template
+          path: release-assets/*.tar.gz
+          retention-days: 1
+
+  build_demo_site:
+    needs: prepare
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: site/package-lock.json
+      - name: Build and validate standalone demo static site
+        working-directory: site
+        run: |
+          npm ci
+          npm run check:content
+          npm run build
+          npm run check:i18n:dist
+          npm run check:access:dist
+          npm run check:search:dist
+      - name: Package demo-dist archive
+        env:
+          TAG: ${{ needs.prepare.outputs.tag }}
+        run: |
+          set -euo pipefail
+          mkdir -p release-assets
+          STAGE="$(mktemp -d)"
+          trap 'rm -rf "$STAGE"' EXIT
+          OUT_DIR="$STAGE/demo-dist-${TAG}"
+          mkdir -p "$OUT_DIR"
+          cp -a site/docs/.vitepress/dist/. "$OUT_DIR/"
+          tar czf "release-assets/interactive-lecture-engine-demo-dist-${TAG}.tar.gz" -C "$STAGE" "demo-dist-${TAG}"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: release-demo-dist
+          path: release-assets/*.tar.gz
+          retention-days: 1
+
+  publish:
+    needs: [prepare, build_server, build_demo_site]
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download release archives
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          path: dist-assets
+          merge-multiple: true
+      - name: Generate SHA256SUMS and publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          EVENT_NAME: ${{ github.event_name }}
+          TARGET_SHA: ${{ github.sha }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+          PRERELEASE: ${{ needs.prepare.outputs.prerelease }}
+          DRAFT: ${{ needs.prepare.outputs.draft }}
+        run: |
+          set -euo pipefail
+          cd dist-assets
+          sha256sum ./*.tar.gz > SHA256SUMS.txt
+
+          NOTES="$(printf '%s\n' \
+            "Prebuilt deployment archives for **${TAG}** (no private \`content/\` included)." \
+            "" \
+            "- \`lecture-api-${TAG}.tar.gz\`: compiled Hono backend (\`dist/\`, \`migrations/\`, \`scripts/\`, \`deploy/\`, \`package*.json\`); run \`npm ci --omit=dev && node dist/index.js\` (or \`npm ci\` to run \`db:migrate\`/\`db:backup\` scripts)." \
+            "- \`interactive-lecture-engine-demo-dist-${TAG}.tar.gz\`: standalone static demo site built from \`templates/demo-content\`." \
+            "- \`content-template-${TAG}.tar.gz\`: clean \`templates/\` starter bundle." \
+            "- \`SHA256SUMS.txt\`: SHA-256 checksums for all archives.")"
+
+          ARGS=(release create "$TAG" ./*.tar.gz SHA256SUMS.txt
+            --repo "$GH_REPO"
+            --title "Interactive Lecture Engine ${TAG}"
+            --generate-notes
+            --notes "$NOTES")
+
+          if [ "$EVENT_NAME" = "push" ]; then
+            ARGS+=(--verify-tag)
+          else
+            ARGS+=(--target "$TARGET_SHA")
+          fi
+          if [ "$PRERELEASE" = "true" ]; then
+            ARGS+=(--prerelease)
+          fi
+          if [ "$DRAFT" = "true" ]; then
+            ARGS+=(--draft)
+          fi
+
+          gh "${ARGS[@]}"
