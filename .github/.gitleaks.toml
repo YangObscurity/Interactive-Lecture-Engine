@@ -5,6 +5,7 @@ useDefault = true
 
 [[allowlists]]
 description = "Synthetic test sentinel strings in unit and integration tests"
+condition = "AND"
 paths = [
   '''^server/tests/''',
   '''^site/tests/''',

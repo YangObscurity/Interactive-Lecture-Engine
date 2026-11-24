@@ -2,17 +2,16 @@ name: PR-Agent (ClinePass)
 
 on:
   pull_request:
+    # Omit synchronize to avoid burning ClinePass quota on fixup pushes; comment /review when re-review is needed.
     types: [opened, reopened, ready_for_review]
   issue_comment:
     types: [created]
 
 permissions:
   contents: read
-  issues: write
-  pull-requests: write
 
 jobs:
-  pr_agent:
+  prepare:
     if: >-
       github.event.sender.type != 'Bot' &&
       (
@@ -29,6 +28,37 @@ jobs:
         )
       )
     runs-on: ubuntu-latest
+    outputs:
+      allowed: ${{ steps.gate.outputs.allowed }}
+    steps:
+      - id: gate
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.issue.number }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            echo "allowed=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          head_repo="$(gh api "repos/${GH_REPO}/pulls/${PR_NUMBER}" --jq '.head.repo.full_name // ""')"
+          if [ "$head_repo" = "$GH_REPO" ]; then
+            echo "allowed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::Skipping PR-Agent secret job for fork PR comment ($head_repo)"
+            echo "allowed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  pr_agent:
+    needs: prepare
+    if: needs.prepare.outputs.allowed == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: write
     steps:
       - name: Run PR-Agent
         uses: qodo-ai/pr-agent@e673a02076ce09a4726c3d0c3cc85780e59ca52b # v0.50.0
