@@ -17,6 +17,8 @@
 import { defineConfig, devices } from '@playwright/test'
 
 const CI = !!process.env.CI
+const PARSED_E2E_WORKERS = Number(process.env.E2E_WORKERS)
+const E2E_WORKERS = Number.isInteger(PARSED_E2E_WORKERS) && PARSED_E2E_WORKERS > 0 ? PARSED_E2E_WORKERS : CI ? 4 : 2
 // Two checkouts can run e2e at the same time: E2E_PROD_PORT / E2E_DEV_PORT move the servers off the defaults.
 const PROD_PORT = Number(process.env.E2E_PROD_PORT ?? 4174)
 const DEV_PORT = Number(process.env.E2E_DEV_PORT ?? 5174)
@@ -51,7 +53,7 @@ export default defineConfig({
   outputDir: 'test-results',
   fullyParallel: true,
   forbidOnly: CI,
-  workers: 2,
+  workers: E2E_WORKERS,
   retries: CI ? 1 : 0,
   timeout: 90_000,
   expect: {
