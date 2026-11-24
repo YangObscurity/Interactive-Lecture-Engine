@@ -1,0 +1,51 @@
+name: PR-Agent (ClinePass)
+
+on:
+  pull_request:
+    types: [opened, reopened, ready_for_review]
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+
+jobs:
+  pr_agent:
+    if: >-
+      github.event.sender.type != 'Bot' &&
+      (
+        (
+          github.event_name == 'pull_request' &&
+          github.event.pull_request.head.repo.full_name == github.repository &&
+          !github.event.pull_request.draft
+        ) ||
+        (
+          github.event_name == 'issue_comment' &&
+          github.event.issue.pull_request &&
+          contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.comment.author_association) &&
+          startsWith(github.event.comment.body, '/')
+        )
+      )
+    runs-on: ubuntu-latest
+    steps:
+      - name: Run PR-Agent
+        uses: qodo-ai/pr-agent@e673a02076ce09a4726c3d0c3cc85780e59ca52b # v0.50.0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OPENAI_KEY: ${{ secrets.CLINE_API_KEY }}
+          OPENAI__API_BASE: https://api.cline.bot/api/v1
+          LITELLM__EXTRA_HEADERS: '{"X-Response-Format": "openai"}'
+          CONFIG__MODEL: openai/cline-pass/deepseek-v4.1-flash
+          CONFIG__MODEL_WEAK: openai/cline-pass/deepseek-v4.1-flash
+          CONFIG__MODEL_REASONING: openai/cline-pass/deepseek-v4.1-flash
+          CONFIG__FALLBACK_MODELS: '["openai/cline-pass/deepseek-v4.1-flash-1017", "openai/cline-pass/mimo-v2.6-flash"]'
+          CONFIG__CUSTOM_MODEL_MAX_TOKENS: '256000'
+          CONFIG__MAX_MODEL_TOKENS: '256000'
+          CONFIG__USE_REPO_SETTINGS_FILE: 'false'
+          CONFIG__DISABLE_AUTO_FEEDBACK: 'false'
+          GITHUB_ACTION_CONFIG__AUTO_DESCRIBE: 'true'
+          GITHUB_ACTION_CONFIG__AUTO_REVIEW: 'true'
+          GITHUB_ACTION_CONFIG__AUTO_IMPROVE: 'false'
+          GITHUB_ACTION_CONFIG__FAIL_ON_COMMAND_ERRORS: 'true'
