@@ -1,0 +1,312 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag name (e.g. v2.0.0 or v2026.11.24)'
+        required: true
+        type: string
+      prerelease:
+        description: 'Mark as prerelease'
+        required: false
+        default: false
+        type: boolean
+      draft:
+        description: 'Save as draft release'
+        required: false
+        default: false
+        type: boolean
+
+concurrency:
+  group: release-${{ github.event_name == 'push' && github.ref_name || inputs.tag }}
+  cancel-in-progress: false
+
+permissions: {}
+
+jobs:
+  prepare:
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.meta.outputs.tag }}
+      prerelease: ${{ steps.meta.outputs.prerelease }}
+      draft: ${{ steps.meta.outputs.draft }}
+    steps:
+      - name: Validate release tag and branch
+        id: meta
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+          REF_NAME: ${{ github.ref_name }}
+          INPUT_TAG: ${{ inputs.tag }}
+          INPUT_PRERELEASE: ${{ inputs.prerelease }}
+          INPUT_DRAFT: ${{ inputs.draft }}
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+
+          if [ "$EVENT_NAME" = "push" ]; then
+            TAG="$REF_NAME"
+            PRERELEASE="false"
+            if [[ "$TAG" == *-* ]]; then
+              PRERELEASE="true"
+            fi
+            DRAFT="false"
+          else
+            if [ "$REF" != "refs/heads/main" ]; then
+              echo "::error::Manual releases may only be triggered from main (got $REF)"
+              exit 1
+            fi
+            TAG="$INPUT_TAG"
+            PRERELEASE="$INPUT_PRERELEASE"
+            DRAFT="$INPUT_DRAFT"
+          fi
+
+          if [[ "$TAG" == *$'\n'* || "$TAG" == *$'\r'* ]] || ! [[ "$TAG" =~ ^v[0-9]+\.[0-9]+(\.[0-9]+)*(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::Invalid release tag '$TAG' (expected single-line semver or calver e.g. v2.0.0 or v2026.11.24)"
+            exit 1
+          fi
+
+          if gh release view "$TAG" --repo "$GH_REPO" >/dev/null 2>&1; then
+            echo "::error::Release '$TAG' already exists"
+            exit 1
+          fi
+
+          if [ "$EVENT_NAME" != "push" ]; then
+            set +e
+            tag_err="$(gh api "repos/${GH_REPO}/git/ref/tags/${TAG}" 2>&1)"
+            tag_rc=$?
+            set -e
+            if [ "$tag_rc" -eq 0 ]; then
+              echo "::error::Git tag '$TAG' already exists; push the tag or choose a new version"
+              exit 1
+            elif ! printf '%s' "$tag_err" | grep -q '404'; then
+              echo "::error::Failed to verify git tag availability for '$TAG': $tag_err"
+              exit 1
+            fi
+          fi
+
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "prerelease=$PRERELEASE" >> "$GITHUB_OUTPUT"
+          echo "draft=$DRAFT" >> "$GITHUB_OUTPUT"
+
+  build_server:
+    needs: prepare
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: server/package-lock.json
+      - name: Build and verify lecture-api server
+        working-directory: server
+        run: |
+          npm ci
+          npm run typecheck
+          npm run lint
+          npm test
+          npm run build
+      - name: Package lecture-api and content template archives
+        env:
+          TAG: ${{ needs.prepare.outputs.tag }}
+        run: |
+          set -euo pipefail
+          mkdir -p release-assets
+          STAGE="$(mktemp -d)"
+          trap 'rm -rf "$STAGE"' EXIT
+
+          API_DIR="$STAGE/lecture-api-${TAG}"
+          mkdir -p "$API_DIR" "$API_DIR/prompts"
+          cp -a server/dist server/src server/migrations server/scripts server/deploy "$API_DIR/"
+          cp -a server/package.json server/package-lock.json server/tsconfig.json server/tsconfig.typecheck.json server/.env.example server/README.md "$API_DIR/"
+          cp -a site/prompts/companion.example.json "$API_DIR/prompts/"
+          tar czf "release-assets/lecture-api-${TAG}.tar.gz" -C "$STAGE" "lecture-api-${TAG}"
+
+          TPL_DIR="$STAGE/content-template-${TAG}"
+          mkdir -p "$TPL_DIR"
+          cp -a templates/. "$TPL_DIR/"
+          tar czf "release-assets/content-template-${TAG}.tar.gz" -C "$STAGE" "content-template-${TAG}"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: release-server-and-template
+          path: release-assets/*.tar.gz
+          retention-days: 1
+
+  build_demo_site:
+    needs: prepare
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: site/package-lock.json
+      - name: Build and validate standalone demo static site
+        working-directory: site
+        run: |
+          test ! -e ../content
+          npm ci
+          npm run check:content
+          npm run build
+          npm run check:i18n:dist
+          npm run check:access:dist
+          npm run check:search:dist
+      - name: Package demo-dist archive
+        env:
+          TAG: ${{ needs.prepare.outputs.tag }}
+        run: |
+          set -euo pipefail
+          mkdir -p release-assets
+          STAGE="$(mktemp -d)"
+          trap 'rm -rf "$STAGE"' EXIT
+          OUT_DIR="$STAGE/demo-dist-${TAG}"
+          mkdir -p "$OUT_DIR"
+          cp -a site/docs/.vitepress/dist/. "$OUT_DIR/"
+          tar czf "release-assets/interactive-lecture-engine-demo-dist-${TAG}.tar.gz" -C "$STAGE" "demo-dist-${TAG}"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: release-demo-dist
+          path: release-assets/*.tar.gz
+          retention-days: 1
+
+  publish:
+    needs: [prepare, build_server, build_demo_site]
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download release archives
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          path: dist-assets
+          merge-multiple: true
+      - name: Generate SHA256SUMS and publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          EVENT_NAME: ${{ github.event_name }}
+          TARGET_SHA: ${{ github.sha }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+          PRERELEASE: ${{ needs.prepare.outputs.prerelease }}
+          DRAFT: ${{ needs.prepare.outputs.draft }}
+        run: |
+          set -euo pipefail
+          cd dist-assets
+
+          expected_archives=(
+            "lecture-api-${TAG}.tar.gz"
+            "interactive-lecture-engine-demo-dist-${TAG}.tar.gz"
+            "content-template-${TAG}.tar.gz"
+          )
+          for archive in "${expected_archives[@]}"; do
+            if [ ! -f "$archive" ]; then
+              echo "::error::Missing expected release archive '$archive'"
+              exit 1
+            fi
+          done
+
+          sha256sum "${expected_archives[@]}" > SHA256SUMS.txt
+
+          resolve_tag_commit() {
+            local ref_json obj_type obj_sha tag_json rc=0
+            ref_json="$(gh api "repos/${GH_REPO}/git/ref/tags/${TAG}" 2>&1)" || rc=$?
+            if [ "$rc" -ne 0 ]; then
+              if printf '%s' "$ref_json" | grep -q 'HTTP 404'; then
+                return 1
+              fi
+              echo "::error::Failed to query git ref refs/tags/${TAG}: ${ref_json}" >&2
+              return 2
+            fi
+            obj_type="$(printf '%s' "$ref_json" | jq -r '.object.type // ""')" || return 2
+            obj_sha="$(printf '%s' "$ref_json" | jq -r '.object.sha // ""')" || return 2
+            local depth=0
+            while [ "$obj_type" = "tag" ]; do
+              depth=$((depth + 1))
+              if [ "$depth" -gt 10 ]; then
+                echo "::error::Too many nested tag dereferences for refs/tags/${TAG}" >&2
+                return 2
+              fi
+              tag_json="$(gh api "repos/${GH_REPO}/git/tags/${obj_sha}" 2>&1)" || {
+                echo "::error::Failed to dereference annotated tag '${obj_sha}': ${tag_json}" >&2
+                return 2
+              }
+              obj_type="$(printf '%s' "$tag_json" | jq -r '.object.type // ""')" || return 2
+              obj_sha="$(printf '%s' "$tag_json" | jq -r '.object.sha // ""')" || return 2
+            done
+            if [ "$obj_type" != "commit" ] || [ -z "$obj_sha" ]; then
+              echo "::error::Expected commit target for refs/tags/${TAG}, got '${obj_type}' '${obj_sha}'" >&2
+              return 2
+            fi
+            printf '%s' "$obj_sha"
+          }
+
+          pre_tag_sha=""
+          pre_tag_rc=0
+          pre_tag_sha="$(resolve_tag_commit)" || pre_tag_rc=$?
+          if [ "$pre_tag_rc" -eq 2 ]; then
+            exit 1
+          elif [ "$pre_tag_rc" -eq 0 ]; then
+            if [ "$pre_tag_sha" != "$TARGET_SHA" ]; then
+              echo "::error::Git tag '$TAG' points to '$pre_tag_sha', expected built commit '$TARGET_SHA'"
+              exit 1
+            fi
+          elif [ "$EVENT_NAME" = "push" ]; then
+            echo "::error::Push release requires existing git tag '$TAG' pointing to '$TARGET_SHA'"
+            exit 1
+          fi
+
+          NOTES="$(printf '%s\n' \
+            "Prebuilt deployment archives for **${TAG}** (no private \`content/\` included)." \
+            "" \
+            "- \`lecture-api-${TAG}.tar.gz\`: compiled Hono backend (\`dist/\`, \`src/\`, \`migrations/\`, \`scripts/\`, \`deploy/\`, \`prompts/companion.example.json\`, \`package*.json\`); run \`npm ci --omit=dev && node dist/index.js\` (or \`npm ci\` to run \`db:migrate\`/\`db:backup\`/\`setup\` scripts)." \
+            "- \`interactive-lecture-engine-demo-dist-${TAG}.tar.gz\`: standalone static demo site built from \`templates/demo-content\`." \
+            "- \`content-template-${TAG}.tar.gz\`: clean \`templates/\` starter bundle." \
+            "- \`SHA256SUMS.txt\`: SHA-256 checksums for all archives.")"
+
+          ARGS=(release create "$TAG" "${expected_archives[@]}" SHA256SUMS.txt
+            --repo "$GH_REPO"
+            --title "Interactive Lecture Engine ${TAG}"
+            --generate-notes
+            --notes "$NOTES")
+
+          if [ "$pre_tag_rc" -eq 0 ]; then
+            ARGS+=(--verify-tag)
+          else
+            ARGS+=(--target "$TARGET_SHA")
+          fi
+          if [ "$PRERELEASE" = "true" ]; then
+            ARGS+=(--prerelease)
+          fi
+          if [ "$DRAFT" = "true" ]; then
+            ARGS+=(--draft)
+          fi
+
+          gh "${ARGS[@]}"
+
+          post_tag_sha=""
+          post_tag_rc=0
+          post_tag_sha="$(resolve_tag_commit)" || post_tag_rc=$?
+          if [ "$post_tag_rc" -eq 2 ]; then
+            exit 1
+          elif [ "$post_tag_rc" -eq 0 ]; then
+            if [ "$post_tag_sha" != "$TARGET_SHA" ]; then
+              echo "::error::Post-publish tag '$TAG' resolved to '$post_tag_sha' instead of built commit '$TARGET_SHA'"
+              exit 1
+            fi
+          elif [ "$DRAFT" != "true" ]; then
+            echo "::error::Post-publish tag '$TAG' not found after creating non-draft release"
+            exit 1
+          fi
