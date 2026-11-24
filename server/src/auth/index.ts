@@ -1,6 +1,7 @@
 import type { MiddlewareHandler } from 'hono'
 import type { AppConfig } from '../config/schema.js'
 import type { Db } from '../db/types.js'
+import { setSetting } from '../repo/siteSettings.js'
 import { isOriginAllowed } from './origin.js'
 import { createHybridAuthAdapter } from './hybrid.js'
 import { createLocalAuthAdapter } from './local.js'
@@ -19,6 +20,27 @@ export { createLocalAuthAdapter } from './local.js'
 export { createHybridAuthAdapter } from './hybrid.js'
 export * from './password.js'
 export * from './sessions.js'
+
+let gatewaySeenGeneration = 1
+const gatewaySeenGenByDb = new WeakMap<Db, number>()
+
+export function hasSeenGatewayAuthInMemory(db: Db): boolean {
+  return gatewaySeenGenByDb.get(db) === gatewaySeenGeneration
+}
+
+export function markGatewayAuthSeen(db: Db): void {
+  if (gatewaySeenGenByDb.get(db) === gatewaySeenGeneration) return
+  gatewaySeenGenByDb.set(db, gatewaySeenGeneration)
+  void setSetting(db, 'gateway_auth_seen', { seen: true }, 'gateway').catch(() => {})
+}
+
+export function resetGatewayAuthSeen(db?: Db): void {
+  if (db) {
+    gatewaySeenGenByDb.delete(db)
+  } else {
+    gatewaySeenGeneration += 1
+  }
+}
 
 export function createAuthAdapter(
   config: AppConfig & { authAdapter: 'none' | 'trusted-header' },
@@ -109,6 +131,10 @@ export function createAuthMiddleware(
     c.set('rememberMe', auth.rememberMe)
     c.set('canAccessAdmin', auth.canAccessAdmin)
     c.set('canAccessAuthor', auth.canAccessAuthor)
+
+    if (db && auth.authSource === 'gateway' && config.authAdapter === 'hybrid') {
+      markGatewayAuthSeen(db)
+    }
 
     await next()
   }

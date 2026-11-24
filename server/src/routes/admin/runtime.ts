@@ -26,6 +26,7 @@ export function createAdminRuntimeRouter(config: AppConfig, aiRuntime?: AiRuntim
     c.header('Cache-Control', 'no-store')
     try {
       await aiRuntime?.prompts?.reload()
+      await aiRuntime?.mcpManager?.reload().catch(() => {})
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
       serverLogBuffer.add({

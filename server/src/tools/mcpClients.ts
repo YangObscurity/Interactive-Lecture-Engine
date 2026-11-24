@@ -116,7 +116,10 @@ export class ExternalMcpManager {
 
   async applyConfigOverride(cfg: AiToolsFileConfig | null): Promise<void> {
     this.configOverride = cfg
-    if (!cfg) return
+    if (!cfg) {
+      await this.closeAll()
+      return
+    }
     const keepIds = new Set(cfg.mcpServers.map((s) => s.id))
     for (const [id, entry] of [...this.entries.entries()]) {
       const serverCfg = cfg.mcpServers.find((s) => s.id === id)
@@ -125,6 +128,13 @@ export class ExternalMcpManager {
         if (!keepIds.has(id)) this.entries.delete(id)
       }
     }
+  }
+
+  async reload(): Promise<AiToolsFileConfig> {
+    await this.applyConfigOverride(null)
+    const nextCfg = await this.loadConfig()
+    await this.applyConfigOverride(nextCfg)
+    return nextCfg
   }
 
   async loadConfig(): Promise<AiToolsFileConfig> {

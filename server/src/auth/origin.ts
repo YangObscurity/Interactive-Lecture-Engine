@@ -51,6 +51,7 @@ export function isOriginAllowed(
         return true
       }
     }
+    return false
   } catch {
     parsedReqUrl = null
   }
@@ -61,7 +62,7 @@ export function isOriginAllowed(
       const proto =
         cfg.authCookieSecure === 'true' || forwardedProto === 'https'
           ? 'https:'
-          : (parsedReqUrl?.protocol ?? 'http:')
+          : 'http:'
       try {
         const hostOrigin = new URL(`${proto}//${cleanHost}`).origin.toLowerCase()
         if (hostOrigin === cleanClientOrigin) {

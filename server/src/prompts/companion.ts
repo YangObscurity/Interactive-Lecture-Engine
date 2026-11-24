@@ -590,9 +590,7 @@ export function createServerPromptStore(
     return refreshIfNeeded()
   }
 
-  if (config.aiProvider !== 'off' || Boolean(config.aiPromptsFile)) {
-    refreshIfNeeded()
-  }
+  // Defer loading until setDbLoader() or load()/require() runs so DB-only deployments do not fail before DB hydration attaches.
 
   return {
     get() {
@@ -621,7 +619,9 @@ export function createServerPromptStore(
         overridePrompts = null
         cachedMtimeMs = -1
         cachedPrompts = null
-        await load()
+        if (prompts === undefined) {
+          await load()
+        }
       }
     },
   }

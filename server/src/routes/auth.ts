@@ -24,7 +24,12 @@ import {
 import type { AppConfig, Role } from '../config/schema.js'
 import type { Db } from '../db/types.js'
 import { randomUUID, timingSafeEqual } from 'node:crypto'
-import { getSetting, setSetting } from '../repo/siteSettings.js'
+import {
+  hasSeenGatewayAuthInMemory,
+  markGatewayAuthSeen,
+  resetGatewayAuthSeen,
+} from '../auth/index.js'
+import { getSetting } from '../repo/siteSettings.js'
 
 export function computeVisibleSections(roles: readonly Role[]): string[] {
   if (roles.includes('admin')) {
@@ -66,10 +71,8 @@ function getRequestContext(c: Context<AppEnv>) {
   }
 }
 
-let inMemoryGatewaySeen = false
-
-export function resetGatewayAuthSeenForTests(): void {
-  inMemoryGatewaySeen = false
+export function resetGatewayAuthSeenForTests(db?: Db): void {
+  resetGatewayAuthSeen(db)
 }
 
 interface BootstrapCheckResult {
@@ -174,13 +177,13 @@ export async function canBootstrapNow(
     }
 
     let gatewaySeen =
-      inMemoryGatewaySeen || Boolean(config.logoutUrl && config.logoutUrl.trim() !== '')
+      hasSeenGatewayAuthInMemory(db) || Boolean(config.logoutUrl && config.logoutUrl.trim() !== '')
     if (!gatewaySeen) {
       try {
         const seenSetting = await getSetting<{ seen?: boolean }>(db, 'gateway_auth_seen')
         if (seenSetting?.seen) {
           gatewaySeen = true
-          inMemoryGatewaySeen = true
+          markGatewayAuthSeen(db)
         }
       } catch {
         // ignore
@@ -216,11 +219,8 @@ export function createAuthRouter(
     const session = c.get('session')
     const auth = c.get('auth')
 
-    if (c.get('authSource') === 'gateway') {
-      if (!inMemoryGatewaySeen) {
-        inMemoryGatewaySeen = true
-        setSetting(db, 'gateway_auth_seen', { seen: true }).catch(() => {})
-      }
+    if (c.get('authSource') === 'gateway' && config.authAdapter === 'hybrid') {
+      markGatewayAuthSeen(db)
     }
 
     const check = await canBootstrapNow(config, db, c)

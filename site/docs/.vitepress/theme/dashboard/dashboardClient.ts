@@ -53,7 +53,6 @@ import {
   savePromptsWithMessage,
   saveThemeConfig,
   saveToolSwitches,
-  type CheckRunPayload,
   type DevLogLine,
   type HistoryPayload,
   type PreviewAccessResult,

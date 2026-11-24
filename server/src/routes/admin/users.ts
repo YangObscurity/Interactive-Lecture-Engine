@@ -163,7 +163,12 @@ export function createAdminUsersRouter(db: Db): Hono<AppEnv> {
           ? body.password
           : ''
     try {
-      await updateManagedUser(db, targetUserId, { password })
+      await updateManagedUser(
+        db,
+        targetUserId,
+        { password },
+        { requireNonEmptyPassword: true },
+      )
       return c.json({ ok: true }, 200)
     } catch (err) {
       if (err instanceof UserManagementError) {

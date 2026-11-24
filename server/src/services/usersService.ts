@@ -125,7 +125,7 @@ export async function createManagedUser(
   }
 
   let passwordHash = ''
-  if (input.password === null || input.password === '') {
+  if (input.password === null) {
     passwordHash = ''
   } else if (typeof input.password === 'string') {
     try {
@@ -140,7 +140,7 @@ export async function createManagedUser(
       )
     }
     passwordHash = await hashPassword(input.password)
-  } else if (input.password !== undefined) {
+  } else {
     throw new UserManagementError('invalid_password', 'Password must be at least 8 characters', 400)
   }
 
@@ -205,10 +205,15 @@ export interface UpdateManagedUserInput {
   password?: unknown
 }
 
+export interface UpdateManagedUserOptions {
+  requireNonEmptyPassword?: boolean
+}
+
 export async function updateManagedUser(
   db: Db,
   targetUserId: string,
   input: UpdateManagedUserInput,
+  options?: UpdateManagedUserOptions,
 ): Promise<ManagedUserRow> {
   let parsedNewRoles: Role[] | undefined
   if (input.roles !== undefined) {
@@ -224,7 +229,19 @@ export async function updateManagedUser(
   }
 
   let passwordHashUpdate: string | null = null
-  if (input.password !== undefined && input.password !== null) {
+  if (options?.requireNonEmptyPassword && (typeof input.password !== 'string' || input.password.length === 0)) {
+    try {
+      validatePasswordStrength(typeof input.password === 'string' ? input.password : '')
+    } catch (err) {
+      throw new UserManagementError(
+        'invalid_password',
+        err instanceof PasswordValidationError || err instanceof Error
+          ? err.message
+          : String(err),
+        400,
+      )
+    }
+  } else if (input.password !== undefined) {
     if (typeof input.password !== 'string') {
       throw new UserManagementError('invalid_password', 'Password must be a string', 400)
     }

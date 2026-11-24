@@ -965,4 +965,74 @@ describe('WP-5 RBAC Online Dashboard Suite', () => {
     expect(wrapper.find('[data-access-load-error]').exists()).toBe(true)
     expect(wrapper.find('[data-access-save-btn]').exists()).toBe(false)
   })
+
+  it('f) DashboardLogin toggles bootstrap mode and submits setupToken when bootstrapTokenRequired is true', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input.toString()
+      if (url.endsWith('/api/auth/bootstrap')) {
+        return jsonResponse({
+          ok: true,
+          authenticated: true,
+          user: { id: 'admin-1', username: 'tokenadmin', name: 'Token Admin', email: null },
+          roles: ['reader', 'author', 'admin'],
+          groups: [],
+          canAccessAdmin: true,
+          canAccessAuthor: true,
+        }, 201)
+      }
+      return jsonResponse({ ok: true })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const wrapper = mount(DashboardLogin, {
+      props: {
+        authStatus: {
+          authAdapter: 'local',
+          authenticated: false,
+          needsBootstrap: false,
+          bootstrapTokenRequired: true,
+          authSource: 'none',
+          authMethod: 'anonymous',
+          rememberMe: false,
+          user: null,
+          roles: ['reader'],
+          groups: [],
+          canAccessAdmin: false,
+          canAccessAuthor: false,
+          visibleSections: ['my-learning', 'account'],
+        },
+        methods: [
+          {
+            id: 'password',
+            name: 'Password',
+            description: 'Password login',
+            enabled: true,
+            implemented: true,
+            extensible: false,
+          },
+        ],
+      },
+    })
+
+    const toggleBtn = wrapper.find('[data-login-bootstrap-token-toggle]')
+    expect(toggleBtn.exists()).toBe(true)
+    expect(wrapper.find('[data-login-setup-token]').exists()).toBe(false)
+
+    await toggleBtn.trigger('click')
+    expect(wrapper.find('[data-login-setup-token]').exists()).toBe(true)
+
+    await wrapper.find('[data-login-setup-token]').setValue('my-setup-secret')
+    await wrapper.find('[data-login-username]').setValue('tokenadmin')
+    await wrapper.find('[data-login-password]').setValue('Password123!')
+    await wrapper.find('[data-login-confirm]').setValue('Password123!')
+    await wrapper.find('[data-login-form]').trigger('submit')
+    await flushPromises()
+
+    const bootCall = fetchMock.mock.calls.find(([url]) => String(url).endsWith('/api/auth/bootstrap'))
+    expect(bootCall).toBeTruthy()
+    const sentBody = JSON.parse(String(bootCall![1]?.body))
+    expect(sentBody.setupToken).toBe('my-setup-secret')
+    expect(sentBody.username).toBe('tokenadmin')
+    expect(wrapper.emitted('authenticated')).toBeTruthy()
+  })
 })

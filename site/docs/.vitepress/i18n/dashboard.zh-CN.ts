@@ -738,6 +738,11 @@ export const dashboardZhCN = {
   'dsh.login.errRequired': '请填写用户名和密码',
   'dsh.login.errPasswordMismatch': '两次输入的密码不一致',
   'dsh.login.errPasswordShort': '密码至少需要 8 个字符',
+  'dsh.login.setupToken': '初始化令牌 (Bootstrap Token)',
+  'dsh.login.setupTokenHint': '对应服务端环境变量 AUTH_BOOTSTRAP_TOKEN',
+  'dsh.login.bootstrapWithTokenBtn': '使用初始化令牌创建首个管理员',
+  'dsh.login.backToLoginBtn': '返回常规登录',
+  'dsh.login.errSetupTokenRequired': '请输入服务端配置的初始化令牌',
 
   // ---- WP-4: 我的学习 (PageMyLearning) ----
   'dsh.me.title': '我的学习',
@@ -958,8 +963,8 @@ export const dashboardZhCN = {
   'dsh.lk.onlineSettingSave': '保存设置',
   'dsh.lk.onlineSettingSaved': '已保存设置 {key}',
   'dsh.lk.onlineSettingJsonErr': '设置值必须是合法 JSON',
-  'dsh.lk.onlineSettingReservedErr': '此键属于受保护的业务配置项（access、texts、look、ai_tools、companion_prompts），请前往专属页面进行修改。',
-  'dsh.lk.onlineSettingsReservedHint': '业务设置（access、texts、look、ai_tools、companion_prompts 等）需在专属页面修改',
+  'dsh.lk.onlineSettingReservedErr': '此键属于受保护的业务或系统配置项（access、texts、look、ai_tools、companion_prompts、last_check_report、gateway_auth_seen），请前往专属页面修改。',
+  'dsh.lk.onlineSettingsReservedHint': '业务与系统保留设置（access、texts、look、ai_tools、companion_prompts 等）需在专属页面修改',
   'dsh.lk.savedThemeOnline': '主题外观已保存到服务端（需要重建静态站点以生效）',
   'dsh.rt.reloadBtn': '重载运行时',
   'dsh.rt.reloadOk': '运行时缓存与提示词已于 {time} 重载',

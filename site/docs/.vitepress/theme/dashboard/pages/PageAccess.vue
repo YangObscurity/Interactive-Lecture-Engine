@@ -448,7 +448,7 @@ onMounted(async () => {
         )
       )
       if (res.source === 'uninitialized_restricted' || isRestrictedInTheme) {
-        onlineLoadError.value = t('dsh.ac.uninitializedRestrictedErr') || 'Existing site restrictions detected. Initialize access.json or export from site.config.ts before editing online to prevent overwriting restrictions.'
+        onlineLoadError.value = t('dsh.ac.uninitializedRestrictedErr')
         feedback.value = onlineLoadError.value
         feedbackError.value = true
       } else {

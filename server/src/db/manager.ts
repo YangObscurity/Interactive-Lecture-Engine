@@ -176,6 +176,7 @@ export interface DbManager {
     nextMeta: DbSwapNextMeta,
     options?: DbSwapOptions,
   ): Promise<DbSwapResult>
+  onSwap?(listener: () => void | Promise<void>): () => void
   close(): Promise<void>
 }
 
@@ -189,6 +190,7 @@ export function createDbManager(
   const envFilePath: string | null = initialMeta.envFilePath ?? null
   const swapMutex = new AsyncMutex()
   const operationMutex = new AsyncMutex()
+  const swapListeners = new Set<() => void | Promise<void>>()
 
   const inflight = new WeakMap<Db, { count: number; waiters: Array<() => void> }>()
 
@@ -409,6 +411,14 @@ export function createDbManager(
           backupPath = persisted.backupPath
         }
 
+        for (const listener of swapListeners) {
+          try {
+            await listener()
+          } catch {
+            // Keep DB swap deterministic even if cache listener fails
+          }
+        }
+
         return {
           previousKind,
           currentKind: nextDb.kind,
@@ -416,6 +426,13 @@ export function createDbManager(
           backupPath,
         }
       })
+    },
+
+    onSwap(listener: () => void | Promise<void>): () => void {
+      swapListeners.add(listener)
+      return () => {
+        swapListeners.delete(listener)
+      }
     },
 
     async close(): Promise<void> {

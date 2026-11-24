@@ -601,13 +601,6 @@ export function saveOnlineCompanion(prompts: CompanionPromptsFile): Promise<Admi
   return adminFetch<OnlineCompanionSavePayload>('PUT', '/api/admin/companion', { prompts })
 }
 
-export function saveOnlineCompanionAction(
-  name: string,
-  action: Record<string, unknown> | null,
-): Promise<AdminApiResult<{ ok: boolean; action: unknown; persistence: OnlinePersistenceInfo }>> {
-  return adminFetch('PUT', `/api/admin/companion/prompts/${encodeURIComponent(name)}`, { action })
-}
-
 export function fetchOnlineCompanionHistory(): Promise<
   AdminApiResult<{ ok: boolean; history: OnlineCompanionHistoryItem[] }>
 > {

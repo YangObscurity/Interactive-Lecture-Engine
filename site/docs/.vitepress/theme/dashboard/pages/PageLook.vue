@@ -341,6 +341,11 @@ async function loadOnlineSetting(): Promise<void> {
   if (!canWrite.value) return
   const key = onlineSettingKey.value.trim()
   if (!key) return
+  if (RESERVED_SETTING_KEYS.has(key)) {
+    onlineSettingErr.value = true
+    onlineSettingMsg.value = t('dsh.lk.onlineSettingReservedErr')
+    return
+  }
   onlineSettingBusy.value = true
   onlineSettingErr.value = false
   onlineSettingMsg.value = ''

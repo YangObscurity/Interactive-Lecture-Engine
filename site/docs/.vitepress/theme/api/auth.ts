@@ -34,6 +34,7 @@ export interface AuthStatus {
   authAdapter: string
   authenticated: boolean
   needsBootstrap: boolean
+  bootstrapTokenRequired?: boolean
   authSource: string
   authMethod: string
   rememberMe: boolean
@@ -314,6 +315,7 @@ export function bootstrapAdmin(payload: {
   displayName?: string
   email?: string
   rememberMe?: boolean
+  setupToken?: string
 }): Promise<AuthLoginResult> {
   return apiJson<AuthLoginResult>('POST', '/api/auth/bootstrap', payload)
 }

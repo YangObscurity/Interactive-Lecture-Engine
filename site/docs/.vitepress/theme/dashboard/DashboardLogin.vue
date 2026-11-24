@@ -48,13 +48,20 @@ const form = reactive({
   username: '',
   displayName: '',
   email: '',
+  setupToken: '',
   password: '',
   confirmPassword: '',
   rememberMe: true,
 })
 
+const useBootstrapToken = ref(false)
 const effectiveStatus = computed(() => props.authStatus ?? fetchedStatus.value)
-const isBootstrap = computed(() => Boolean(effectiveStatus.value?.needsBootstrap))
+const bootstrapTokenRequired = computed(() => Boolean(effectiveStatus.value?.bootstrapTokenRequired))
+const isBootstrap = computed(
+  () =>
+    Boolean(effectiveStatus.value?.needsBootstrap) ||
+    (bootstrapTokenRequired.value && useBootstrapToken.value),
+)
 const effectiveMethods = computed<AuthMethodInfo[]>(() =>
   props.methods !== undefined ? props.methods : fetchedMethods.value,
 )
@@ -142,6 +149,10 @@ async function onSubmit(): Promise<void> {
   }
 
   if (isBootstrap.value) {
+    if (bootstrapTokenRequired.value && !form.setupToken.trim()) {
+      errorMessage.value = t('dsh.login.errSetupTokenRequired')
+      return
+    }
     if (form.password.length < 8) {
       errorMessage.value = t('dsh.login.errPasswordShort')
       return
@@ -160,6 +171,7 @@ async function onSubmit(): Promise<void> {
           password: form.password,
           ...(form.displayName.trim() ? { displayName: form.displayName.trim() } : {}),
           ...(form.email.trim() ? { email: form.email.trim() } : {}),
+          ...(bootstrapTokenRequired.value ? { setupToken: form.setupToken.trim() } : {}),
           rememberMe: form.rememberMe,
         })
       : await loginWithPassword({
@@ -290,6 +302,25 @@ async function onPasskeyLogin(): Promise<void> {
           </div>
 
           <template v-if="isBootstrap">
+            <div v-if="bootstrapTokenRequired" class="db-frow one">
+              <label class="db-fl" for="dsh-login-setup-token">
+                {{ t('dsh.login.setupToken') }}
+                <small>{{ t('dsh.login.setupTokenHint') }}</small>
+              </label>
+              <div class="db-fld">
+                <input
+                  id="dsh-login-setup-token"
+                  v-model="form.setupToken"
+                  class="db-in"
+                  type="password"
+                  autocomplete="one-time-code"
+                  :disabled="submitting"
+                  required
+                  data-login-setup-token
+                />
+              </div>
+            </div>
+
             <div class="db-frow one">
               <label class="db-fl" for="dsh-login-displayname">{{ t('dsh.login.displayName') }}</label>
               <div class="db-fld">
@@ -399,6 +430,17 @@ async function onPasskeyLogin(): Promise<void> {
               @click="onPasskeyLogin"
             >
               {{ t('dsh.login.passkeyBtn') }}
+            </button>
+
+            <button
+              v-if="bootstrapTokenRequired"
+              type="button"
+              class="db-btn sm"
+              :disabled="submitting"
+              data-login-bootstrap-token-toggle
+              @click="useBootstrapToken = !useBootstrapToken; errorMessage = ''"
+            >
+              {{ isBootstrap ? t('dsh.login.backToLoginBtn') : t('dsh.login.bootstrapWithTokenBtn') }}
             </button>
           </div>
         </form>

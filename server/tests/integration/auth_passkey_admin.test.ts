@@ -10,7 +10,7 @@ import { isOriginAllowed } from '../../src/auth/origin.js'
 import type { AuthMethodProvider } from '../../src/auth/providers/types.js'
 import { loadConfig } from '../../src/config/load.js'
 import type { AppConfig } from '../../src/config/schema.js'
-import { createDb } from '../../src/db/index.js'
+import { createDb, createDbManager } from '../../src/db/index.js'
 import { runMigrations } from '../../src/db/migrate.js'
 import type { Db } from '../../src/db/types.js'
 import { serverLogBuffer } from '../../src/http/logBuffer.js'
@@ -1793,6 +1793,257 @@ describe('WP-2: Backend Authentication, Cookies, Passkeys, Hybrid, Me & Admin', 
         body: JSON.stringify({ username: 'admintoken', password: 'Password123!' }),
       })
       expect(correctTokenRes.status).toBe(201)
+    })
+
+    it('7. rejects Host-header CSRF bypass when request URL parses to a different origin', async () => {
+      const cfg = makeTestConfig({ webauthnOrigin: '' })
+      expect(
+        isOriginAllowed(
+          'https://evil.example.com',
+          cfg,
+          'https://app.example.com/api/admin/texts',
+          'evil.example.com',
+        ),
+      ).toBe(false)
+      expect(
+        isOriginAllowed(
+          'https://app.example.com',
+          cfg,
+          'http://app.example.com/api/admin/texts',
+          'app.example.com',
+          (h) => (h.toLowerCase() === 'x-forwarded-proto' ? 'https' : undefined),
+        ),
+      ).toBe(true)
+
+      const memDb = createDb('pglite:memory')
+      await runMigrations(memDb)
+      const csrfApp = createApp(makeTestConfig({ authAdapter: 'local', webauthnOrigin: '' }), memDb)
+      const boot = await csrfApp.request('https://app.example.com/api/auth/bootstrap', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Origin: 'https://app.example.com',
+        },
+        body: JSON.stringify({ username: 'csrfadmin', password: 'Password123!' }),
+      })
+      expect(boot.status).toBe(201)
+      const cookie = extractCookie(boot).value!
+
+      const forged = await csrfApp.request('https://app.example.com/api/admin/texts', {
+        method: 'PUT',
+        headers: {
+          Cookie: `lec_session=${cookie}`,
+          Origin: 'https://evil.example.com',
+          Host: 'evil.example.com',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ texts: { pwned: true } }),
+      })
+      expect(forged.status).toBe(403)
+    })
+
+    it('8. enforces password validation on PUT /api/admin/users/:id/password and POST /api/admin/users', async () => {
+      const memDb = createDb('pglite:memory')
+      await runMigrations(memDb)
+      const uApp = createApp(makeTestConfig({ authAdapter: 'local' }), memDb)
+      const boot = await uApp.request('/api/auth/bootstrap', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: 'useradmin', password: 'Password123!' }),
+      })
+      const cookie = extractCookie(boot).value!
+
+      // Omitted or empty-string password on POST /api/admin/users -> 400 invalid_password
+      const missingPw = await uApp.request('/api/admin/users', {
+        method: 'POST',
+        headers: { Cookie: `lec_session=${cookie}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: 'nopwuser' }),
+      })
+      expect(missingPw.status).toBe(400)
+      expect((await missingPw.json()).error).toBe('invalid_password')
+
+      const emptyPwCreate = await uApp.request('/api/admin/users', {
+        method: 'POST',
+        headers: { Cookie: `lec_session=${cookie}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: 'emptypwuser', password: '' }),
+      })
+      expect(emptyPwCreate.status).toBe(400)
+      expect((await emptyPwCreate.json()).error).toBe('invalid_password')
+
+      // Explicit null password creates passwordless passkey user -> 201
+      const passkeyUserRes = await uApp.request('/api/admin/users', {
+        method: 'POST',
+        headers: { Cookie: `lec_session=${cookie}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: 'passkeyonly', password: null }),
+      })
+      expect(passkeyUserRes.status).toBe(201)
+      const createdId = (await passkeyUserRes.json()).id as string
+
+      // PUT /:id/password with {} or empty newPassword -> 400 invalid_password
+      const emptyReset1 = await uApp.request(`/api/admin/users/${createdId}/password`, {
+        method: 'PUT',
+        headers: { Cookie: `lec_session=${cookie}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      })
+      expect(emptyReset1.status).toBe(400)
+      expect((await emptyReset1.json()).error).toBe('invalid_password')
+
+      const emptyReset2 = await uApp.request(`/api/admin/users/${createdId}/password`, {
+        method: 'PUT',
+        headers: { Cookie: `lec_session=${cookie}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ newPassword: '' }),
+      })
+      expect(emptyReset2.status).toBe(400)
+      expect((await emptyReset2.json()).error).toBe('invalid_password')
+    })
+
+    it('9. defers missing AI_PROMPTS_FILE read until DB loader attaches and invalidates caches on db swap', async () => {
+      const dbA = createDb('pglite:memory')
+      await runMigrations(dbA)
+      const promptsA: CompanionPromptsFile = {
+        version: 1,
+        system: { zh: 'DB A Prompt', en: 'DB A Prompt EN' },
+        actions: [
+          {
+            id: 'explain',
+            label: { zh: '解释', en: 'Explain' },
+            template: { zh: '解释：{selection}', en: 'Explain: {selection}' },
+            needsSelection: true,
+            surfaces: ['panel'],
+            enabled: true,
+          },
+        ],
+      }
+      await setSetting(dbA, 'companion_prompts', promptsA, 'seed')
+
+      const dbB = createDb('pglite:memory')
+      await runMigrations(dbB)
+      const promptsB: CompanionPromptsFile = {
+        ...promptsA,
+        system: { zh: 'DB B Prompt', en: 'DB B Prompt EN' },
+      }
+      await setSetting(dbB, 'companion_prompts', promptsB, 'seed')
+
+      const dbMgr = createDbManager(dbA, { databaseUrl: 'pglite:memory' })
+      // Explicit nonexistent aiPromptsFile MUST NOT crash createApp when prompts live in DB
+      const appWithMissingFile = createApp(
+        makeTestConfig({
+          authAdapter: 'local',
+          aiProvider: 'dify',
+          aiPromptsFile: join(tmpdir(), `missing-prompts-${Date.now()}.json`),
+        }),
+        dbA,
+        { dbManager: dbMgr },
+      )
+
+      const boot = await appWithMissingFile.request('/api/auth/bootstrap', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: 'swapadmin', password: 'Password123!' }),
+      })
+      const cookieA = extractCookie(boot).value!
+
+      // Runtime reload populates prompts from dbA
+      const reloadA = await appWithMissingFile.request('/api/admin/runtime/reload', {
+        method: 'POST',
+        headers: { Cookie: `lec_session=${cookieA}` },
+      })
+      expect(reloadA.status).toBe(200)
+
+      const compA = await appWithMissingFile.request('/api/admin/companion', {
+        headers: { Cookie: `lec_session=${cookieA}` },
+      })
+      expect((await compA.json()).prompts.system.zh).toBe('DB A Prompt')
+
+      // Swap to dbB -> stale cached prompts cleared automatically
+      await dbMgr.swapTo(dbB, { databaseUrl: 'pglite:memory' }, { updateEnv: false })
+      const bootB = await appWithMissingFile.request('/api/auth/bootstrap', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: 'swapadminb', password: 'Password123!' }),
+      })
+      const cookieB = extractCookie(bootB).value!
+
+      const reloadB = await appWithMissingFile.request('/api/admin/runtime/reload', {
+        method: 'POST',
+        headers: { Cookie: `lec_session=${cookieB}` },
+      })
+      expect(reloadB.status).toBe(200)
+      const compB = await appWithMissingFile.request('/api/admin/companion', {
+        headers: { Cookie: `lec_session=${cookieB}` },
+      })
+      expect((await compB.json()).prompts.system.zh).toBe('DB B Prompt')
+      await dbMgr.close()
+    })
+
+    it('10. resolves ../../../.lecture-build/access-manifest.json and blocks PUT /api/admin/access with 409 when uninitialized_restricted', async () => {
+      const savedEnvContent = process.env['CONTENT_DIR']
+      delete process.env['CONTENT_DIR']
+      const siteRoot = mkdtempSync(join(tmpdir(), 'lec-site-root-'))
+      try {
+        const distDir = join(siteRoot, 'docs', '.vitepress', 'dist')
+        const manifestDir = join(siteRoot, '.lecture-build')
+        mkdirSync(distDir, { recursive: true })
+        mkdirSync(manifestDir, { recursive: true })
+        writeFileSync(
+          join(manifestDir, 'access-manifest.json'),
+          JSON.stringify({
+            version: 1,
+            defaultTier: 'authenticated',
+            enforcement: 'gateway',
+            tiers: [{ id: 'authenticated', groups: ['G01'] }],
+          }),
+          'utf8',
+        )
+
+        const memDb = createDb('pglite:memory')
+        await runMigrations(memDb)
+        const dApp = createApp(makeTestConfig({ siteDistDir: distDir, authAdapter: 'local' }), memDb)
+        const boot = await dApp.request('/api/auth/bootstrap', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username: 'accadmin', password: 'Password123!' }),
+        })
+        const cookie = extractCookie(boot).value!
+
+        const getRes = await dApp.request('/api/admin/access', {
+          headers: { Cookie: `lec_session=${cookie}` },
+        })
+        expect((await getRes.json()).source).toBe('uninitialized_restricted')
+
+        const putRes = await dApp.request('/api/admin/access', {
+          method: 'PUT',
+          headers: { Cookie: `lec_session=${cookie}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ access: { default: 'public', enforcement: 'none', groups: {} } }),
+        })
+        expect(putRes.status).toBe(409)
+        expect((await putRes.json()).error).toBe('uninitialized_restricted_access')
+      } finally {
+        if (savedEnvContent !== undefined) process.env['CONTENT_DIR'] = savedEnvContent
+        else delete process.env['CONTENT_DIR']
+        rmSync(siteRoot, { recursive: true, force: true })
+      }
+    })
+
+    it('11. records gateway_auth_seen from any gateway route (not only /api/auth/status)', async () => {
+      resetGatewayAuthSeenForTests()
+      const memDb = createDb('pglite:memory')
+      await runMigrations(memDb)
+      const hApp = createApp(makeTestConfig({ authAdapter: 'hybrid', logoutUrl: null }), memDb)
+
+      // Gateway request hits /api/me/overview instead of /api/auth/status
+      const meRes = await hApp.request('/api/me/overview', {
+        headers: { 'Remote-User': 'gw-reader' },
+      })
+      expect(meRes.status).toBe(200)
+
+      // Wait briefly for fire-and-forget DB persistence if needed, in-memory mark is already immediate
+      const unauthBoot = await hApp.request('/api/auth/bootstrap', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: 'attacker', password: 'Password123!' }),
+      })
+      expect(unauthBoot.status).toBe(403)
     })
   })
 })

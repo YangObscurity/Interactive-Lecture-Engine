@@ -1,7 +1,13 @@
 import type { LanguageModel } from 'ai'
 import { Hono, type MiddlewareHandler } from 'hono'
 import { bodyLimit } from 'hono/body-limit'
-import { createAuthMiddleware, type AuthResult, type WireSession, type WireSessionUser } from './auth/index.js'
+import {
+  createAuthMiddleware,
+  resetGatewayAuthSeen,
+  type AuthResult,
+  type WireSession,
+  type WireSessionUser,
+} from './auth/index.js'
 import type { AppConfig } from './config/schema.js'
 import { createDbManager, type DbManager } from './db/manager.js'
 import type { Db } from './db/types.js'
@@ -108,6 +114,11 @@ export function createApp(config: AppConfig, db: Db, options: AppOptions = {}): 
             enabled: dbServer.tools?.[toolName]?.enabled ?? toolConf.enabled,
           }
         }
+        for (const [toolName, dbTool] of Object.entries(dbServer.tools ?? {})) {
+          if (typeof dbTool?.enabled === 'boolean' && !(toolName in mergedTools)) {
+            mergedTools[toolName] = { enabled: dbTool.enabled }
+          }
+        }
 
         return {
           ...diskServer,
@@ -124,6 +135,11 @@ export function createApp(config: AppConfig, db: Db, options: AppOptions = {}): 
     } catch {
       return null
     }
+  })
+  dbManager.onSwap?.(async () => {
+    await aiRuntime.prompts.reload(null)
+    await aiRuntime.mcpManager.applyConfigOverride(null)
+    resetGatewayAuthSeen(effectiveDb)
   })
   appCloseHandlers.set(app, () => aiRuntime.mcpManager.closeAll())
   const writeLimiter = new WriteRateLimiter(config.writeRatePerMinute, now)

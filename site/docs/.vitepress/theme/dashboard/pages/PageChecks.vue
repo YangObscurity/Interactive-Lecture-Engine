@@ -262,8 +262,8 @@ onMounted(() => {
         <section class="db-panel" data-checks-output>
           <header><h3>{{ t('dsh.chk.outputTitle') }}</h3></header>
           <div class="db-pbody">
-            <b>check:content</b>
-            <pre class="db-codeb">{{ report ? `$ npm run check:content\nFAIL ${report.totals.fail}, WARN ${report.totals.warn}, INFO ${report.totals.info}\n${report.ok ? 'PASS' : 'FAIL'} (exit ${checkState.run?.exitCode ?? ''})` : '—' }}</pre>
+            <b>{{ isOnlineMode ? 'CONTENT_DIR summary' : 'check:content' }}</b>
+            <pre class="db-codeb">{{ report ? `${isOnlineMode ? 'CONTENT_DIR summary' : '$ npm run check:content'}\nFAIL ${report.totals.fail}, WARN ${report.totals.warn}, INFO ${report.totals.info}\n${report.ok ? 'PASS' : 'FAIL'} (exit ${checkState.run?.exitCode ?? ''})` : '—' }}</pre>
           </div>
           <div class="db-pbody db-sep">
             <b>doctor</b>

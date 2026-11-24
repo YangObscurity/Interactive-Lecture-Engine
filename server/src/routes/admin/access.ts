@@ -82,6 +82,7 @@ function detectManifestRestrictions(config: AppConfig): boolean {
   const candidatePaths: string[] = []
   if (config.siteDistDir) {
     candidatePaths.push(
+      resolve(config.siteDistDir, '../../../.lecture-build/access-manifest.json'),
       resolve(config.siteDistDir, '../../.lecture-build/access-manifest.json'),
       resolve(config.siteDistDir, '../.lecture-build/access-manifest.json'),
       resolve(config.siteDistDir, '.lecture-build/access-manifest.json'),
@@ -158,6 +159,23 @@ export function createAdminAccessRouter(config: AppConfig, db: Db): Hono<AppEnv>
     const validated = isValidAccessConfig(body?.access)
     if (!validated.ok) {
       return c.json({ ok: false, error: 'validation_failed', message: validated.message }, 400)
+    }
+
+    const existingSaved = await getSetting<unknown>(db, 'access')
+    if (
+      !isValidAccessConfig(existingSaved).ok &&
+      !readDiskAccess(config) &&
+      detectManifestRestrictions(config)
+    ) {
+      return c.json(
+        {
+          ok: false,
+          error: 'uninitialized_restricted_access',
+          message:
+            'Existing site restrictions detected in build manifest. Initialize content/access.json or export restrictions before editing online.',
+        },
+        409,
+      )
     }
 
     const userId = c.get('userId') ?? 'admin'

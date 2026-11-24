@@ -7,6 +7,7 @@ export const RESERVED_DOMAIN_SETTING_KEYS: ReadonlySet<string> = new Set([
   'ai_tools',
   'companion_prompts',
   'last_check_report',
+  'gateway_auth_seen',
 ])
 
 export interface SiteSettingRow<T = unknown> {
