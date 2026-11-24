@@ -290,6 +290,7 @@ export interface CanvasNodeProps {
   locked: boolean
   active: boolean
   match: boolean
+  traceRole?: 'locked' | 'pre' | 'post' | 'pair' | null
   x: number
   y: number
   w: number

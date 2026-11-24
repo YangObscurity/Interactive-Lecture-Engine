@@ -444,6 +444,11 @@ export class LabelLayer {
         if (changed) {
           this.dirtyAll = true
           this.invalidateStyleCache = true
+          this.passCache.anc.clear()
+          this.passCache.ancAlpha.clear()
+          this.passCache.styles.clear()
+          this.passCache.sigs.clear()
+          this.alphaCache.clear()
           needPaint = true
         }
         continue
@@ -459,9 +464,12 @@ export class LabelLayer {
       }
       // an ancestor changed: what was kept for its elements (opacity, signature) is stale
       this.passCache.anc.clear()
+      this.passCache.ancAlpha.clear()
+      this.passCache.styles.clear()
       this.passCache.sigs.delete(t)
       this.alphaCache.clear()
       t.querySelectorAll?.('text').forEach((x) => {
+        this.passCache.sigs.delete(x)
         const l = this.byEl.get(x)
         if (l) {
           this.dirty.add(l)
@@ -756,7 +764,8 @@ export class LabelLayer {
         styled++
       }
       if (!(l.alpha > 0.01)) continue
-      if (l.size * k < MIN_LABEL_PX) continue
+      const priority = typeof l.el.closest === 'function' && Boolean(l.el.closest('.cv-node.on, .cv-node.locked, .cv-node.match'))
+      if (l.size * k < (priority ? 1.8 : MIN_LABEL_PX)) continue
       const px = labelPixelSize(l.size, k, onLadder)
       let fontSpec = l._font
       if (!fontSpec || l._px !== px) {

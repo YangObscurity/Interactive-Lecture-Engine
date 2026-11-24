@@ -8,7 +8,7 @@ defineProps<CanvasNodeProps>()
 <template>
   <g
     class="cv-node n"
-    :class="[status, { hover, locked, on: active, match }]"
+    :class="[status, traceRole ? `trace-${traceRole}` : '', { hover, locked, on: active, match }]"
     :data-id="id"
     data-slot="CanvasNode"
   >
@@ -31,9 +31,6 @@ defineProps<CanvasNodeProps>()
 .n-box { fill: var(--lec-bg); stroke: var(--lec-border); stroke-width: 1; }
 .n.read .n-box { fill: color-mix(in srgb, var(--lec-done) 11%, var(--lec-bg)); stroke: color-mix(in srgb, var(--lec-done) 48%, var(--lec-border)); }
 .n.reading .n-box { fill: var(--lec-accent-tint); stroke: var(--lec-accent); stroke-width: 1.5; }
-.n.hover .n-box { stroke: var(--lec-accent); stroke-width: 1.5; }
-.n.locked .n-box { stroke: var(--lec-accent); stroke-width: 3; }
-.n.match .n-box { stroke: var(--lec-accent); stroke-width: 2.5; fill: var(--lec-accent-tint); }
 .dot { fill: var(--lec-bg); stroke: var(--lec-border); stroke-width: 1.5; }
 .n.read .dot { fill: var(--lec-done); stroke: var(--lec-done); }
 .n.reading .dot { fill: var(--lec-bg); stroke: var(--lec-accent); }
@@ -42,6 +39,41 @@ defineProps<CanvasNodeProps>()
 .label { font: 400 12px var(--lec-font-body); fill: var(--lec-text); pointer-events: none; }
 .n.unread .label { fill: var(--lec-text-muted); }
 .n.reading .label { font-weight: 600; }
+.n.on,
+.n.locked,
+.n.match,
+.n.trace-pre,
+.n.trace-post {
+  opacity: 1 !important;
+}
+.n.on .n-box {
+  stroke: var(--lec-accent);
+  stroke-width: calc(2px / var(--k, 1));
+}
+.n.on .no,
+.n.on .label,
+.n.locked .no,
+.n.locked .label {
+  fill: var(--lec-text);
+  font-weight: 600;
+}
+.n.trace-pre .n-box {
+  stroke: var(--lec-accent);
+  fill: var(--lec-accent-tint);
+  stroke-width: calc(2.2px / var(--k, 1));
+}
+.n.trace-post .n-box {
+  stroke: var(--lec-done);
+  fill: color-mix(in srgb, var(--lec-done) 14%, var(--lec-bg));
+  stroke-width: calc(2.2px / var(--k, 1));
+}
+.n.locked .n-box {
+  stroke: var(--lec-accent);
+  fill: var(--lec-accent-tint);
+  stroke-width: calc(3px / var(--k, 1));
+}
+.n.match .n-box { stroke: var(--lec-accent); stroke-width: calc(2.5px / var(--k, 1)); fill: var(--lec-accent-tint); }
+.n.hover .n-box { stroke: var(--lec-accent); stroke-width: calc(2px / var(--k, 1)); }
 :is(.cv-dim) .n:not(.on) { opacity: 0.28; }
 :is(.cv-searching) .n:not(.match) { opacity: 0.3; }
 </style>

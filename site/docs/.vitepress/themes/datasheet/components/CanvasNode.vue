@@ -8,7 +8,7 @@ defineProps<CanvasNodeProps>()
 <template>
   <g
     class="cv-node n"
-    :class="[status, { hover, locked, on: active, match }]"
+    :class="[status, traceRole ? `trace-${traceRole}` : '', { hover, locked, on: active, match }]"
     :data-id="id"
     data-slot="CanvasNode"
   >
@@ -40,13 +40,45 @@ defineProps<CanvasNodeProps>()
 .pn { font: 11px var(--lec-font-mono); fill: var(--lec-text-muted); pointer-events: none; }
 .pname { font: 13px var(--lec-font-body); fill: var(--lec-text-muted); pointer-events: none; }
 .n.read .pname, .n.reading .pname { fill: var(--lec-text); }
-.n.hover .p { stroke: var(--lec-accent); stroke-width: 2.5; }
-.n.hover .pname { fill: var(--lec-accent); text-decoration: underline; }
+.n.on,
+.n.locked,
+.n.match,
+.n.trace-pre,
+.n.trace-post {
+  opacity: 1 !important;
+}
+.n.on .p {
+  stroke: var(--lec-accent);
+  stroke-width: 2.5;
+}
+.n.on .pname,
+.n.on .pn {
+  fill: var(--lec-text);
+  font-weight: 600;
+}
+.n.trace-pre .p-half,
+.n.trace-post .p-half,
 .n.locked .p-half { display: none; }
+.n.trace-pre .p {
+  fill: var(--lec-accent);
+  stroke: var(--lec-accent);
+}
+.n.trace-pre .pname {
+  fill: var(--lec-accent);
+}
+.n.trace-post .p {
+  fill: var(--lec-done);
+  stroke: var(--lec-done);
+}
+.n.trace-post .pname {
+  fill: var(--lec-done-text, var(--lec-done));
+}
 .n.locked .p { fill: var(--lec-accent); stroke: var(--lec-accent); stroke-width: 2.5; }
 .n.locked .pname { fill: var(--lec-accent); font-weight: 700; text-decoration: underline; }
 .n.match .p { stroke: var(--lec-accent); stroke-width: 3; }
 .n.match .pname { fill: var(--lec-accent); font-weight: 700; }
+.n.hover .p { stroke: var(--lec-accent); stroke-width: 2.5; }
+.n.hover .pname { fill: var(--lec-accent); text-decoration: underline; }
 :is(.cv-dim) .n:not(.on) { opacity: 0.28; }
 :is(.cv-searching) .n:not(.match) { opacity: 0.3; }
 </style>

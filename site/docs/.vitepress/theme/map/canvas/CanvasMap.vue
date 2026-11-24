@@ -292,8 +292,9 @@ const stageProps = computed(() => ({
 
 const labelOptions = {
   visible(label: Label, k: number): boolean {
-    if (label.kind === 'ann') return k >= 0.22 && Boolean(label.el.closest('.bundle-g.on'))
+    if (label.kind === 'ann') return k >= 0.22 && typeof label.el.closest === 'function' && Boolean(label.el.closest('.bundle-g.on'))
     if (label.kind === 'big') return k < 0.22
+    if (label.kind === 'num' && typeof label.el.closest === 'function' && Boolean(label.el.closest('.cv-node.on, .cv-node.locked, .cv-node.match'))) return true
     if (label.kind === 'mid' || label.kind === 'num') return k >= 0.22
     if (label.kind === 'name' || label.kind === 'nc') return k >= 0.45
     return true
@@ -783,16 +784,16 @@ function onNodeKeydown(ev: KeyboardEvent, id: string): void {
     @click="onStageClick"
   >
     <template #defs>
-      <marker id="cv-ah" viewBox="0 0 8 6" refX="7" refY="3" markerWidth="6" markerHeight="4.5" orient="auto">
+      <marker id="cv-ah" viewBox="0 0 8 6" refX="7" refY="3" markerUnits="userSpaceOnUse" markerWidth="10" markerHeight="7.5" orient="auto">
         <path d="M0 0.5L7 3L0 5.5Z" class="cv-m-ie" />
       </marker>
-      <marker id="cv-ah-b" viewBox="0 0 8 6" refX="7" refY="3" markerWidth="5" markerHeight="3.8" orient="auto">
+      <marker id="cv-ah-b" viewBox="0 0 8 6" refX="6.5" refY="3" markerUnits="userSpaceOnUse" markerWidth="24" markerHeight="18" orient="auto">
         <path d="M0 0.5L7 3L0 5.5Z" class="cv-m-b" />
       </marker>
-      <marker id="cv-ah-pre" viewBox="0 0 8 6" refX="7" refY="3" markerWidth="6" markerHeight="4.5" orient="auto">
+      <marker id="cv-ah-pre" viewBox="0 0 8 6" refX="7" refY="3" markerUnits="userSpaceOnUse" markerWidth="14" markerHeight="10.5" orient="auto">
         <path d="M0 0.5L7 3L0 5.5Z" class="cv-m-pre" />
       </marker>
-      <marker id="cv-ah-post" viewBox="0 0 8 6" refX="7" refY="3" markerWidth="6" markerHeight="4.5" orient="auto">
+      <marker id="cv-ah-post" viewBox="0 0 8 6" refX="7" refY="3" markerUnits="userSpaceOnUse" markerWidth="14" markerHeight="10.5" orient="auto">
         <path d="M0 0.5L7 3L0 5.5Z" class="cv-m-post" />
       </marker>
     </template>
@@ -864,14 +865,6 @@ function onNodeKeydown(ev: KeyboardEvent, id: string): void {
       <template v-if="edgePart">
         <component
           :is="edgePart.component"
-          v-for="(ie, idx) in view.intraEdges"
-          :key="`ie-${idx}`"
-          v-bind="ie"
-          data-slot="CanvasEdge"
-          :data-slot-impl="edgePart.impl"
-        />
-        <component
-          :is="edgePart.component"
           v-for="be in view.bundleEdges"
           :key="`be-${be.pairKey}`"
           v-bind="be"
@@ -887,6 +880,16 @@ function onNodeKeydown(ev: KeyboardEvent, id: string): void {
           v-bind="g"
           data-slot="CanvasGroup"
           :data-slot-impl="groupPart.impl"
+        />
+      </template>
+      <template v-if="edgePart">
+        <component
+          :is="edgePart.component"
+          v-for="(ie, idx) in view.intraEdges"
+          :key="`ie-${idx}`"
+          v-bind="ie"
+          data-slot="CanvasEdge"
+          :data-slot-impl="edgePart.impl"
         />
       </template>
       <template v-if="nodePart">
@@ -1071,7 +1074,7 @@ function onNodeKeydown(ev: KeyboardEvent, id: string): void {
 .cv-layer.lod-far :deep(.ie) {
   opacity: 0.16;
 }
-.cv-layer.lod-far :deep(.cv-node:not(.on)) {
+.cv-layer.lod-far :deep(.cv-node:not(.on):not(.match):not(.locked)) {
   opacity: 0.22;
 }
 .cv-m-ie {
