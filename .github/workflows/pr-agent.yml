@@ -1,4 +1,4 @@
-name: PR-Agent (ClinePass)
+name: PR-Agent
 
 on:
   pull_request:
@@ -58,6 +58,7 @@ jobs:
     needs: prepare
     if: needs.prepare.outputs.allowed == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 12
     permissions:
       contents: read
       issues: write

@@ -24,8 +24,8 @@ jobs:
   static:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
           cache: npm
@@ -39,13 +39,13 @@ jobs:
   build-and-gates:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
           cache: npm
           cache-dependency-path: site/package-lock.json
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: '3.12'
       - run: npm ci
@@ -73,19 +73,24 @@ jobs:
         working-directory: .
         run: python scripts/check_lecture_contracts.py
       # the built site, for small deploy hosts that cannot build themselves (docs-dev/BUILD.md section 4)
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: dist
           path: site/docs/.vitepress/dist
           retention-days: 7
 
-  e2e:
+  e2e-prod:
+    name: e2e-prod (${{ matrix.shard }}/${{ strategy.job-total }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
     env:
       CI: '1'
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
           cache: npm
@@ -96,13 +101,53 @@ jobs:
       # Screenshot specs (@visual) compare with baselines recorded in Chrome on Windows (docs-dev/BUILD.md section 5),
       # so they do not run on Linux CI; every functional spec does.
       - run: npm run build:e2e
-      - run: npx playwright test --project prod --grep-invert @visual
-      - run: npm run test:e2e:access
+      - run: npx playwright test --project prod --grep-invert @visual --shard=${{ matrix.shard }}/${{ strategy.job-total }}
       - if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: playwright-report
+          name: playwright-report-prod-${{ matrix.shard }}
           path: |
             site/playwright-report
             site/test-results
           retention-days: 7
+
+  e2e-access:
+    name: e2e-access
+    runs-on: ubuntu-latest
+    env:
+      CI: '1'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: site/package-lock.json
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:e2e:access
+      - if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: playwright-report-access
+          path: |
+            site/playwright-report
+            site/test-results
+          retention-days: 7
+
+  e2e:
+    name: e2e
+    needs: [e2e-prod, e2e-access]
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify all E2E suites passed
+        working-directory: .
+        env:
+          PROD_RESULT: ${{ needs.e2e-prod.result }}
+          ACCESS_RESULT: ${{ needs.e2e-access.result }}
+        run: |
+          echo "e2e-prod=${PROD_RESULT}, e2e-access=${ACCESS_RESULT}"
+          if [ "${PROD_RESULT}" != "success" ] || [ "${ACCESS_RESULT}" != "success" ]; then
+            exit 1
+          fi
