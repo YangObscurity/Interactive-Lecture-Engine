@@ -6,6 +6,9 @@
 .gitattributes
 .env.example
 .github/
+.coderabbit.yaml
+cubic.yaml
+.greptile/
 AGENTS.md
 README.md
 LICENSE

@@ -1,0 +1,123 @@
+name: Auto Merge
+
+on:
+  pull_request_target:
+    types: [opened, reopened, ready_for_review, labeled, unlabeled, synchronize]
+
+permissions: {}
+
+jobs:
+  decide:
+    permissions:
+      pull-requests: read
+    runs-on: ubuntu-latest
+    if: >-
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      !github.event.pull_request.draft &&
+      (
+        github.event.pull_request.user.login == 'dependabot[bot]' ||
+        contains(github.event.pull_request.labels.*.name, 'automerge') ||
+        (github.event.action == 'unlabeled' && github.event.label.name == 'automerge')
+      )
+    outputs:
+      action: ${{ steps.eval.outputs.action }}
+      head_sha: ${{ github.event.pull_request.head.sha }}
+    steps:
+      - name: Fetch Dependabot metadata
+        id: metadata
+        if: github.event.pull_request.user.login == 'dependabot[bot]'
+        uses: dependabot/fetch-metadata@25dd0e34f4fe68f24cc83900b1fe3fe149efef98 # v3.1.0
+        with:
+          github-token: ${{ github.token }}
+
+      - name: Evaluate auto-merge eligibility
+        id: eval
+        env:
+          REPO_OWNER: ${{ github.repository_owner }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          AUTHOR_ASSOC: ${{ github.event.pull_request.author_association }}
+          PR_LABELS_JSON: ${{ toJson(github.event.pull_request.labels.*.name) }}
+          EVENT_ACTION: ${{ github.event.action }}
+          EVENT_LABEL: ${{ github.event.label.name }}
+          ACTOR: ${{ github.actor }}
+          DEP_ECOSYSTEM: ${{ steps.metadata.outputs.package-ecosystem }}
+          DEP_UPDATE_TYPE: ${{ steps.metadata.outputs.update-type }}
+        run: |
+          set -euo pipefail
+
+          # Only auto-enable Dependabot for non-major github-actions bumps (site/server npm still require maintainer review or `automerge` label).
+          if [ "$PR_AUTHOR" = "dependabot[bot]" ]; then
+            if [ "$DEP_ECOSYSTEM" = "github-actions" ] && [ "$DEP_UPDATE_TYPE" != "version-update:semver-major" ]; then
+              echo "action=enable" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          fi
+
+          # Maintainer opt-in via `automerge` label on same-repo PRs.
+          has_label="$(jq -rn --argjson labels "$PR_LABELS_JSON" '$labels | index("automerge") != null')"
+          if [ "$has_label" = "true" ]; then
+            case "$AUTHOR_ASSOC" in
+              OWNER|MEMBER|COLLABORATOR) ;;
+              *)
+                echo "::notice::PR author association ($AUTHOR_ASSOC) is not eligible for automerge label"
+                echo "action=none" >> "$GITHUB_OUTPUT"
+                exit 0
+                ;;
+            esac
+
+            if [ "$EVENT_ACTION" = "labeled" ] && [ "$EVENT_LABEL" = "automerge" ]; then
+              if [ "$ACTOR" != "$REPO_OWNER" ] && [ "$ACTOR" != "$PR_AUTHOR" ]; then
+                echo "::notice::Label actor ($ACTOR) cannot enable automerge for another author's PR"
+                echo "action=none" >> "$GITHUB_OUTPUT"
+                exit 0
+              fi
+            fi
+
+            echo "action=enable" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if [ "$EVENT_ACTION" = "unlabeled" ] && [ "$EVENT_LABEL" = "automerge" ]; then
+            echo "action=disable" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "action=none" >> "$GITHUB_OUTPUT"
+
+  apply:
+    needs: decide
+    if: needs.decide.outputs.action != 'none'
+    permissions:
+      contents: write
+      pull-requests: write
+    runs-on: ubuntu-latest
+    steps:
+      - name: Update auto-merge state
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          ACTION: ${{ needs.decide.outputs.action }}
+          HEAD_SHA: ${{ needs.decide.outputs.head_sha }}
+        run: |
+          set -euo pipefail
+
+          if [ "$ACTION" = "disable" ]; then
+            gh pr merge --repo "$GH_REPO" --disable-auto "$PR_NUMBER" || true
+            exit 0
+          fi
+
+          state_json="$(gh pr view "$PR_NUMBER" --repo "$GH_REPO" --json autoMergeRequest,mergeStateStatus)"
+          has_auto="$(printf '%s' "$state_json" | jq -r '.autoMergeRequest != null')"
+          merge_state="$(printf '%s' "$state_json" | jq -r '.mergeStateStatus')"
+
+          if [ "$has_auto" = "true" ]; then
+            echo "Auto-merge already enabled for PR #$PR_NUMBER"
+            exit 0
+          fi
+
+          if [ "$merge_state" = "CLEAN" ]; then
+            gh pr merge --repo "$GH_REPO" --squash --match-head-commit "$HEAD_SHA" "$PR_NUMBER"
+          else
+            gh pr merge --repo "$GH_REPO" --auto --squash --match-head-commit "$HEAD_SHA" "$PR_NUMBER"
+          fi

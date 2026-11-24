@@ -1,0 +1,84 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+
+language: "zh-CN"
+enable_free_tier: true
+
+reviews:
+  profile: "chill"
+  high_level_summary: true
+  review_status: true
+  commit_status: true
+  collapse_walkthrough: false
+  changed_files_summary: true
+  sequence_diagrams: true
+  estimate_code_review_effort: true
+  enable_prompt_for_ai_agents: true
+
+  auto_approvals:
+    enabled: false
+
+  auto_review:
+    enabled: true
+    auto_incremental_review: true
+    auto_pause_after_reviewed_commits: 5
+    drafts: false
+
+  finishing_touches:
+    autofix:
+      enabled: false
+    fix_ci:
+      enabled: false
+    resolve_merge_conflict:
+      enabled: false
+    unit_tests:
+      enabled: false
+    simplify:
+      enabled: false
+
+  slop_detection:
+    enabled: true
+
+  path_filters:
+    - "!**/.refactor-backup/**"
+    - "!**/package-lock.json"
+    - "!site/.e2e-demo/**"
+    - "!site/docs/.vitepress/dist/**"
+    - "!site/docs/.vitepress/cache/**"
+    - "!server/dist/**"
+
+  path_instructions:
+    - path: ".github/workflows/**"
+      instructions: "检查最小权限（permissions）、Fork PR 与评论门控隔离、Action SHA 固定以及避免脚本注入和密钥泄露。"
+    - path: "server/**"
+      instructions: "重点审查 API 鉴权、Zod 输入校验、SQL/PGlite 查询安全性、错误边界与配置校验。"
+    - path: "site/**"
+      instructions: "重点审查 VitePress SSR 兼容性、主题/插槽契约、HTML 清洗与 XSS 防护及可访问性；不要建议修改 content:sync 自动生成的副本目录。"
+    - path: "scripts/**"
+      instructions: "重点审查路径边界校验、Windows/Linux 跨平台兼容性及隐私扫描允许名单策略。"
+
+  tools:
+    opengrep:
+      enabled: true
+    gitleaks:
+      enabled: true
+    trivy:
+      enabled: true
+    actionlint:
+      enabled: true
+
+chat:
+  auto_reply: true
+
+knowledge_base:
+  opt_out: false
+  code_guidelines:
+    enabled: true
+    filePatterns:
+      - "AGENTS.md"
+      - "docs/authoring/**"
+  learnings:
+    scope: "local"
+  issues:
+    scope: "local"
+  pull_requests:
+    scope: "local"
