@@ -232,15 +232,22 @@ jobs:
             fi
             obj_type="$(printf '%s' "$ref_json" | jq -r '.object.type // ""')" || return 2
             obj_sha="$(printf '%s' "$ref_json" | jq -r '.object.sha // ""')" || return 2
-            if [ "$obj_type" = "tag" ]; then
+            local depth=0
+            while [ "$obj_type" = "tag" ]; do
+              depth=$((depth + 1))
+              if [ "$depth" -gt 10 ]; then
+                echo "::error::Too many nested tag dereferences for refs/tags/${TAG}" >&2
+                return 2
+              fi
               tag_json="$(gh api "repos/${GH_REPO}/git/tags/${obj_sha}" 2>&1)" || {
                 echo "::error::Failed to dereference annotated tag '${obj_sha}': ${tag_json}" >&2
                 return 2
               }
+              obj_type="$(printf '%s' "$tag_json" | jq -r '.object.type // ""')" || return 2
               obj_sha="$(printf '%s' "$tag_json" | jq -r '.object.sha // ""')" || return 2
-            fi
-            if [ -z "$obj_sha" ]; then
-              echo "::error::Empty commit SHA resolved for refs/tags/${TAG}" >&2
+            done
+            if [ "$obj_type" != "commit" ] || [ -z "$obj_sha" ]; then
+              echo "::error::Expected commit target for refs/tags/${TAG}, got '${obj_type}' '${obj_sha}'" >&2
               return 2
             fi
             printf '%s' "$obj_sha"
