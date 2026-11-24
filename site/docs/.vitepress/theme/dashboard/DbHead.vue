@@ -1,10 +1,12 @@
 <script setup lang="ts">
 /** DbHead.vue — page header: title, one-line purpose, facts (file, version, time), and the read-only lock line online. */
+import { computed } from 'vue'
 import { useT } from '../../i18n/useT.ts'
 import { isReadOnly } from './useDashboard'
 
-defineProps<{ title: string; lead: string; meta?: ReadonlyArray<readonly [string, string]> }>()
+const props = defineProps<{ title: string; lead: string; meta?: ReadonlyArray<readonly [string, string]>; readOnly?: boolean }>()
 const { t } = useT()
+const effectiveReadOnly = computed(() => (props.readOnly !== undefined ? props.readOnly : isReadOnly.value))
 </script>
 
 <template>
@@ -18,7 +20,7 @@ const { t } = useT()
       </div>
     </dl>
   </header>
-  <div v-if="isReadOnly" class="db-lockline" role="status" data-dashboard-lockline>
+  <div v-if="effectiveReadOnly" class="db-lockline" role="status" data-dashboard-lockline>
     <span class="db-lock" aria-hidden="true"></span>
     <span>{{ t('dsh.common.readOnlyLine') }}</span>
   </div>

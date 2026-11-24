@@ -5,6 +5,8 @@
  */
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useT } from '../../../i18n/useT.ts'
+import DbUnavailable from '../DbUnavailable.vue'
+import { canAccessPage, dashboardState } from '../useDashboard'
 import {
   createDbTableRow,
   deleteDbTableRow,
@@ -31,6 +33,7 @@ import {
 } from '../../api/admin'
 
 const { t } = useT()
+const blockedByRole = computed(() => dashboardState.mode === 'online' && !canAccessPage('database'))
 
 const NEON_PRESET_URL = 'postgresql://user:password@ep-example.us-east-2.aws.neon.tech/neondb?sslmode=require'
 const PGLITE_PRESET_URL = 'pglite:./data/pglite'
@@ -224,7 +227,7 @@ async function loadRows(allowRetry = true): Promise<void> {
 }
 
 onMounted(() => {
-  if (typeof window !== 'undefined') {
+  if (typeof window !== 'undefined' && !blockedByRole.value) {
     void loadInitial()
   }
 })
@@ -558,6 +561,9 @@ async function onDeleteRow(row: Record<string, unknown>): Promise<void> {
       <p>{{ t('dsh.db.lead') }}</p>
     </header>
 
+    <DbUnavailable v-if="blockedByRole" id="database" :what="t('dsh.db.title')" :why="t('dsh.ac.editOnlineWhy')" />
+
+    <template v-else>
     <div v-if="errorMessage" class="db-errbox" role="alert" data-db-error>
       {{ errorMessage }}
     </div>
@@ -1016,5 +1022,6 @@ async function onDeleteRow(row: Record<string, unknown>): Promise<void> {
         </div>
       </div>
     </section>
+    </template>
   </div>
 </template>

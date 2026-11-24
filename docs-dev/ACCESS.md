@@ -51,6 +51,8 @@ When authoring via the Dashboard or managing configuration separately from code:
   3. `site.config.ts` / `lecture.config.ts`: fallback default when `access.json` is not present.
 - Dashboard Local Write:
   In local author mode (`!isReadOnly && !demo`), the Dashboard (`/dashboard#access`) writes atomically to `access.json` via `POST /__lecture/api/access`. While showing the engine demo content (`demo: true`), writes strictly return 409 `demo_read_only`.
+- Dashboard Online Write & Persistence (Admin Only):
+  In online production mode, authenticated administrators can edit group access tiers directly via `PUT /api/admin/access`. Changes are validated, committed to `site_settings` (with `site_settings_history` audit), and synced to `content/access.json` when `CONTENT_DIR` is mounted. Because static bundles and gateway manifests depend on compiled tier slices, the server responds with `persistence: { mode: 'db+disk' | 'db', effect: 'rebuild_required', rebuildReason: 'Changes to access tiers require a site rebuild to take effect in static pages' }`, displaying a non-blocking rebuild notice (`[data-dashboard-rebuild-badge]`) in the Dashboard until the next static rebuild (`npm run build`).
 
 ### 1.3 Authentication & Login URL (`modules.auth.loginUrl`)
 

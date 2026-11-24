@@ -1,24 +1,32 @@
 <script setup lang="ts">
 /**
- * PageRuntime.vue — 运行状态: what is running and what went wrong. Process states on top; the terminal log (local: the
- * dev server and the content sync, redacted before they were stored; online: lecture-api only, which needs a log endpoint
- * lecture-api does not have yet) and the health checks. Read-only: nothing runs from here.
+ * PageRuntime.vue — Runtime status, live logs (dev terminal OR online `/api/admin/logs`),
+ * online runtime reload (`/api/admin/runtime/reload`), sync status, and health checks.
  */
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useT } from '../../../i18n/useT.ts'
-import type { AdminHealthResponse } from '../../api/admin'
-import { fetchDevLogs, fetchRuntime, type DevLogLine, type RuntimePayload } from '../../api/devDashboard'
+import type { AdminHealthResponse, OnlineLogEntry, OnlineRuntimePayload } from '../../api/admin'
+import type { DevLogLine, RuntimePayload } from '../../api/devDashboard'
+import { dashboardClient } from '../dashboardClient'
 import DbHead from '../DbHead.vue'
 import DbTabs from '../DbTabs.vue'
 import DbUnavailable from '../DbUnavailable.vue'
-import { dashboardState, isReadOnly, tabOf } from '../useDashboard'
+import { canAccessPage, dashboardState, say, tabOf } from '../useDashboard'
 import { shortDateTime } from '../dashboardData'
 
 defineProps<{ health: AdminHealthResponse | null; healthError: string }>()
 const emit = defineEmits<{ tab: [tab: string] }>()
 const { t } = useT()
 
+const isDev = computed(() => dashboardState.mode === 'dev')
+
 const runtime = ref<RuntimePayload | null>(null)
+const onlineRuntime = ref<OnlineRuntimePayload | null>(null)
+const reloading = ref(false)
+const reloadMessage = ref('')
+const reloadError = ref(false)
+
+// Dev logs state
 const lines = ref<DevLogLine[]>([])
 const last = ref(0)
 const clearedAt = ref(0)
@@ -28,17 +36,26 @@ const paused = ref(false)
 const term = ref<HTMLElement | null>(null)
 let timer: ReturnType<typeof setInterval> | null = null
 
+// Online logs state
+const onlineLogs = ref<OnlineLogEntry[]>([])
+const onlineLogsLoading = ref(false)
+const onlineLogsError = ref('')
+const onlineLogFilter = reactive({
+  level: 'all',
+  category: 'all',
+  limit: 50,
+})
+
 const SOURCES: ReadonlyArray<DevLogLine['src']> = ['dev', 'sync', 'build', 'api']
 const srcLabel = (s: DevLogLine['src']) => (s === 'dev' ? t('dsh.rt.srcDev') : s === 'sync' ? t('dsh.rt.srcSync') : s === 'build' ? t('dsh.rt.srcBuild') : 'lecture-api')
 const visible = computed(() =>
   lines.value.filter((l) => l.seq > clearedAt.value && (filter.src === 'all' || l.src === filter.src) && filter.lv[l.lv] && (!filter.q.trim() || l.msg.includes(filter.q.trim()))),
 )
-/** The newest content-sync line of this dev server (sync tab). */
 const lastSync = computed(() => [...lines.value].reverse().find((l) => l.src === 'sync') ?? null)
 
 async function poll(): Promise<void> {
   if (paused.value || dashboardState.mode !== 'dev') return
-  const res = await fetchDevLogs(dashboardState.token, last.value)
+  const res = await dashboardClient.fetchDevLogs(last.value)
   if (!res) return
   if (res.lines.length) {
     lines.value = [...lines.value, ...res.lines].slice(-500)
@@ -50,6 +67,40 @@ async function poll(): Promise<void> {
   } else last.value = res.last
 }
 
+async function loadOnlineLogs(): Promise<void> {
+  if (!canAccessPage('runtime') || isDev.value) return
+  onlineLogsLoading.value = true
+  onlineLogsError.value = ''
+  const res = await dashboardClient.fetchOnlineLogs({
+    limit: onlineLogFilter.limit,
+    level: onlineLogFilter.level,
+    category: onlineLogFilter.category,
+  })
+  onlineLogsLoading.value = false
+  if (res.ok) {
+    onlineLogs.value = res.logs
+  } else {
+    onlineLogsError.value = res.error ?? 'load_failed'
+  }
+}
+
+async function onReloadRuntime(): Promise<void> {
+  reloading.value = true
+  reloadMessage.value = ''
+  reloadError.value = false
+  const res = await dashboardClient.reloadRuntime()
+  reloading.value = false
+  if (res.ok) {
+    const msg = t('dsh.rt.reloadOk', { time: shortDateTime(res.reloadedAt ?? Date.now()) })
+    reloadMessage.value = msg
+    say(msg)
+    void loadOnlineLogs()
+  } else {
+    reloadError.value = true
+    reloadMessage.value = t('dsh.rt.reloadErr', { error: res.error ?? 'unknown' })
+  }
+}
+
 watch(follow, async (on) => {
   if (on) {
     await nextTick()
@@ -59,6 +110,7 @@ watch(follow, async (on) => {
 
 const time = (iso: string) => {
   const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return iso
   return `${d.toTimeString().slice(0, 8)}.${String(d.getMilliseconds()).padStart(3, '0')}`
 }
 
@@ -74,10 +126,16 @@ const procs = computed(() => {
 })
 
 onMounted(async () => {
-  if (dashboardState.mode !== 'dev') return
-  runtime.value = await fetchRuntime()
-  await poll()
-  timer = setInterval(() => void poll(), 1500)
+  if (dashboardState.mode === 'dev') {
+    const rt = await dashboardClient.fetchRuntime()
+    runtime.value = rt.devRuntime ?? null
+    await poll()
+    timer = setInterval(() => void poll(), 1500)
+  } else if (dashboardState.mode === 'online' && canAccessPage('runtime')) {
+    const rt = await dashboardClient.fetchRuntime()
+    if (rt.ok && rt.onlineRuntime) onlineRuntime.value = rt.onlineRuntime
+    await loadOnlineLogs()
+  }
 })
 onBeforeUnmount(() => {
   if (timer) clearInterval(timer)
@@ -88,17 +146,28 @@ const statusMark = (s: string) => (s === 'ok' ? 'ok' : s === 'off' || s === 'dis
 
 <template>
   <div class="db-page" data-page="runtime">
-    <DbHead :title="t('dsh.nav.runtime')" :lead="t('dsh.rt.lead')" :meta="[[t('dsh.rt.env'), isReadOnly ? t('dsh.rt.online') : t('dsh.rt.local')]]" />
+    <DbHead :title="t('dsh.nav.runtime')" :lead="t('dsh.rt.lead')" :meta="[[t('dsh.rt.env'), isDev ? t('dsh.rt.local') : t('dsh.rt.online')]]" />
 
-    <div v-if="!isReadOnly" class="db-procs" data-runtime-procs>
+    <div v-if="isDev" class="db-procs" data-runtime-procs>
       <div v-for="p in procs" :key="p.name"><b>{{ p.name }}</b><span class="db-stat"><span class="dm" :data-k="p.k" aria-hidden="true"></span>{{ p.st }}</span><span class="db-mono">{{ p.d }}</span></div>
     </div>
-    <div v-else-if="health" class="db-procs" data-runtime-procs>
-      <div><b>lecture-api</b><span class="db-stat"><span class="dm" :data-k="health.ok ? 'ok' : 'bad'" aria-hidden="true"></span>{{ health.ok ? t('dsh.rt.running') : t('dsh.rt.down') }}</span><span class="db-mono">{{ t('dsh.rt.uptime', { h: Math.floor(health.uptimeSeconds / 3600) }) }}</span></div>
-      <div><b>{{ t('dsh.rt.db') }}</b><span class="db-stat"><span class="dm" :data-k="statusMark(health.checks.db.status)" aria-hidden="true"></span>{{ statusText(health.checks.db.status) }}</span><span class="db-mono">{{ health.runtime.dbKind }}</span></div>
-      <div><b>{{ t('dsh.rt.ai') }}</b><span class="db-stat"><span class="dm" :data-k="statusMark(health.checks.ai.status)" aria-hidden="true"></span>{{ statusText(health.checks.ai.status) }}</span><span class="db-mono">{{ health.checks.ai.provider }}</span></div>
-      <div><b>Notion</b><span class="db-stat"><span class="dm" :data-k="health.checks.notion.configured ? statusMark(health.checks.notion.status) : 'off'" aria-hidden="true"></span>{{ health.checks.notion.configured ? statusText(health.checks.notion.status) : t('dsh.rt.off') }}</span><span></span></div>
-    </div>
+    <template v-else>
+      <div v-if="health || onlineRuntime" class="db-procs" data-runtime-procs>
+        <div>
+          <b>lecture-api</b>
+          <span class="db-stat"><span class="dm" :data-k="health ? (health.ok ? 'ok' : 'bad') : healthError ? 'warn' : 'ok'" aria-hidden="true"></span>{{ health ? (health.ok ? t('dsh.rt.running') : t('dsh.rt.down')) : healthError ? t('dsh.rt.healthErrorShort') : t('dsh.rt.running') }}</span>
+          <span class="db-mono">{{ t('dsh.rt.uptime', { h: Math.floor((onlineRuntime?.uptimeSeconds ?? health?.uptimeSeconds ?? 0) / 3600) }) }}</span>
+        </div>
+        <div v-if="health"><b>{{ t('dsh.rt.db') }}</b><span class="db-stat"><span class="dm" :data-k="statusMark(health.checks.db.status)" aria-hidden="true"></span>{{ statusText(health.checks.db.status) }}</span><span class="db-mono">{{ health.runtime.dbKind }}</span></div>
+        <div v-if="health"><b>{{ t('dsh.rt.ai') }}</b><span class="db-stat"><span class="dm" :data-k="statusMark(health.checks.ai.status)" aria-hidden="true"></span>{{ statusText(health.checks.ai.status) }}</span><span class="db-mono">{{ health.checks.ai.provider }}</span></div>
+        <div v-if="onlineRuntime"><b>{{ t('dsh.rt.pid') }}</b><span class="db-mono">{{ onlineRuntime.pid }}</span><span class="db-mono">{{ onlineRuntime.nodeVersion }} · {{ onlineRuntime.authAdapter }}</span></div>
+        <div v-if="onlineRuntime?.memory?.rss"><b>{{ t('dsh.rt.memoryRss') }}</b><span class="db-mono">{{ Math.round(onlineRuntime.memory.rss / (1024 * 1024)) }} MB</span><span></span></div>
+      </div>
+      <div class="db-btns" data-runtime-actions>
+        <button type="button" class="db-btn sm primary" :disabled="reloading" data-runtime-reload @click="onReloadRuntime">{{ t('dsh.rt.reloadBtn') }}</button>
+        <span v-if="reloadMessage" :class="reloadError ? 'db-err' : 'db-ok'" data-runtime-reload-msg>{{ reloadMessage }}</span>
+      </div>
+    </template>
 
     <DbTabs
       page="runtime"
@@ -114,7 +183,7 @@ const statusMark = (s: string) => (s === 'ok' ? 'ok' : s === 'off' || s === 'dis
     <template v-if="tabOf('runtime') === 'sync'">
       <section class="db-panel" data-runtime-sync>
         <header><h3>{{ t('dsh.rt.syncTitle') }}</h3><span class="db-hm">{{ t('dsh.rt.syncHint') }}</span></header>
-        <DbUnavailable v-if="isReadOnly" id="sync-online" :what="t('dsh.rt.syncTitle')" :why="t('dsh.rt.logsOnlineWhy')" />
+        <DbUnavailable v-if="!isDev" id="sync-online" :what="t('dsh.rt.syncTitle')" :why="t('dsh.rt.logsOnlineWhy')" />
         <div v-else class="db-pbody">
           <dl class="db-kv">
             <dt>{{ t('dsh.rt.syncMode') }}</dt>
@@ -135,8 +204,7 @@ const statusMark = (s: string) => (s === 'ok' ? 'ok' : s === 'off' || s === 'dis
     </template>
 
     <section v-else-if="tabOf('runtime') === 'logs'" class="db-panel" data-runtime-logs>
-      <DbUnavailable v-if="isReadOnly" id="logs" :what="t('dsh.rt.logsOnlineWhat')" :why="t('dsh.rt.logsOnlineWhy')" />
-      <template v-else>
+      <template v-if="isDev">
         <div class="db-logbar">
           <div class="db-tabs" role="tablist" :aria-label="t('dsh.rt.logSource')">
             <button type="button" role="tab" :aria-selected="filter.src === 'all'" data-log-src="all" @click="filter.src = 'all'">{{ t('dsh.rt.all') }}</button>
@@ -165,6 +233,45 @@ const statusMark = (s: string) => (s === 'ok' ? 'ok' : s === 'off' || s === 'dis
         <div class="db-termfoot"><span>{{ t('dsh.rt.count', { n: visible.length, total: lines.filter((l) => l.seq > clearedAt).length }) }}</span><span>{{ t('dsh.rt.localNote') }}</span></div>
         <div class="db-pbody db-sep"><DbUnavailable id="logs-build-api" :what="t('dsh.rt.buildApiWhat')" :why="t('dsh.rt.buildApiWhy')" /></div>
       </template>
+
+      <template v-else>
+        <header>
+          <h3>{{ t('dsh.rt.logsOnlineTitle') }}</h3>
+          <div class="db-btns">
+            <select v-model="onlineLogFilter.level" class="db-in db-in-sm" :aria-label="t('dsh.rt.logsLevel')" data-online-log-level @change="loadOnlineLogs">
+              <option value="all">{{ t('dsh.rt.all') }}</option>
+              <option value="info">info</option>
+              <option value="warn">warn</option>
+              <option value="error">error</option>
+            </select>
+            <select v-model="onlineLogFilter.category" class="db-in db-in-sm" :aria-label="t('dsh.rt.logsCategory')" data-online-log-category @change="loadOnlineLogs">
+              <option value="all">{{ t('dsh.rt.all') }}</option>
+              <option value="admin">admin</option>
+              <option value="auth">auth</option>
+              <option value="ai">ai</option>
+              <option value="db">db</option>
+              <option value="error">error</option>
+            </select>
+            <select v-model.number="onlineLogFilter.limit" class="db-in db-in-sm" :aria-label="t('dsh.rt.logsLimit')" data-online-log-limit @change="loadOnlineLogs">
+              <option :value="50">50</option>
+              <option :value="100">100</option>
+              <option :value="200">200</option>
+            </select>
+            <button type="button" class="db-btn sm" :disabled="onlineLogsLoading" data-online-log-refresh @click="loadOnlineLogs">{{ t('dsh.rt.logsRefresh') }}</button>
+          </div>
+        </header>
+        <div v-if="onlineLogsError" class="db-errbox">{{ onlineLogsError }}</div>
+        <div v-else-if="onlineLogsLoading" class="db-pbody db-muted">{{ t('dsh.common.loading') }}</div>
+        <div v-else-if="!onlineLogs.length" class="db-empty"><span>{{ t('dsh.rt.logsEmpty') }}</span></div>
+        <div v-else class="db-term" role="log" :aria-label="t('dsh.rt.logOutput')" data-runtime-online-logs>
+          <div v-for="(entry, idx) in onlineLogs" :key="entry.id ?? idx" class="db-ln" :class="entry.level === 'error' ? 'err' : entry.level" data-online-log-line>
+            <span class="t">{{ time(entry.timestamp) }}</span>
+            <span class="s">{{ entry.category }}</span>
+            <span class="l">{{ entry.level }}</span>
+            <span class="m">{{ entry.message }}</span>
+          </div>
+        </div>
+      </template>
     </section>
 
     <section v-else class="db-panel" data-runtime-health>
@@ -180,7 +287,7 @@ const statusMark = (s: string) => (s === 'ok' ? 'ok' : s === 'off' || s === 'dis
           </tbody>
         </table>
       </div>
-      <div v-else-if="isReadOnly" class="db-pbody db-muted">{{ healthError || t('dsh.common.loading') }}</div>
+      <div v-else-if="!isDev" class="db-pbody db-muted">{{ healthError || t('dsh.common.loading') }}</div>
       <div v-else class="db-pbody">
         <DbUnavailable id="health-local" :what="t('dsh.rt.healthTitle')" :why="runtime?.processes.lectureApi.up ? t('dsh.rt.healthLocalUp') : t('dsh.rt.healthLocalDown')" />
       </div>

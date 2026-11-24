@@ -6,7 +6,7 @@ import type { Db } from '../../db/types.js'
 import { getSetting, setSetting } from '../../repo/siteSettings.js'
 import type { AiRuntime } from '../ai/runtime.js'
 import { createAdminAccessRouter } from './access.js'
-import { createAdminAiToolsHandler } from './aiTools.js'
+import { createAdminAiToolsHandler, createAdminAiToolsSaveHandler } from './aiTools.js'
 import { createAdminBackupsRouter } from './backups.js'
 import { createAdminChecksRouter } from './checks.js'
 import { createAdminCompanionRouter } from './companion.js'
@@ -57,6 +57,7 @@ export function createAdminRouter(
   if (aiRuntime) {
     router.use('/ai-tools', requireStrictAdmin)
     router.get('/ai-tools', createAdminAiToolsHandler(config, aiRuntime))
+    router.put('/ai-tools', createAdminAiToolsSaveHandler(config, db, aiRuntime))
   }
 
   router.use('/users', requireStrictAdmin)

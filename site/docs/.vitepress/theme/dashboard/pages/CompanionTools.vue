@@ -1,17 +1,17 @@
 <script setup lang="ts">
 /**
- * CompanionTools.vue — 伴读 › 工具 (prototype v3.4, K4, S6Z-4): how tools are called (self-hosted loop or Dify), the engine
- * tool switches and the external MCP servers of content/ai-tools.json (on/off switches, adding/removing servers in local
- * author mode with strict validation and secret protection). Call statistics, trial runs, tool discovery and the call log
- * need lecture-api runtime endpoints that do not exist yet: they are shown as unavailable, never with fake metrics.
+ * CompanionTools.vue — Companion > Tools: engine tool switches and external MCP servers.
+ * Supports local dev mode (`/__lecture/api/tools`) and online admin mode (`/api/admin/ai-tools`).
  */
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useT } from '../../../i18n/useT.ts'
 import type { MessageKey } from '../../../i18n/index.ts'
-import { fetchTools, saveToolSwitches, type ToolsPayload } from '../../api/devDashboard'
+import type { OnlineAiToolsPayload } from '../../api/admin'
+import type { ToolsPayload } from '../../api/devDashboard'
+import { dashboardClient } from '../dashboardClient'
 import DbUnavailable from '../DbUnavailable.vue'
 import { shortDateTime } from '../dashboardData'
-import { dashboardState, isReadOnly, registerModel, say, touchModels, type DashboardPageId } from '../useDashboard'
+import { canWritePage, dashboardState, registerModel, say, touchModels, type DashboardPageId } from '../useDashboard'
 
 const emit = defineEmits<{ go: [page: DashboardPageId, tab?: string] }>()
 const { t } = useT()
@@ -34,7 +34,12 @@ interface ServerDraftItem {
   timeoutMs?: number | null
 }
 
+const isDev = computed(() => dashboardState.mode === 'dev')
+const canManageOnlineTools = computed(() => dashboardState.mode === 'online' && dashboardState.canAccessAdmin)
+const toolsEditable = computed(() => canWritePage('companion') && (isDev.value || canManageOnlineTools.value))
+
 const view = ref<ToolsPayload | null>(null)
+const onlineStats = ref<Record<string, { calls: number; errors: number }>>({})
 const draft = ref<{ engine: Record<string, boolean> }>({ engine: {} })
 const serversDraft = ref<ServerDraftItem[]>([])
 const open = ref<Set<string>>(new Set())
@@ -42,7 +47,6 @@ const saving = ref(false)
 const status = ref('')
 const savedNote = ref('')
 
-// Add server drawer / form state
 const showAddServer = ref(false)
 const newServerId = ref('')
 const newServerName = ref('')
@@ -51,7 +55,6 @@ const newServerHdr = ref('Authorization')
 const newServerEnv = ref('')
 const addServerError = ref('')
 
-// Delete server confirmation state
 const confirmDeleteId = ref<string | null>(null)
 
 const savedEngine = computed(() => view.value?.engine ?? {})
@@ -68,21 +71,21 @@ const engineOn = computed(() => ENGINE.filter(([id]) => draft.value.engine[id]).
 const provider = computed(() => view.value?.settings.provider ?? 'off')
 
 function flipEngine(id: string): void {
-  if (isReadOnly.value) return
+  if (!toolsEditable.value) return
   draft.value.engine[id] = !draft.value.engine[id]
   touchModels()
 }
 
 function flipServer(id: string): void {
   const s = serversDraft.value.find((x) => x.id === id)
-  if (!s || isReadOnly.value) return
+  if (!s || !toolsEditable.value) return
   s.enabled = !s.enabled
   touchModels()
 }
 
 function flipServerTool(id: string, k: string): void {
   const s = serversDraft.value.find((x) => x.id === id)
-  if (!s || isReadOnly.value) return
+  if (!s || !toolsEditable.value) return
   s.tools[k] = !s.tools[k]
   touchModels()
 }
@@ -119,7 +122,6 @@ function submitAddServer(): void {
   const hdr = newServerHdr.value.trim() || 'Authorization'
   const env = newServerEnv.value.trim()
 
-  // Reject actual secret tokens before format regexes so clear secret guidance wins
   const suspectPatterns = [/sk-[a-zA-Z0-9_-]{10,}/, /bearer\s+/i, /ghp_[a-zA-Z0-9]{20,}/, /eyJ[a-zA-Z0-9_-]{15,}/]
   for (const val of [name, url, hdr, env]) {
     for (const pat of suspectPatterns) {
@@ -198,24 +200,57 @@ function confirmDeleteServer(id: string): void {
 }
 
 async function save(): Promise<boolean> {
-  if (!dirty.value || isReadOnly.value) return true
+  if (!toolsEditable.value) return false
+  if (!dirty.value) return true
   saving.value = true
   status.value = ''
-  const r = await saveToolSwitches(dashboardState.token, {
+  if (isDev.value) {
+    const r = await dashboardClient.saveDevTools({
+      engine: draft.value.engine,
+      servers: serversDraft.value,
+    })
+    saving.value = false
+    if ('error' in r) {
+      status.value = t('dsh.tl.saveFailed', { e: r.error })
+      return false
+    }
+    view.value = r.tools
+    draft.value.engine = { ...r.tools.engine }
+    serversDraft.value = JSON.parse(JSON.stringify(r.tools.servers))
+    savedNote.value = t('dsh.common.savedAt', { time: shortDateTime(Date.now()) })
+    touchModels()
+    say(t('dsh.tl.saved'))
+    return true
+  }
+
+  const res = await dashboardClient.saveOnlineAiTools({
     engine: draft.value.engine,
-    servers: serversDraft.value,
+    servers: serversDraft.value.map((s) => ({
+      id: s.id,
+      enabled: s.enabled,
+      tools: s.tools,
+    })),
   })
   saving.value = false
-  if ('error' in r) {
-    status.value = t('dsh.tl.saveFailed', { e: r.error })
+  if (!res.ok) {
+    status.value = t('dsh.tl.saveFailed', { e: res.error || 'unknown' })
     return false
   }
-  view.value = r.tools
-  draft.value.engine = { ...r.tools.engine }
-  serversDraft.value = JSON.parse(JSON.stringify(r.tools.servers))
+  if (res.data) {
+    const nextView = buildOnlineToolsView(res.data)
+    view.value = nextView
+    draft.value.engine = { ...nextView.engine }
+    serversDraft.value = JSON.parse(JSON.stringify(nextView.servers))
+  } else if (view.value) {
+    view.value = {
+      ...view.value,
+      engine: { ...draft.value.engine },
+      servers: JSON.parse(JSON.stringify(serversDraft.value)),
+    }
+  }
   savedNote.value = t('dsh.common.savedAt', { time: shortDateTime(Date.now()) })
   touchModels()
-  say(t('dsh.tl.saved'))
+  say(t('dsh.tl.onlineSaved'))
   return true
 }
 
@@ -231,12 +266,62 @@ function discard(): void {
   touchModels()
 }
 
+function buildOnlineToolsView(aiData: OnlineAiToolsPayload | undefined): ToolsPayload {
+  const engine: Record<string, boolean> = {}
+  for (const [id] of ENGINE) engine[id] = true
+  if (aiData?.engineTools) {
+    for (const et of aiData.engineTools) {
+      engine[et.name] = et.enabled
+    }
+  }
+  const servers: ToolsPayload['servers'] = (aiData?.mcpServers ?? []).map((srv) => ({
+    id: srv.id,
+    name: srv.name,
+    url: srv.host,
+    enabled: srv.enabled,
+    headers: [],
+    tools: Object.fromEntries(srv.tools.map((tl) => [tl.name, tl.enabled])),
+    timeoutMs: aiData?.settings?.timeoutMs ?? null,
+  }))
+
+  const st = aiData?.settings
+  return {
+    file: 'ai-tools.json',
+    exists: true,
+    source: 'content',
+    engine,
+    servers,
+    settings: {
+      provider: st?.provider ?? 'off',
+      maxSteps: st?.maxSteps ?? 5,
+      timeoutMs: st?.timeoutMs ?? 8000,
+      maxResultBytes: st?.maxResultBytes ?? 24000,
+      mcpTokenSet: Boolean(st?.mcpTokenSet ?? aiData?.mcpEndpoint?.enabled),
+      ticketSecretSet: Boolean(st?.ticketSecretSet),
+      source: st?.source === 'default' ? 'default' : 'server/.env',
+    },
+  }
+}
+
 let unregister: (() => void) | null = null
 onMounted(async () => {
   unregister = registerModel('tools', { page: 'companion', dirty: () => dirty.value, save, discard })
-  if (dashboardState.mode !== 'dev') return
-  const v = await fetchTools()
-  if (v) {
+  if (dashboardState.mode === 'dev') {
+    const v = await dashboardClient.fetchDevTools()
+    if (v) {
+      view.value = v
+      draft.value.engine = { ...v.engine }
+      serversDraft.value = JSON.parse(JSON.stringify(v.servers))
+      if (v.servers[0]) open.value = new Set([v.servers[0].id])
+      touchModels()
+    }
+  } else if (canManageOnlineTools.value) {
+    const aiToolsRes = await dashboardClient.fetchOnlineAiTools().catch(() => ({ ok: false as const }))
+    const aiData = 'data' in aiToolsRes ? aiToolsRes.data : undefined
+    if (aiData?.toolCallCounts7d) {
+      onlineStats.value = aiData.toolCallCounts7d
+    }
+    const v = buildOnlineToolsView(aiData)
     view.value = v
     draft.value.engine = { ...v.engine }
     serversDraft.value = JSON.parse(JSON.stringify(v.servers))
@@ -249,12 +334,12 @@ onBeforeUnmount(() => unregister?.())
 
 <template>
   <div class="db-grid" data-companion-tools>
-    <DbUnavailable v-if="isReadOnly" id="tools-online" :what="t('dsh.cp.tabTools')" :why="t('dsh.ac.editOnlineWhy')" />
+    <DbUnavailable v-if="!toolsEditable" id="tools-online" :what="t('dsh.cp.tabTools')" :why="dashboardState.mode === 'online' ? t('dsh.tl.onlineAuthorWhy') : t('dsh.ac.editOnlineWhy')" />
 
     <template v-else-if="view">
+      <p v-if="!isDev && canManageOnlineTools" class="db-banner" data-tools-online-note>{{ t('dsh.tl.onlineManageNote') }}</p>
       <p v-if="view.source !== 'content'" class="db-banner" data-tools-example>{{ t('dsh.tl.fromExample') }}</p>
 
-      <!-- How tools are called -->
       <section class="db-panel" data-tools-how>
         <header>
           <h3>{{ t('dsh.tl.howTitle') }}</h3>
@@ -282,7 +367,6 @@ onBeforeUnmount(() => unregister?.())
         <div class="db-pbody db-sep"><button type="button" class="db-btn sm" @click="emit('go', 'look', 'modules')">{{ t('dsh.tl.toLimits') }}</button></div>
       </section>
 
-      <!-- Engine tools switches -->
       <section class="db-panel" data-tools-engine>
         <header><h3>{{ t('dsh.tl.engineTitle') }}</h3><span class="db-hm">{{ t('dsh.tl.engineHint', { on: engineOn, n: ENGINE.length }) }}</span></header>
         <div class="db-tw">
@@ -295,15 +379,14 @@ onBeforeUnmount(() => unregister?.())
                 <td :data-l="t('dsh.tl.colSwitch')">
                   <button type="button" class="db-sw" role="switch" :aria-checked="!!draft.engine[id]" :aria-label="t('dsh.tl.switchLabel', { name: t(title) })" :data-tool-switch="id" @click="flipEngine(id)"><i></i>{{ draft.engine[id] ? t('dsh.tl.on') : t('dsh.tl.off') }}</button>
                 </td>
-                <td :data-l="t('dsh.tl.colUses')" class="n db-muted">—</td>
+                <td :data-l="t('dsh.tl.colUses')" class="n db-muted">{{ onlineStats[id] ? onlineStats[id].calls : '—' }}</td>
               </tr>
             </tbody>
           </table>
         </div>
-        <div class="db-pbody db-sep"><DbUnavailable id="tools-stats" :what="t('dsh.tl.statsWhat')" :why="t('dsh.tl.statsWhy')" /></div>
+        <div v-if="isDev" class="db-pbody db-sep"><DbUnavailable id="tools-stats" :what="t('dsh.tl.statsWhat')" :why="t('dsh.tl.statsWhy')" /></div>
       </section>
 
-      <!-- Dify mode panel -->
       <section v-if="provider === 'dify'" class="db-panel" data-tools-dify>
         <header><h3>{{ t('dsh.tl.difyMcpTitle') }}</h3></header>
         <div class="db-pbody"><p>{{ t('dsh.tl.difyMcpText') }}</p></div>
@@ -317,7 +400,6 @@ onBeforeUnmount(() => unregister?.())
         </div>
       </section>
 
-      <!-- External MCP servers (S6Z-4) -->
       <section v-else class="db-panel" data-tools-servers>
         <header><h3>{{ t('dsh.tl.serversTitle') }}</h3><span class="db-hm">{{ t('dsh.tl.serversHint', { n: serversDraft.length }) }}</span></header>
         <div v-if="!serversDraft.length" class="db-empty"><b>{{ t('dsh.tl.serversNone') }}</b><span>{{ t('dsh.tl.serversNoneHint') }}</span></div>
@@ -355,12 +437,11 @@ onBeforeUnmount(() => unregister?.())
             </table>
             <p v-else class="db-muted">{{ t('dsh.tl.srvNoTools') }}</p>
 
-            <div class="db-btns" style="margin-top: 8px">
+            <div v-if="isDev" class="db-btns" style="margin-top: 8px">
               <button type="button" class="db-btn sm" :data-server-discover="s.id" @click="say(t('dsh.tl.manageWhy'))">{{ t('dsh.tl.srvDiscover') }}</button>
               <button type="button" class="db-btn sm db-btn-danger" :data-server-delete="s.id" @click="promptDeleteServer(s)">{{ t('dsh.tl.srvDelete') }}</button>
             </div>
 
-            <!-- Delete confirmation box -->
             <div v-if="confirmDeleteId === s.id" class="db-srv-confirm" :data-server-delete-confirm="s.id">
               <p><b>{{ t('dsh.tl.srvDeleteConfirm', { name: s.name }) }}</b></p>
               <p class="db-muted db-small">{{ t('dsh.tl.srvDeleteConfirmBody') }}</p>
@@ -372,8 +453,7 @@ onBeforeUnmount(() => unregister?.())
           </div>
         </div>
 
-        <!-- Add External MCP Server drawer / form -->
-        <div v-if="!isReadOnly" class="db-pbody db-sep">
+        <div v-if="isDev && toolsEditable" class="db-pbody db-sep">
           <button v-if="!showAddServer" type="button" class="db-btn sm" data-add-server-btn @click="showAddServer = true">{{ t('dsh.tl.addServer') }}</button>
           <div v-else class="db-addsrv" data-add-server-form>
             <h4 style="margin: 0 0 12px">{{ t('dsh.tl.addServerTitle') }}</h4>
@@ -408,13 +488,11 @@ onBeforeUnmount(() => unregister?.())
         <div class="db-pbody db-sep"><DbUnavailable id="tools-manage" :what="t('dsh.tl.manageWhat')" :why="t('dsh.tl.manageWhy')" /></div>
       </section>
 
-      <!-- Recent tool calls log -->
       <section class="db-panel" data-tools-log>
         <header><h3>{{ t('dsh.tl.logTitle') }}</h3><span class="db-hm">{{ t('dsh.tl.logHint') }}</span></header>
         <div class="db-pbody"><DbUnavailable id="tools-log" :what="t('dsh.tl.logTitle')" :why="t('dsh.tl.logWhy')" /></div>
       </section>
 
-      <!-- Savebar -->
       <div class="db-savebar" data-savebar="tools">
         <span class="db-st" :class="{ 'db-err': !!status }" data-tools-status>{{ status || (dirty ? t('dsh.common.unsavedChanges') : savedNote || t('dsh.common.allSaved')) }}</span>
         <button type="button" class="db-btn" :disabled="!dirty" data-tools-discard @click="discard">{{ t('dsh.common.discard') }}</button>

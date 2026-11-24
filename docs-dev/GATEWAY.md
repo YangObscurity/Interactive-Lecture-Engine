@@ -106,3 +106,26 @@ Today nginx sends `/api/ai/chat` and `/api/ai/upload` straight to `api.dify.ai` 
 | lecture-api writes (per user) | 120/min on `/api/db/*`, `/api/progress/*` |
 
 The per-user counters are in memory (single process, reset on restart). With `AUTH_ADAPTER=none` all visitors share the user `anonymous`: AI routes answer 403 unless `AI_ALLOW_ANONYMOUS=true`, and the write limit is skipped.
+
+## 8. Hybrid Adapter, WebAuthn & Role-Scoped Routes (WP-2 & WP-4)
+
+When deploying with `AUTH_ADAPTER=hybrid`:
+
+### 8.1 Dual-Authentication Flow
+1. **Primary Gateway Pass-Through**: `lecture-api` inspects `Remote-User`, `Remote-Groups`, `Remote-Email`, and `Remote-Name` supplied by the reverse proxy (e.g. Authelia, Authentik). If present, the user is authenticated directly (`authSource: 'gateway'`) and roles are mapped via `AUTH_ROLE_MAP`.
+2. **Fallback Local Session**: When gateway headers are absent or empty (e.g. direct access or standalone deployment), `lecture-api` falls back to its local cookie session store (`authSource: 'session'`), allowing login via local password or WebAuthn Passkey.
+
+### 8.2 Session Lifetimes & Remember Me
+- `SESSION_TTL_HOURS`: Governs server session expiration (default: 12 hours).
+- **Persistent Cookie vs Session Cookie**:
+  - When `rememberMe: true` is passed to `/api/auth/login` or Passkey verification, `lecture-api` issues a persistent cookie with `Max-Age=2592000` (30 days).
+  - Otherwise, an ephemeral session cookie is issued without `Max-Age`, clearing when the browser terminates.
+
+### 8.3 WebAuthn Configuration
+- `WEBAUTHN_RP_ID`: Relying party domain identifier (e.g. `docs.example.com` or `localhost`).
+- `WEBAUTHN_RP_NAME`: Display name of the application (e.g. `Lecture Platform`).
+- `WEBAUTHN_ORIGIN`: Exact origin URL expected for WebAuthn ceremony validation (e.g. `https://docs.example.com`).
+
+### 8.4 Role-Scoped Route Separation
+- `/api/me/*`: Reader self-service endpoints (reading KPIs, lecture progress export, password changes, WebAuthn Passkey registration/deletion, session listing and revocation). Accessible to any authenticated user (`reader`, `author`, `admin`).
+- `/api/admin/*`: Guarded at the router boundary by `requireAdminOrAuthor`. Authoring endpoints (`/overview`, `/checks`, `/figures`, `/texts`, `/companion`) accept `author` or `admin`; system and site-level admin endpoints (`/health`, `/ai-tools`, `/users`, `/access`, `/look`, `/runtime`, `/logs`, `/backups`, `/db`, `/settings`) enforce `requireStrictAdmin` (`admin` role only).

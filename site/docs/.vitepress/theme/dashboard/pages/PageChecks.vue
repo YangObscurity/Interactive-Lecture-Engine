@@ -1,8 +1,7 @@
 <script setup lang="ts">
 /**
- * PageChecks.vue — 内容检查: the last `check:content` run (the same checks the build relies on), every problem with its
- * next step (open the file at the line, copy a brief for the coding agent, rerun), the author rules, and the latest
- * `check:content` / `doctor` output. Local author mode only: the online site has no content folder to check.
+ * PageChecks.vue — Content checks: runs in local author mode (`/__lecture/api/check`)
+ * and online for `author`/`admin` (`/api/admin/checks` & `/api/admin/checks/run`).
  */
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useT } from '../../../i18n/useT.ts'
@@ -10,10 +9,13 @@ import type { MessageKey } from '../../../i18n/index.ts'
 import { fetchSnippet, type CheckIssue, type Snippet } from '../../api/devDashboard'
 import DbHead from '../DbHead.vue'
 import DbUnavailable from '../DbUnavailable.vue'
-import { checkState, dashboardState, ensureCheckRun, isReadOnly, runChecks, say } from '../useDashboard'
+import { canAccessPage, checkState, dashboardState, ensureCheckRun, runChecks, say } from '../useDashboard'
 import { agentBrief, groupIssuesByCode, shortDateTime } from '../dashboardData'
 
 const { t } = useT()
+const isDev = computed(() => dashboardState.mode === 'dev')
+const canViewChecks = computed(() => isDev.value || (dashboardState.mode === 'online' && canAccessPage('checks')))
+
 const report = computed(() => checkState.run?.report ?? null)
 const groups = computed(() => (report.value ? groupIssuesByCode(report.value).filter((g) => g.level !== 'info') : []))
 const infos = computed(() => (report.value ? groupIssuesByCode(report.value).filter((g) => g.level === 'info') : []))
@@ -64,6 +66,10 @@ async function toggleFile(i: CheckIssue, n: number): Promise<void> {
   }
   expanded.add(key)
   if (!i.file || snippets.has(key)) return
+  if (!isDev.value) {
+    snippets.set(key, 'none')
+    return
+  }
   snippets.set(key, 'loading')
   const s = await fetchSnippet(dashboardState.token, i.file, i.line)
   snippets.set(key, s ?? 'none')
@@ -98,7 +104,6 @@ const meta = computed<Array<[string, string]>>(() =>
     : [],
 )
 
-// "rerun this check": one category (the first part of the issue code) on top of the last full report
 const catOf = (code: string): string => code.split('.')[0] ?? code
 const catLabel = (c: string): string => (c in CAT_LABEL ? t(CAT_LABEL[c as (typeof CATEGORIES)[number]]) : c)
 const canRerun = (c: string): boolean => (CATEGORIES as readonly string[]).includes(c)
@@ -119,8 +124,13 @@ onMounted(() => {
   <div class="db-page" data-page="checks">
     <DbHead :title="t('dsh.nav.checks')" :lead="t('dsh.chk.lead')" :meta="meta" />
 
-    <DbUnavailable v-if="isReadOnly" id="checks" :what="t('dsh.nav.checks')" :why="t('dsh.chk.onlineWhy')" />
+    <DbUnavailable v-if="!canViewChecks" id="checks" :what="t('dsh.nav.checks')" :why="t('dsh.chk.onlineWhy')" />
     <template v-else>
+      <div v-if="!isDev" class="db-banner" data-checks-online-banner>
+        <span class="db-info" aria-hidden="true"></span>
+        <span>{{ t('dsh.chk.onlineModeHint') }}</span>
+      </div>
+
       <div class="db-figs">
         <div><b>{{ report?.totals.fail ?? '—' }}</b><span>{{ t('dsh.chk.fail') }}</span><small>{{ t('dsh.chk.failHint') }}</small></div>
         <div><b>{{ report?.totals.warn ?? '—' }}</b><span>{{ t('dsh.chk.warn') }}</span><small>{{ t('dsh.chk.warnHint') }}</small></div>
@@ -136,7 +146,7 @@ onMounted(() => {
             <button type="button" class="db-btn sm primary" :disabled="checkState.running" data-checks-rerun @click="runChecks()">{{ t('dsh.chk.rerunAll') }}</button>
           </span>
         </header>
-        <div v-if="checkState.error" class="db-pbody db-err">{{ t('dsh.chk.runFailed') }}</div>
+        <div v-if="checkState.error" class="db-pbody db-err">{{ t('dsh.chk.runFailed') }} ({{ checkState.error }})</div>
         <div v-else-if="checkState.run && !report" class="db-pbody"><pre class="db-codeb">{{ checkState.run.error }}</pre></div>
         <div v-else-if="!report" class="db-empty"><span>{{ checkState.running ? t('dsh.chk.running') : t('dsh.chk.notRun') }}</span></div>
         <div v-else-if="groups.length === 0" class="db-empty" data-checks-allpass>
@@ -173,7 +183,7 @@ onMounted(() => {
               </div>
               <div v-if="expanded.has(issueKey(i, n))" class="db-wx">
                 <span v-if="snippets.get(issueKey(i, n)) === 'loading'" class="db-muted">{{ t('dsh.common.loading') }}</span>
-                <span v-else-if="snippets.get(issueKey(i, n)) === 'none' || !snippets.get(issueKey(i, n))" class="db-muted">{{ t('dsh.chk.snippetNone') }}</span>
+                <span v-else-if="snippets.get(issueKey(i, n)) === 'none' || !snippets.get(issueKey(i, n))" class="db-muted">{{ isDev ? t('dsh.chk.snippetNone') : t('dsh.chk.snippetOnlineOnly') }}</span>
                 <pre v-else class="db-snip" :aria-label="t('dsh.chk.snippet')" data-checks-snippet
                   ><span
                     v-for="(line, k) in (snippets.get(issueKey(i, n)) as Snippet).lines"

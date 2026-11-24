@@ -1,10 +1,7 @@
 <script setup lang="ts">
 /**
- * PageCompanion.vue — 伴读: system prompt, quick actions, version history and usage / limits (prototype v3.1, AI plan §7.1).
- *
- * Two layers: what the owner edits here (prompts/companion.json) and the locked feature contracts (site/ai-contracts/*.json,
- * read-only in every mode). Restoring a default or an earlier version shows the diff first and is written as a new version
- * (a commit when the content folder is its own git repository). Online everything is read-only.
+ * PageCompanion.vue — Companion: system prompt, quick actions, version history, usage/limits, and tools.
+ * Supports local author mode (`/__lecture/api/prompts`) and online `author`/`admin` (`/api/admin/companion*`).
  */
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useT } from '../../../i18n/useT.ts'
@@ -17,15 +14,14 @@ import {
 } from '../../../prompts/companion.ts'
 import type { AiFeatureContract } from '../../../prompts/contracts.ts'
 import { companionPromptsRef } from '../../../prompts/store.ts'
-import { fetchDevCompanionPrompts } from '../../api/admin'
+import { fetchDevCompanionPrompts, type OnlineCompanionHistoryItem, type OnlineRuntimePayload } from '../../api/admin'
 import {
   fetchPromptsAt,
-  fetchPromptsHistory,
   fetchRuntime,
-  savePromptsWithMessage,
   type HistoryPayload,
   type RuntimePayload,
 } from '../../api/devDashboard'
+import { dashboardClient } from '../dashboardClient'
 import DbDiff from '../DbDiff.vue'
 import DbHead from '../DbHead.vue'
 import DbTabs from '../DbTabs.vue'
@@ -34,7 +30,7 @@ import PlaceholderEditor from '../PlaceholderEditor.vue'
 import CompanionTools from './CompanionTools.vue'
 import { PLACEHOLDER_SETS, fillTemplate, moveItem, usedTokens } from '../placeholders'
 import { READER_LIMIT_DEFAULTS, shortDateTime } from '../dashboardData'
-import { ask, dashboardState, isReadOnly, registerModel, say, tabOf, touchModels, type DashboardPageId } from '../useDashboard'
+import { ask, canAccessPage, canWritePage, dashboardState, registerModel, say, tabOf, touchModels, type DashboardPageId } from '../useDashboard'
 
 const emit = defineEmits<{ tab: [tab: string]; go: [page: DashboardPageId, tab?: string] }>()
 const { t } = useT()
@@ -43,6 +39,10 @@ type Lang = 'zh' | 'en'
 const clone = <T,>(x: T): T => JSON.parse(JSON.stringify(x)) as T
 const pretty = (p: CompanionPromptsFile | QuickActionSpec | null): string => (p ? JSON.stringify(p, null, 2) : '')
 const noVersion = (p: CompanionPromptsFile) => ({ system: p.system, actions: p.actions })
+
+const isDev = computed(() => dashboardState.mode === 'dev')
+const canWrite = computed(() => canWritePage('companion'))
+const ro = computed(() => !canWrite.value)
 
 const saved = ref<CompanionPromptsFile>(clone(companionPromptsRef.value))
 const draft = ref<CompanionPromptsFile>(clone(companionPromptsRef.value))
@@ -57,17 +57,19 @@ const saving = ref(false)
 const status = ref('')
 const statusError = ref(false)
 const history = ref<HistoryPayload | null>(null)
+const onlineHistory = ref<OnlineCompanionHistoryItem[] | null>(null)
+const onlineHistoryOpen = ref<number | null>(null)
 const historyOpen = ref<string | null>(null)
 const historyDiff = ref<{ before: string; after: string } | null>(null)
 const runtime = ref<RuntimePayload | null>(null)
+const onlineRuntime = ref<OnlineRuntimePayload | null>(null)
 const showDiff = ref(false)
 
-const shown = computed(() => (isReadOnly.value ? companionPromptsRef.value : draft.value))
+const shown = computed(() => (ro.value ? companionPromptsRef.value : draft.value))
 const dirty = computed(() => JSON.stringify(noVersion(draft.value)) !== JSON.stringify(noVersion(saved.value)))
 const validation = computed(() => validateCompanionPrompts(draft.value))
 const errors = computed(() => (validation.value.ok ? [] : validation.value.errors))
 
-// ── contracts: engine files, bundled read-only ──
 const contractModules = import.meta.glob<{ default: AiFeatureContract }>('../../../../../ai-contracts/*.json', { eager: true })
 const contracts = computed(() => Object.values(contractModules).map((m) => m.default).filter((c) => c && typeof c.id === 'string'))
 const contractOpen = ref<string | null>(null)
@@ -163,7 +165,6 @@ function addAction(): void {
   draft.value.actions.push({ id, label: { zh: '', en: '' }, template: { zh: '{lecture}', en: '{lecture}' }, needsSelection: false, surfaces: ['panel'], enabled: false })
   openActions.add(id)
   touch()
-  // the prototype puts the focus into the new action's name (audit #30)
   const at = draft.value.actions.length - 1
   void nextTick(() => document.querySelector<HTMLElement>(`[data-qa-label="${at}.zh"]`)?.focus())
 }
@@ -182,7 +183,8 @@ function remove(i: number): void {
 }
 
 async function writeVersion(next: CompanionPromptsFile, message: string): Promise<boolean> {
-  if (!dashboardState.token) return false
+  if (ro.value) return false
+  if (isDev.value && !dashboardState.token) return false
   const checked = validateCompanionPrompts(next)
   if (!checked.ok) {
     status.value = checked.errors.join('; ')
@@ -191,7 +193,7 @@ async function writeVersion(next: CompanionPromptsFile, message: string): Promis
   }
   saving.value = true
   try {
-    const res = await savePromptsWithMessage(dashboardState.token, next, message)
+    const res = await dashboardClient.saveCompanion(next, message)
     if (!res.ok || !res.prompts) {
       status.value = t('dsh.cp.saveErr', { error: res.errors?.join('; ') || res.error || 'unknown' })
       statusError.value = true
@@ -199,12 +201,16 @@ async function writeVersion(next: CompanionPromptsFile, message: string): Promis
     }
     saved.value = clone(res.prompts)
     companionPromptsRef.value = clone(res.prompts)
-    const commitText = res.commit?.committed
-      ? t('dsh.cp.committed', { hash: res.commit.hash ?? '' })
-      : res.commit?.reason === 'not_own_repo'
-        ? t('dsh.cp.notCommittedNotOwn')
-        : t('dsh.cp.notCommitted', { reason: res.commit?.reason ?? '' })
-    status.value = `${t('dsh.cp.savedVersion', { v: res.prompts.version })} ${commitText}`
+    if (isDev.value) {
+      const commitText = res.commit?.committed
+        ? t('dsh.cp.committed', { hash: res.commit.hash ?? '' })
+        : res.commit?.reason === 'not_own_repo'
+          ? t('dsh.cp.notCommittedNotOwn')
+          : t('dsh.cp.notCommitted', { reason: res.commit?.reason ?? '' })
+      status.value = `${t('dsh.cp.savedVersion', { v: res.prompts.version })} ${commitText}`
+    } else {
+      status.value = t('dsh.cp.savedOnline')
+    }
     statusError.value = false
     say(status.value)
     void loadHistory()
@@ -290,8 +296,15 @@ async function restoreFile(kind: 'default' | 'previous'): Promise<void> {
 }
 
 async function loadHistory(): Promise<void> {
-  if (dashboardState.mode !== 'dev') return
-  history.value = await fetchPromptsHistory()
+  if (dashboardState.mode === 'dev') {
+    const res = await dashboardClient.fetchCompanionHistory()
+    history.value = res.devHistory ?? null
+    return
+  }
+  if (dashboardState.mode === 'online' && canAccessPage('companion')) {
+    const res = await dashboardClient.fetchCompanionHistory()
+    onlineHistory.value = res.onlineHistory ?? []
+  }
 }
 
 async function toggleHistory(hash: string): Promise<void> {
@@ -318,26 +331,53 @@ async function loadAsDraft(hash: string, short: string): Promise<void> {
   say(t('dsh.cp.loadedDraft', { hash: short }))
 }
 
+function prettyUnknown(v: unknown): string {
+  if (v === null || v === undefined) return ''
+  try {
+    return JSON.stringify(v, null, 2)
+  } catch {
+    return String(v)
+  }
+}
+
 let unregister: (() => void) | null = null
 onMounted(async () => {
   unregister = registerModel('prompts', { page: 'companion', dirty: () => dirty.value, save, discard })
-  if (dashboardState.mode !== 'dev') return
-  const loaded = await fetchDevCompanionPrompts()
-  if (loaded) {
-    saved.value = clone(loaded.prompts)
-    draft.value = clone(loaded.prompts)
-    filePath.value = loaded.filePath
-    defaults.value = (loaded as unknown as { defaults?: CompanionPromptsFile }).defaults ?? null
-    touchModels()
+  if (dashboardState.mode === 'dev') {
+    const loaded = await fetchDevCompanionPrompts()
+    if (loaded) {
+      saved.value = clone(loaded.prompts)
+      draft.value = clone(loaded.prompts)
+      filePath.value = loaded.filePath
+      defaults.value = (loaded as unknown as { defaults?: CompanionPromptsFile }).defaults ?? null
+      touchModels()
+    }
+    void loadHistory()
+    runtime.value = await fetchRuntime()
+  } else if (dashboardState.mode === 'online' && canAccessPage('companion')) {
+    const loaded = await dashboardClient.fetchCompanion()
+    if (loaded.ok && loaded.prompts) {
+      saved.value = clone(loaded.prompts)
+      draft.value = clone(loaded.prompts)
+      companionPromptsRef.value = clone(loaded.prompts)
+      filePath.value = loaded.filePath ?? 'prompts/companion.json'
+      touchModels()
+    }
+    void loadHistory()
+    if (dashboardState.canAccessAdmin) {
+      const rt = await dashboardClient.fetchRuntime()
+      if (rt.ok && rt.onlineRuntime) onlineRuntime.value = rt.onlineRuntime
+    }
   }
-  void loadHistory()
-  runtime.value = await fetchRuntime()
 })
 onBeforeUnmount(() => unregister?.())
 watch(
   () => tabOf('companion'),
   (tab) => {
-    if (tab === 'history' && !history.value) void loadHistory()
+    if (tab === 'history') {
+      if (isDev.value && !history.value) void loadHistory()
+      else if (!isDev.value && onlineHistory.value === null) void loadHistory()
+    }
   },
 )
 
@@ -351,7 +391,7 @@ const meta = computed<Array<[string, string]>>(() => [
 
 <template>
   <div class="db-page" data-page="companion">
-    <DbHead :title="t('dsh.nav.companion')" :lead="t('dsh.cp.lead')" :meta="meta" />
+    <DbHead :title="t('dsh.nav.companion')" :lead="t('dsh.cp.lead')" :meta="meta" :read-only="ro" />
     <DbTabs
       page="companion"
       :label="t('dsh.nav.companion')"
@@ -368,7 +408,6 @@ const meta = computed<Array<[string, string]>>(() => [
 
     <CompanionTools v-show="tabOf('companion') === 'tools'" @go="(p, tab) => emit('go', p, tab)" />
 
-    <!-- system prompt + contracts + restore -->
     <template v-if="tabOf('companion') === 'prompt'">
       <section class="db-panel" data-companion-system>
         <header><h3>{{ t('dsh.cp.systemTitle') }}</h3><span class="db-hm">{{ t('dsh.cp.systemHint') }}</span></header>
@@ -376,7 +415,7 @@ const meta = computed<Array<[string, string]>>(() => [
           <div class="db-tabs in" role="tablist" :aria-label="t('dsh.cp.systemLang')">
             <button v-for="l in (['zh', 'en'] as const)" :key="l" type="button" role="tab" :aria-selected="sysLang === l" :data-companion-syslang="l" @click="sysLang = l">{{ l === 'zh' ? t('dsh.common.zh') : 'English' }}</button>
           </div>
-          <div class="db-fld" :class="{ dirty: !isReadOnly && draft.system[sysLang] !== saved.system[sysLang] }">
+          <div class="db-fld" :class="{ dirty: !ro && draft.system[sysLang] !== saved.system[sysLang] }">
             <PlaceholderEditor
               :id="`db-sys-${sysLang}`"
               :key="sysLang"
@@ -384,12 +423,12 @@ const meta = computed<Array<[string, string]>>(() => [
               :names="PLACEHOLDER_SETS.prompts"
               :label="t('dsh.cp.systemLabel', { lang: sysLang })"
               :max="PROMPT_LIMITS.maxSystemChars"
-              :readonly="isReadOnly"
+              :readonly="ro"
               required
               @update:model-value="setSystem(sysLang, $event)"
             />
           </div>
-          <div v-if="!isReadOnly" class="db-bar-r">
+          <div v-if="!ro && isDev" class="db-bar-r">
             <button type="button" class="db-btn sm" :disabled="!defaults || sysSame(sysLang)" data-companion-restore-sys @click="restoreSystem(sysLang)">
               {{ !defaults ? t('dsh.cp.noDefault') : sysSame(sysLang) ? t('dsh.cp.isDefault') : t('dsh.cp.restoreSys') }}
             </button>
@@ -421,7 +460,7 @@ const meta = computed<Array<[string, string]>>(() => [
         <div v-if="!contracts.length" class="db-empty"><span>{{ t('dsh.cp.noContracts') }}</span></div>
       </section>
 
-      <section v-if="!isReadOnly" class="db-panel" data-companion-restore>
+      <section v-if="!ro && isDev" class="db-panel" data-companion-restore>
         <header><h3>{{ t('dsh.cp.restoreTitle') }}</h3><span class="db-hm">{{ t('dsh.cp.restoreHint') }}</span></header>
         <div class="db-pbody db-grid">
           <p>{{ t('dsh.cp.restoreLead') }}</p>
@@ -436,14 +475,13 @@ const meta = computed<Array<[string, string]>>(() => [
       </section>
     </template>
 
-    <!-- quick actions -->
     <section v-else-if="tabOf('companion') === 'actions'" class="db-panel" data-companion-actions>
       <header><h3>{{ t('dsh.cp.actionsTitle') }}</h3><span class="db-hm">{{ t('dsh.cp.actionsHint', { n: shown.actions.length, max: PROMPT_LIMITS.maxActions }) }}</span></header>
       <div class="db-qa-list">
         <div v-for="(a, i) in shown.actions" :key="a.id" class="db-qa" :class="{ off: !a.enabled }" :data-qa="a.id" @dragover.prevent @drop="onDrop($event, i)">
           <div class="db-qa-sum">
             <button
-              v-if="!isReadOnly"
+              v-if="!ro"
               type="button"
               class="db-icon db-handle"
               draggable="true"
@@ -464,14 +502,14 @@ const meta = computed<Array<[string, string]>>(() => [
             </div>
             <span class="db-qa-uses" :title="t('dsh.cp.usesUnavailable')">{{ t('dsh.cp.uses7d') }}</span>
             <span class="db-qa-more">
-              <span v-if="isReadOnly" class="db-rov"><span class="db-lock" aria-hidden="true"></span>{{ a.enabled ? t('dsh.common.enabled') : t('dsh.common.disabled') }}</span>
+              <span v-if="ro" class="db-rov"><span class="db-lock" aria-hidden="true"></span>{{ a.enabled ? t('dsh.common.enabled') : t('dsh.common.disabled') }}</span>
               <template v-else>
                 <button type="button" class="db-sw" role="switch" :aria-checked="a.enabled" :aria-label="t('dsh.cp.enableLabel', { name: a.label.zh || a.id })" :data-qa-enable="i" @click="a.enabled = !a.enabled; touch()"><i></i>{{ a.enabled ? t('dsh.common.enabled') : t('dsh.common.disabled') }}</button>
                 <button type="button" class="db-icon" :aria-expanded="openActions.has(a.id)" :aria-label="t('dsh.cp.editLabel', { name: a.label.zh || a.id })" :data-qa-open="i" @click="openActions.has(a.id) ? openActions.delete(a.id) : openActions.add(a.id)"><span class="db-chev" aria-hidden="true"></span></button>
               </template>
             </span>
           </div>
-          <div v-if="!isReadOnly && openActions.has(a.id)" class="db-qa-ed">
+          <div v-if="!ro && openActions.has(a.id)" class="db-qa-ed">
             <div class="db-frow">
               <div class="db-fl">{{ t('dsh.cp.name') }}<small>{{ t('dsh.cp.nameHint', { max: PROMPT_LIMITS.maxActionLabelChars }) }}</small></div>
               <div class="db-two">
@@ -521,7 +559,7 @@ const meta = computed<Array<[string, string]>>(() => [
             <div class="db-qa-foot">
               <span class="db-sp"><button type="button" class="db-btn sm" :aria-pressed="previewOn.has(a.id)" :data-qa-preview="i" @click="previewOn.has(a.id) ? previewOn.delete(a.id) : previewOn.add(a.id)">{{ previewOn.has(a.id) ? t('dsh.cp.assembleHide') : t('dsh.cp.assembleShow') }}</button></span>
               <button type="button" class="db-btn sm" :disabled="draft.actions.length >= PROMPT_LIMITS.maxActions" @click="duplicate(i)">{{ t('dsh.cp.duplicate') }}</button>
-              <button type="button" class="db-btn sm" :disabled="actionState(a) !== 'diff'" @click="restoreAction(i)">{{ actionState(a) === 'diff' ? t('dsh.cp.restoreDefault') : actionState(a) === 'same' ? t('dsh.cp.isDefault') : t('dsh.cp.noDefault') }}</button>
+              <button v-if="isDev" type="button" class="db-btn sm" :disabled="actionState(a) !== 'diff'" @click="restoreAction(i)">{{ actionState(a) === 'diff' ? t('dsh.cp.restoreDefault') : actionState(a) === 'same' ? t('dsh.cp.isDefault') : t('dsh.cp.noDefault') }}</button>
               <template v-if="confirmDelete === a.id">
                 <span class="db-muted db-small">{{ t('dsh.cp.deleteConfirm') }}</span>
                 <button type="button" class="db-btn sm danger" :data-qa-delete-ok="i" @click="remove(i)">{{ t('dsh.common.delete') }}</button>
@@ -532,18 +570,20 @@ const meta = computed<Array<[string, string]>>(() => [
           </div>
         </div>
       </div>
-      <div v-if="!isReadOnly" class="db-pbody db-sep db-btns">
+      <div v-if="!ro" class="db-pbody db-sep db-btns">
         <button type="button" class="db-btn" :disabled="draft.actions.length >= PROMPT_LIMITS.maxActions" data-qa-add @click="addAction">{{ t('dsh.cp.addAction') }}</button>
         <span class="db-muted db-small">{{ draft.actions.length >= PROMPT_LIMITS.maxActions ? t('dsh.cp.maxReached', { max: PROMPT_LIMITS.maxActions }) : t('dsh.cp.newDisabled') }}</span>
       </div>
       <div class="db-pbody db-sep"><DbUnavailable id="action-uses" :what="t('dsh.cp.uses7dWhat')" :why="t('dsh.cp.usesWhy')" /></div>
     </section>
 
-    <!-- history -->
     <section v-else-if="tabOf('companion') === 'history'" class="db-panel" data-companion-history>
-      <header><h3>{{ t('dsh.cp.historyTitle') }}</h3><span class="db-hm">{{ isReadOnly ? '' : t('dsh.cp.historyHint', { n: history?.commits.length ?? 0 }) }}</span></header>
-      <DbUnavailable v-if="isReadOnly" id="history" :what="t('dsh.cp.historyTitle')" :why="t('dsh.cp.historyOnlineWhy')" />
-      <template v-else>
+      <header>
+        <h3>{{ isDev ? t('dsh.cp.historyTitle') : t('dsh.cp.historyOnlineTitle') }}</h3>
+        <span class="db-hm">{{ ro ? '' : isDev ? t('dsh.cp.historyHint', { n: history?.commits.length ?? 0 }) : t('dsh.common.nItems', { n: onlineHistory?.length ?? 0 }) }}</span>
+      </header>
+      <DbUnavailable v-if="ro" id="history" :what="t('dsh.cp.historyTitle')" :why="t('dsh.cp.historyOnlineWhy')" />
+      <template v-else-if="isDev">
         <div v-if="history && !history.ownRepo" class="db-pbody db-muted" data-companion-history-mixed>{{ t('dsh.cp.historyMixed') }}</div>
         <div v-if="history && history.commits.length" class="db-tw">
           <table class="db-t">
@@ -572,9 +612,35 @@ const meta = computed<Array<[string, string]>>(() => [
         </div>
         <div v-else class="db-empty"><span>{{ history ? t('dsh.cp.historyNone') : t('dsh.common.loading') }}</span></div>
       </template>
+      <template v-else>
+        <div v-if="onlineHistory && onlineHistory.length" class="db-tw" data-companion-online-history>
+          <table class="db-t">
+            <thead><tr><th>{{ t('dsh.common.time') }}</th><th>{{ t('dsh.cp.colSettingKey') }}</th><th>{{ t('dsh.cp.colUpdatedBy') }}</th><th></th></tr></thead>
+            <tbody>
+              <template v-for="(h, idx) in onlineHistory" :key="h.id ?? idx">
+                <tr>
+                  <td :data-l="t('dsh.common.time')" class="db-mono">{{ h.updated_at ? shortDateTime(h.updated_at) : '—' }}</td>
+                  <td :data-l="t('dsh.cp.colSettingKey')" class="db-mono">{{ h.setting_key || 'companion_prompts' }}</td>
+                  <td :data-l="t('dsh.cp.colUpdatedBy')">{{ h.updated_by || '—' }}</td>
+                  <td class="n">
+                    <button type="button" class="db-btn sm" :aria-expanded="onlineHistoryOpen === idx" @click="onlineHistoryOpen = onlineHistoryOpen === idx ? null : idx">
+                      {{ onlineHistoryOpen === idx ? t('dsh.cp.hideDiff') : t('dsh.cp.showDiff') }}
+                    </button>
+                  </td>
+                </tr>
+                <tr v-if="onlineHistoryOpen === idx" class="sub">
+                  <td colspan="4">
+                    <DbDiff :before="prettyUnknown(h.previous_value)" :after="prettyUnknown(h.new_value)" file="prompts/companion.json" />
+                  </td>
+                </tr>
+              </template>
+            </tbody>
+          </table>
+        </div>
+        <div v-else class="db-empty"><span>{{ onlineHistory === null ? t('dsh.common.loading') : t('dsh.cp.historyOnlineNone') }}</span></div>
+      </template>
     </section>
 
-    <!-- usage and limits -->
     <template v-else-if="tabOf('companion') === 'usage'">
       <DbUnavailable id="usage" :what="t('dsh.cp.usageWhat')" :why="t('dsh.cp.usageWhy')" />
       <section class="db-panel" data-companion-cost>
@@ -583,15 +649,15 @@ const meta = computed<Array<[string, string]>>(() => [
       </section>
       <section class="db-panel" data-companion-limits>
         <header><h3>{{ t('dsh.cp.limitsTitle') }}</h3><span class="db-hm">{{ t('dsh.cp.limitsHint') }}</span></header>
-        <DbUnavailable v-if="isReadOnly" id="limits" :what="t('dsh.cp.limitsTitle')" :why="t('dsh.cp.limitsOnlineWhy')" />
-        <template v-else>
+        <DbUnavailable v-if="ro" id="limits" :what="t('dsh.cp.limitsTitle')" :why="t('dsh.cp.limitsOnlineWhy')" />
+        <template v-else-if="isDev">
           <div v-for="l in runtime?.limits.limits ?? []" :key="l.key" class="db-frow one" :data-companion-limit="l.key">
             <div class="db-fl">{{ limitLabel(l.key) }}<small><code>{{ l.key }}</code> · {{ l.min }}–{{ l.max }}</small></div>
             <div class="db-rov"><span class="db-lock" aria-hidden="true"></span><span>{{ l.value }} · {{ l.source === 'default' ? t('dsh.cp.limitDefault') : 'server/.env' }}</span></div>
           </div>
           <div class="db-pbody db-sep db-muted">{{ t('dsh.cp.limitsReadOnly') }}</div>
         </template>
-        <div v-if="isReadOnly || !(runtime?.limits.limits.length)" class="db-pbody db-sep" data-companion-limits-source>
+        <div v-if="!isDev || ro || !(runtime?.limits.limits.length)" class="db-pbody db-sep" data-companion-limits-source>
           <p>{{ t('dsh.cp.limitsSourceLead') }}</p>
           <dl class="db-kv">
             <template v-for="l in READER_LIMIT_DEFAULTS" :key="l.key">
@@ -604,7 +670,7 @@ const meta = computed<Array<[string, string]>>(() => [
       </section>
     </template>
 
-    <div v-if="!isReadOnly && tabOf('companion') !== 'tools' && (tabOf('companion') === 'prompt' || tabOf('companion') === 'actions' || dirty)" class="db-panel">
+    <div v-if="!ro && tabOf('companion') !== 'tools' && (tabOf('companion') === 'prompt' || tabOf('companion') === 'actions' || dirty)" class="db-panel">
       <div v-if="showDiff" class="db-pbody"><DbDiff :before="pretty(saved)" :after="pretty(draft)" :title="t('dsh.common.previewChanges')" :file="filePath" /></div>
       <div v-if="errors.length" class="db-pbody db-err" data-companion-errors><ul><li v-for="e in errors" :key="e">{{ e }}</li></ul></div>
       <div class="db-savebar" data-savebar="prompts">

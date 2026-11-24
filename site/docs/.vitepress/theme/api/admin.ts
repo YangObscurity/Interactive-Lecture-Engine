@@ -516,14 +516,19 @@ export interface OnlineChecksPayload {
   at: string
   ms?: number
   exitCode?: number
+  only?: string[]
 }
 
 export function fetchOnlineChecks(): Promise<AdminApiResult<OnlineChecksPayload>> {
   return adminFetch<OnlineChecksPayload>('GET', '/api/admin/checks')
 }
 
-export function runOnlineChecks(): Promise<AdminApiResult<OnlineChecksPayload>> {
-  return adminFetch<OnlineChecksPayload>('POST', '/api/admin/checks/run', {})
+export function runOnlineChecks(only?: readonly string[]): Promise<AdminApiResult<OnlineChecksPayload>> {
+  return adminFetch<OnlineChecksPayload>(
+    'POST',
+    '/api/admin/checks/run',
+    only && only.length ? { only } : {},
+  )
 }
 
 export interface OnlineFigureItem {
@@ -723,6 +728,41 @@ export function saveOnlineSetting<T = unknown>(
   value: T,
 ): Promise<AdminApiResult<{ ok: boolean; key: string; value: T }>> {
   return adminFetch('PUT', `/api/admin/settings/${encodeURIComponent(key)}`, { value })
+}
+
+export interface OnlineAiToolsPayload {
+  mcpEndpoint: { enabled: boolean; path: string }
+  engineTools: Array<{ name: string; enabled: boolean; calls7d: number; errors7d: number }>
+  mcpServers: Array<{
+    id: string
+    name: string
+    host: string
+    enabled: boolean
+    connectionState: string
+    tools: Array<{ name: string; enabled: boolean; calls7d: number; errors7d: number }>
+  }>
+  settings?: {
+    provider: string
+    maxSteps: number
+    timeoutMs: number
+    maxResultBytes: number
+    mcpTokenSet: boolean
+    ticketSecretSet: boolean
+    source: string
+  }
+  statsSource: string
+  toolCallCounts7d: Record<string, { calls: number; errors: number }>
+}
+
+export function fetchOnlineAiTools(): Promise<AdminApiResult<OnlineAiToolsPayload>> {
+  return adminFetch<OnlineAiToolsPayload>('GET', '/api/admin/ai-tools')
+}
+
+export function saveOnlineAiTools(payload: {
+  engine?: Record<string, boolean>
+  servers?: Array<{ id: string; enabled?: boolean; tools?: Record<string, boolean> }>
+}): Promise<AdminApiResult<OnlineAiToolsPayload & { ok: boolean; persistence?: OnlinePersistenceInfo }>> {
+  return adminFetch('PUT', '/api/admin/ai-tools', payload)
 }
 
 // ── Admin Users ──────────────────────────────────────────────────────────────────────────────────

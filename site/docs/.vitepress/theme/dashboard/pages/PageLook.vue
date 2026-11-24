@@ -1,8 +1,8 @@
 <script setup lang="ts">
 /**
- * PageLook.vue — 外观与模块: the site's default theme (skin & reading tints with live WCAG contrast checking
- * and theme.json persistence in local author mode), live device preview, and the site modules with their
- * settings, grouped and folded per module; secrets show only whether they are set.
+ * PageLook.vue — Look & modules: default theme (skin & reading tints with live WCAG contrast check),
+ * live device preview, configured site modules, env/secret settings (dev), and non-secret online
+ * settings (online admin). Online look saves trigger a non-blocking `rebuild_required` banner.
  */
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { useData } from 'vitepress'
@@ -10,7 +10,8 @@ import { THEME_RUNTIME } from 'virtual:lecture-theme'
 import { useT } from '../../../i18n/useT.ts'
 import type { MessageKey } from '../../../i18n/index.ts'
 import { runDevDashboardProbe, saveDevEnvSetting, type DevDashboardStatus, type DevSettingSummary } from '../../api/admin'
-import { fetchThemeConfig, saveThemeConfig, type ThemeView } from '../../api/devDashboard'
+import type { ThemeView } from '../../api/devDashboard'
+import { dashboardClient } from '../dashboardClient'
 import { contrast } from '../../tokens/color'
 import {
   DEFAULT_CUSTOM_HEX,
@@ -23,18 +24,22 @@ import { applyPrefs, prefAttrs, readPrefs, writePrefs, type ReaderPrefs } from '
 import DbHead from '../DbHead.vue'
 import DbTabs from '../DbTabs.vue'
 import { shortDateTime } from '../dashboardData'
-import { dashboardState, isReadOnly, registerModel, say, tabOf, touchModels, type DashboardPageId } from '../useDashboard'
+import { canAccessPage, canWritePage, dashboardState, registerModel, say, tabOf, touchModels, type DashboardPageId } from '../useDashboard'
 
 const props = defineProps<{ status: DevDashboardStatus | null }>()
 const emit = defineEmits<{ tab: [tab: string]; status: [s: DevDashboardStatus]; go: [page: DashboardPageId, tab?: string] }>()
 const { t, lang } = useT()
 const { theme, isDark } = useData<{ lectureModules?: Record<string, Record<string, unknown>> }>()
 
+const isDev = computed(() => dashboardState.mode === 'dev')
+const canWrite = computed(() => canWritePage('look'))
+const ro = computed(() => !canWrite.value)
+
 // ---- Device-level preview (ReaderPrefs in localStorage) ----
 const prefs = ref<ReaderPrefs>({})
 const themeList = THEME_RUNTIME.themes
 const activeTheme = computed(() => prefAttrs(prefs.value, THEME_RUNTIME)['data-lec-theme'] ?? THEME_RUNTIME.defaultTheme)
-const tints = computed(() => themeList.find((th) => th.id === 'reader')?.tints ?? [])
+const tints = computed(() => themeList.find((th: { id: string; tints: string[] }) => th.id === 'reader')?.tints ?? [])
 const TINT_NAME: Record<string, MessageKey> = { light: 'settings.tintLight', sepia: 'settings.tintSepia', green: 'settings.tintGreen', dark: 'settings.tintDark' }
 const tintName = (id: string): string => (TINT_NAME[id] ? t(TINT_NAME[id] as MessageKey) : id)
 const activeTint = computed(() => (isDark.value ? 'dark' : prefAttrs(prefs.value, THEME_RUNTIME)['data-lec-tint'] ?? 'light'))
@@ -60,7 +65,7 @@ function validateJson(): void {
   jsonMsg.value = res.ok ? t('dsh.lk.jsonOk', { n: res.tokenCount }) : 'message' in res ? res.message : 'invalid'
 }
 
-// ---- Site-level theme.json & reading tints (S6Z-3) ----
+// ---- Site-level theme.json / online look persistence ----
 const themeConfig = ref<ThemeView | null>(null)
 const draftSkin = ref<'reader' | 'datasheet'>('reader')
 const draftBase = ref<'paper' | 'sepia' | 'green' | 'dark' | 'custom'>('paper')
@@ -72,18 +77,21 @@ const themeSavedNote = ref('')
 const validHexRe = /^#[0-9a-fA-F]{6}$/
 const isValidHex = computed(() => validHexRe.test(draftCustomHex.value.trim()))
 
+const FALLBACK_BASE = READING_BASES[0]!
+const DARK_BASE = READING_BASES[3] ?? FALLBACK_BASE
+
 const currentBgHex = computed(() => {
   if (draftBase.value === 'custom') {
     return isValidHex.value ? draftCustomHex.value.trim().toUpperCase() : ''
   }
-  return READING_BASES.find((b) => b.id === draftBase.value)?.hex ?? READING_BASES[0].hex
+  return READING_BASES.find((b) => b.id === draftBase.value)?.hex ?? FALLBACK_BASE.hex
 })
 
 const currentSurfaceHex = computed(() => {
   if (draftBase.value === 'custom') {
     return currentBgHex.value
   }
-  return READING_BASES.find((b) => b.id === draftBase.value)?.surface ?? READING_BASES[0].surface
+  return READING_BASES.find((b) => b.id === draftBase.value)?.surface ?? FALLBACK_BASE.surface
 })
 
 const isDarkBase = computed(() => {
@@ -171,14 +179,14 @@ const themeDirty = computed(() => {
 
 const currentBorderHex = computed(() => {
   if (draftBase.value === 'custom') {
-    return isDarkBase.value ? READING_BASES[3].border : READING_BASES[0].border
+    return isDarkBase.value ? DARK_BASE.border : FALLBACK_BASE.border
   }
-  return READING_BASES.find((b) => b.id === draftBase.value)?.border ?? READING_BASES[0].border
+  return READING_BASES.find((b) => b.id === draftBase.value)?.border ?? FALLBACK_BASE.border
 })
 
 const miniPreviewStyle = computed(() => {
-  const bg = currentBgHex.value || READING_BASES[0].hex
-  const surface = currentSurfaceHex.value || READING_BASES[0].surface
+  const bg = currentBgHex.value || FALLBACK_BASE.hex
+  const surface = currentSurfaceHex.value || FALLBACK_BASE.surface
   const p = SKIN_PALETTES.reader[isDarkBase.value ? 'dark' : 'light']
   return {
     '--lec-bg': bg,
@@ -206,26 +214,39 @@ function skinCardStyle(skin: string): Record<string, string> {
 }
 
 async function saveTheme(): Promise<boolean> {
-  if (!themeDirty.value || !contrastOk.value || isReadOnly.value) return true
+  if (!canWrite.value) return false
+  if (!themeDirty.value) return true
+  if (!contrastOk.value) return false
   savingTheme.value = true
   themeSaveStatus.value = ''
-  const res = await saveThemeConfig(dashboardState.token, {
+  const customHex = draftBase.value === 'custom' ? draftCustomHex.value.trim().toUpperCase() : DEFAULT_CUSTOM_HEX
+  const res = await dashboardClient.saveLook({
     skin: draftSkin.value,
     base: draftBase.value,
-    custom: draftBase.value === 'custom' ? draftCustomHex.value.trim().toUpperCase() : undefined,
+    custom: customHex,
   })
   savingTheme.value = false
-  if ('error' in res) {
-    themeSaveStatus.value = res.error
+  if (!res.ok) {
+    themeSaveStatus.value = res.error ?? 'save_failed'
     return false
   }
-  themeConfig.value = res.theme
-  draftSkin.value = res.theme.skin
-  draftBase.value = res.theme.base
-  if (res.theme.custom) draftCustomHex.value = res.theme.custom.toUpperCase()
+  if (res.theme) {
+    themeConfig.value = res.theme
+    draftSkin.value = res.theme.skin
+    draftBase.value = res.theme.base
+    if (res.theme.custom) draftCustomHex.value = res.theme.custom.toUpperCase()
+  } else {
+    themeConfig.value = {
+      file: 'site_settings:look',
+      exists: true,
+      skin: draftSkin.value,
+      base: draftBase.value,
+      custom: customHex,
+    }
+  }
   themeSavedNote.value = t('dsh.common.savedAt', { time: shortDateTime(Date.now()) })
   touchModels()
-  say(t('dsh.lk.savedTheme'))
+  say(isDev.value ? t('dsh.lk.savedTheme') : t('dsh.lk.savedThemeOnline'))
   return true
 }
 
@@ -308,7 +329,56 @@ async function probe(): Promise<void> {
   }
 }
 
-// doctor reports its statuses in Chinese ("set", "default", "invalid"); escapes keep the hard-coded-CJK gate clean
+// ---- Online non-secret settings (/api/admin/settings/:key) ----
+const onlineSettingKey = ref('site_notice')
+const onlineSettingValue = ref('')
+const onlineSettingMsg = ref('')
+const onlineSettingErr = ref(false)
+const onlineSettingBusy = ref(false)
+
+async function loadOnlineSetting(): Promise<void> {
+  if (!canWrite.value) return
+  const key = onlineSettingKey.value.trim()
+  if (!key) return
+  onlineSettingBusy.value = true
+  onlineSettingErr.value = false
+  onlineSettingMsg.value = ''
+  const res = await dashboardClient.fetchSetting(key)
+  onlineSettingBusy.value = false
+  if (!res.ok) {
+    onlineSettingErr.value = true
+    onlineSettingMsg.value = res.error ?? 'load_failed'
+    return
+  }
+  onlineSettingValue.value = res.value === null || res.value === undefined ? 'null' : JSON.stringify(res.value, null, 2)
+}
+
+async function saveOnlineSettingKey(): Promise<void> {
+  if (!canWrite.value) return
+  const key = onlineSettingKey.value.trim()
+  if (!key) return
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(onlineSettingValue.value || 'null')
+  } catch {
+    onlineSettingErr.value = true
+    onlineSettingMsg.value = t('dsh.lk.onlineSettingJsonErr')
+    return
+  }
+  onlineSettingBusy.value = true
+  onlineSettingErr.value = false
+  onlineSettingMsg.value = ''
+  const res = await dashboardClient.saveSetting(key, parsed)
+  onlineSettingBusy.value = false
+  if (!res.ok) {
+    onlineSettingErr.value = true
+    onlineSettingMsg.value = res.error ?? 'save_failed'
+    return
+  }
+  onlineSettingMsg.value = t('dsh.lk.onlineSettingSaved', { key })
+  say(onlineSettingMsg.value)
+}
+
 const ST_SET = '\u5df2\u8bbe\u7f6e'
 const ST_DEFAULT = '\u9ed8\u8ba4\u503c'
 const ST_INVALID = '\u65e0\u6548'
@@ -324,31 +394,55 @@ const lookDirtyTabs = computed(() => [
 let unregisterEnv: (() => void) | null = null
 let unregisterTheme: (() => void) | null = null
 
+const VALID_BASES = new Set(['paper', 'sepia', 'green', 'dark', 'custom'])
+
+function seedRuntimeThemeDefaults(): void {
+  const rtSkin = THEME_RUNTIME.defaultTheme === 'datasheet' ? 'datasheet' : 'reader'
+  const rtBase = THEME_RUNTIME.defaultBase ?? THEME_RUNTIME.defaultTint ?? 'paper'
+  const cleanBase = VALID_BASES.has(rtBase)
+    ? (rtBase as 'paper' | 'sepia' | 'green' | 'dark' | 'custom')
+    : 'paper'
+  const rtCustom = THEME_RUNTIME.customTint?.toUpperCase() ?? DEFAULT_CUSTOM_HEX
+  themeConfig.value = { file: 'theme.json', exists: false, skin: rtSkin, base: cleanBase, custom: rtCustom }
+  draftSkin.value = rtSkin
+  draftBase.value = cleanBase
+  draftCustomHex.value = rtCustom
+}
+
 onMounted(async () => {
   prefs.value = readPrefs()
   unregisterEnv = registerModel('look-env', { page: 'look', dirty: anyDirty, save: saveAll, discard: discardAll })
   unregisterTheme = registerModel('look-theme', { page: 'look', dirty: () => themeDirty.value, save: saveTheme, discard: discardTheme })
 
   if (dashboardState.mode === 'dev') {
-    const cfg = await fetchThemeConfig()
-    if (cfg) {
-      themeConfig.value = cfg
-      draftSkin.value = cfg.skin
-      draftBase.value = cfg.base
-      if (cfg.custom) draftCustomHex.value = cfg.custom.toUpperCase()
+    const res = await dashboardClient.fetchLook()
+    if (res.theme) {
+      themeConfig.value = res.theme
+      draftSkin.value = res.theme.skin
+      draftBase.value = res.theme.base
+      if (res.theme.custom) draftCustomHex.value = res.theme.custom.toUpperCase()
       touchModels()
     }
   } else {
-    const rtSkin = THEME_RUNTIME.defaultTheme === 'datasheet' ? 'datasheet' : 'reader'
-    const rtBase = THEME_RUNTIME.defaultBase ?? THEME_RUNTIME.defaultTint ?? 'paper'
-    const cleanBase = (['paper', 'sepia', 'green', 'dark', 'custom'] as const).includes(rtBase as 'paper' | 'sepia' | 'green' | 'dark' | 'custom')
-      ? (rtBase as 'paper' | 'sepia' | 'green' | 'dark' | 'custom')
-      : 'paper'
-    const rtCustom = THEME_RUNTIME.customTint?.toUpperCase() ?? DEFAULT_CUSTOM_HEX
-    themeConfig.value = { file: 'theme.json', exists: false, skin: rtSkin, base: cleanBase, custom: rtCustom }
-    draftSkin.value = rtSkin
-    draftBase.value = cleanBase
-    draftCustomHex.value = rtCustom
+    seedRuntimeThemeDefaults()
+    if (canAccessPage('look')) {
+      const res = await dashboardClient.fetchLook()
+      if (res.ok && res.look) {
+        const l = res.look
+        const skin = l.skin === 'datasheet' ? 'datasheet' : l.skin === 'reader' ? 'reader' : draftSkin.value
+        const base = typeof l.base === 'string' && VALID_BASES.has(l.base)
+          ? (l.base as 'paper' | 'sepia' | 'green' | 'dark' | 'custom')
+          : draftBase.value
+        const custom = typeof l.custom === 'string' && validHexRe.test(l.custom.trim())
+          ? l.custom.trim().toUpperCase()
+          : draftCustomHex.value
+        themeConfig.value = { file: 'site_settings:look', exists: true, skin, base, custom }
+        draftSkin.value = skin
+        draftBase.value = base
+        draftCustomHex.value = custom
+        touchModels()
+      }
+    }
   }
 })
 
@@ -360,7 +454,7 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="db-page" data-page="look">
-    <DbHead :title="t('dsh.nav.look')" :lead="t('dsh.lk.lead')" />
+    <DbHead :title="t('dsh.nav.look')" :lead="t('dsh.lk.lead')" :read-only="ro" />
     <DbTabs
       page="look"
       :label="t('dsh.nav.look')"
@@ -373,7 +467,6 @@ onBeforeUnmount(() => {
     />
 
     <template v-if="tabOf('look') === 'theme'">
-      <!-- Site default skin selector -->
       <section class="db-panel" data-look-default>
         <header>
           <h3>{{ t('dsh.lk.defaultTitle') }}</h3>
@@ -387,9 +480,9 @@ onBeforeUnmount(() => {
             class="db-skinopt"
             role="radio"
             :aria-checked="draftSkin === s"
-            :disabled="isReadOnly"
+            :disabled="ro"
             :data-skin="s"
-            @click="!isReadOnly && (draftSkin = s, touchModels())"
+            @click="!ro && (draftSkin = s, touchModels())"
           >
             <span class="db-sn">
               <span class="dm" :data-k="draftSkin === s ? 'ok' : 'off'" aria-hidden="true"></span>
@@ -408,7 +501,6 @@ onBeforeUnmount(() => {
         </div>
       </section>
 
-      <!-- Reading base swatches & live WCAG contrast checking -->
       <section class="db-panel" data-look-bases>
         <header>
           <h3>{{ t('dsh.lk.basesTitle') }}</h3>
@@ -416,20 +508,20 @@ onBeforeUnmount(() => {
         </header>
         <div class="db-swatches" role="radiogroup" :aria-label="t('dsh.lk.basesTitle')">
           <button
-            v-for="b in [...READING_BASES, { id: 'custom' as const, nameKey: 'dsh.lk.baseCustom', hex: draftCustomHex, surface: draftCustomHex, border: READING_BASES[0].border }]"
+            v-for="b in [...READING_BASES, { id: 'custom' as const, nameKey: 'dsh.lk.baseCustom', hex: draftCustomHex, surface: draftCustomHex, border: FALLBACK_BASE.border }]"
             :key="b.id"
             type="button"
             class="db-swatch"
             role="radio"
             :aria-checked="draftBase === b.id"
-            :disabled="isReadOnly"
+            :disabled="ro"
             :data-base="b.id"
-            @click="!isReadOnly && (draftBase = b.id, touchModels())"
+            @click="!ro && (draftBase = b.id, touchModels())"
           >
             <span
               class="db-sq"
               :style="{
-                background: b.id === 'custom' && !isValidHex ? READING_BASES[0].hex : b.hex,
+                background: b.id === 'custom' && !isValidHex ? FALLBACK_BASE.hex : b.hex,
                 color: (b.id === 'dark' || (b.id === 'custom' && isDarkBase)) ? SKIN_PALETTES.reader.dark.text : SKIN_PALETTES.reader.light.text,
               }"
             >Aa</span>
@@ -438,7 +530,6 @@ onBeforeUnmount(() => {
           </button>
         </div>
 
-        <!-- Custom hex input + native color picker -->
         <div v-if="draftBase === 'custom'" class="db-frow one db-sep">
           <label for="db-custom-hex" class="db-fl">
             {{ t('dsh.lk.customHex') }}
@@ -452,7 +543,7 @@ onBeforeUnmount(() => {
               style="max-width: 12em"
               maxlength="7"
               spellcheck="false"
-              :disabled="isReadOnly"
+              :disabled="ro"
               data-custom-hex-input
               @input="touchModels()"
             />
@@ -461,14 +552,13 @@ onBeforeUnmount(() => {
               class="db-color-picker"
               :value="isValidHex ? draftCustomHex : DEFAULT_CUSTOM_HEX"
               :aria-label="t('dsh.lk.pickColor')"
-              :disabled="isReadOnly"
+              :disabled="ro"
               @input="draftCustomHex = ($event.target as HTMLInputElement).value.toUpperCase(); touchModels()"
             />
             <span v-if="!isValidHex" class="db-err db-small">{{ t('dsh.lk.invalidHex') }}</span>
           </div>
         </div>
 
-        <!-- 4-row contrast check table -->
         <div class="db-tw db-sep" data-look-contrast-table>
           <table v-if="contrastRows" class="db-t">
             <thead>
@@ -505,7 +595,6 @@ onBeforeUnmount(() => {
           </div>
         </div>
 
-        <!-- Live reader mini-preview card -->
         <div class="db-pbody db-sep" data-look-mini-preview>
           <div class="db-muted db-small" style="margin-bottom: 8px">{{ t('dsh.lk.pvHeading') }}</div>
           <div class="db-pv-mini th-reader" :class="isDarkBase ? 'm-dark' : 'm-light'" :style="miniPreviewStyle">
@@ -529,7 +618,6 @@ onBeforeUnmount(() => {
         </div>
       </section>
 
-      <!-- Live preview on this device (preserved for dashboard-s6y.spec.ts) -->
       <section class="db-panel" data-look-preview>
         <header><h3>{{ t('dsh.lk.previewTitle') }}</h3><span class="db-hm">{{ t('dsh.lk.previewHint') }}</span></header>
         <div class="db-pbody db-grid">
@@ -557,20 +645,18 @@ onBeforeUnmount(() => {
         </div>
       </section>
 
-      <!-- Check custom background JSON -->
       <section class="db-panel" data-look-json>
         <header><h3>{{ t('dsh.lk.jsonTitle') }}</h3><span class="db-hm">{{ t('dsh.lk.jsonHint') }}</span></header>
         <div class="db-pbody db-grid">
-          <textarea v-model="jsonInput" class="db-in" rows="4" :aria-label="t('dsh.lk.jsonTitle')" :placeholder="t('dsh.lk.jsonPlaceholder')"></textarea>
+          <textarea v-model="jsonInput" class="db-in" rows="4" :disabled="ro" :aria-label="t('dsh.lk.jsonTitle')" :placeholder="t('dsh.lk.jsonPlaceholder')"></textarea>
           <div class="db-btns">
-            <button type="button" class="db-btn sm" @click="validateJson">{{ t('dsh.lk.jsonCheck') }}</button>
+            <button type="button" class="db-btn sm" :disabled="ro" @click="validateJson">{{ t('dsh.lk.jsonCheck') }}</button>
             <span v-if="jsonMsg" :class="jsonErr ? 'db-err' : 'db-ok'">{{ jsonMsg }}</span>
           </div>
         </div>
       </section>
 
-      <!-- Savebar for Look / Theme -->
-      <div v-if="!isReadOnly" class="db-savebar" data-savebar="look">
+      <div v-if="!ro" class="db-savebar" data-savebar="look">
         <span class="db-st" :class="{ 'db-err': !contrastOk || !!themeSaveStatus }" data-look-status>
           {{ !contrastOk ? firstContrastFailure : (themeSaveStatus || (themeDirty ? t('dsh.common.unsavedChanges') : themeSavedNote || t('dsh.common.allSaved'))) }}
         </span>
@@ -588,8 +674,30 @@ onBeforeUnmount(() => {
           <div v-for="m in modules" :key="m.id"><b><code>{{ m.adapter }}</code></b><span>{{ m.id }}</span></div>
         </div>
       </section>
-      <section v-if="isReadOnly" class="db-panel">
+      <section v-if="ro" class="db-panel">
         <div class="db-pbody db-muted">{{ t('dsh.lk.modulesOnline') }}</div>
+      </section>
+      <section v-else-if="!isDev" class="db-panel" data-look-online-settings>
+        <header><h3>{{ t('dsh.lk.onlineSettingsTitle') }}</h3></header>
+        <div class="db-grid">
+          <div class="db-frow one">
+            <label class="db-fl" for="lk-online-key">{{ t('dsh.lk.onlineSettingKey') }}</label>
+            <div class="db-fld db-btns">
+              <input id="lk-online-key" v-model="onlineSettingKey" class="db-in db-mono db-grow" type="text" data-look-setting-key />
+              <button type="button" class="db-btn sm" :disabled="onlineSettingBusy" data-look-setting-load @click="loadOnlineSetting">{{ t('dsh.lk.onlineSettingLoad') }}</button>
+            </div>
+          </div>
+          <div class="db-frow one">
+            <label class="db-fl" for="lk-online-val">{{ t('dsh.lk.onlineSettingVal') }}</label>
+            <div class="db-fld">
+              <textarea id="lk-online-val" v-model="onlineSettingValue" class="db-in db-mono" rows="4" data-look-setting-val></textarea>
+            </div>
+          </div>
+          <div class="db-pbody db-sep db-btns">
+            <button type="button" class="db-btn primary sm" :disabled="onlineSettingBusy" data-look-setting-save @click="saveOnlineSettingKey">{{ t('dsh.lk.onlineSettingSave') }}</button>
+            <span v-if="onlineSettingMsg" :class="onlineSettingErr ? 'db-err' : 'db-ok'" data-look-setting-msg>{{ onlineSettingMsg }}</span>
+          </div>
+        </div>
       </section>
       <section v-else class="db-panel" data-look-env>
         <header>

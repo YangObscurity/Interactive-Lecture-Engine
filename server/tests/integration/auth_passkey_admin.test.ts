@@ -904,10 +904,32 @@ describe('WP-2: Backend Authentication, Cookies, Passkeys, Hybrid, Me & Admin', 
       adminCookie = extractCookie(loginRes).value!
     })
 
-    it('modifying site texts writes to DB, records history, and updates disk in CONTENT_DIR', async () => {
+    it('modifying site texts validates SiteTexts, writes to DB, records history, and updates disk in CONTENT_DIR', async () => {
+      const invalidRes = await app.request('/api/admin/texts', {
+        method: 'PUT',
+        headers: {
+          Cookie: `lec_session=${adminCookie}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ texts: { zh: { name: '' }, en: { name: 'Valid' } } }),
+      })
+      expect(invalidRes.status).toBe(400)
+
       const newTexts = {
-        title: 'Updated Online Title',
-        description: 'Test site description',
+        zh: {
+          name: 'Updated Online Title',
+          shortName: 'Online',
+          navText: 'Top Notice',
+          tagline: 'Tagline ZH',
+          description: 'Desc {lectures}',
+        },
+        en: {
+          name: 'Updated Online Title EN',
+          shortName: 'Online',
+          navText: 'Top Notice',
+          tagline: 'Tagline EN',
+          description: 'Test site description',
+        },
       }
 
       const res = await app.request('/api/admin/texts', {
@@ -923,13 +945,14 @@ describe('WP-2: Backend Authentication, Cookies, Passkeys, Hybrid, Me & Admin', 
       const data = await res.json()
       expect(data.ok).toBe(true)
       expect(data.persistence.mode).toBe('db+disk')
-      expect(data.persistence.effect).toBe('live')
+      expect(data.persistence.effect).toBe('rebuild_required')
 
       // Check DB site_settings
       const setting = await db.query('SELECT * FROM site_settings WHERE key = $1', ['texts'])
       expect(setting.rows.length).toBe(1)
-      const settingVal = setting.rows[0]?.value as { title?: string }
-      expect(settingVal?.title).toBe('Updated Online Title')
+      const settingVal = setting.rows[0]?.value as { zh?: { name?: string }; en?: { description?: string } }
+      expect(settingVal?.zh?.name).toBe('Updated Online Title')
+      expect(settingVal?.en?.description).toBe('Test site description')
 
       // Check DB site_settings_history
       const history = await db.query(
@@ -937,14 +960,60 @@ describe('WP-2: Backend Authentication, Cookies, Passkeys, Hybrid, Me & Admin', 
         ['texts'],
       )
       expect(history.rows.length).toBeGreaterThanOrEqual(1)
-      const historyVal = history.rows[0]?.new_value as { title?: string }
-      expect(historyVal?.title).toBe('Updated Online Title')
+      const historyVal = history.rows[0]?.new_value as { zh?: { name?: string } }
+      expect(historyVal?.zh?.name).toBe('Updated Online Title')
 
       // Check atomic file on disk in testContentDir
       const diskPath = join(testContentDir, 'site-texts.json')
       expect(existsSync(diskPath)).toBe(true)
       const diskContent = JSON.parse(readFileSync(diskPath, 'utf8'))
-      expect(diskContent.title).toBe('Updated Online Title')
+      expect(diskContent.zh.name).toBe('Updated Online Title')
+
+      // Look DTCG validation & theme.json persistence
+      const badHexLook = await app.request('/api/admin/look', {
+        method: 'PUT',
+        headers: { Cookie: `lec_session=${adminCookie}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ look: { skin: 'reader', base: 'custom', custom: 'not-a-hex' } }),
+      })
+      expect(badHexLook.status).toBe(400)
+
+      const badContrastLook = await app.request('/api/admin/look', {
+        method: 'PUT',
+        headers: { Cookie: `lec_session=${adminCookie}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ look: { skin: 'reader', base: 'custom', custom: '#808080' } }),
+      })
+      expect(badContrastLook.status).toBe(400)
+
+      const goodLook = await app.request('/api/admin/look', {
+        method: 'PUT',
+        headers: { Cookie: `lec_session=${adminCookie}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ look: { skin: 'datasheet', base: 'sepia', custom: '#EAF2E3' } }),
+      })
+      expect(goodLook.status).toBe(200)
+      const lookJson = await goodLook.json()
+      expect(lookJson.look).toEqual({ skin: 'datasheet', base: 'sepia', custom: '#EAF2E3' })
+      expect(lookJson.persistence.effect).toBe('rebuild_required')
+      expect(existsSync(join(testContentDir, 'theme.json'))).toBe(true)
+
+      // Access config validation & access.json persistence
+      const badAccess = await app.request('/api/admin/access', {
+        method: 'PUT',
+        headers: { Cookie: `lec_session=${adminCookie}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ access: { default: 'invalid-tier' } }),
+      })
+      expect(badAccess.status).toBe(400)
+
+      const goodAccess = await app.request('/api/admin/access', {
+        method: 'PUT',
+        headers: { Cookie: `lec_session=${adminCookie}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          access: { default: 'public', enforcement: 'gateway', groups: { G01: { read: 'authenticated' } } },
+        }),
+      })
+      expect(goodAccess.status).toBe(200)
+      const accessJson = await goodAccess.json()
+      expect(accessJson.persistence.effect).toBe('rebuild_required')
+      expect(existsSync(join(testContentDir, 'access.json'))).toBe(true)
     })
   })
 

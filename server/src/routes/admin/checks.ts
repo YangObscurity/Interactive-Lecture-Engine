@@ -141,23 +141,60 @@ export function createAdminChecksRouter(config: AppConfig, db: Db): Hono<AppEnv>
 
   router.get('/', async (c) => {
     c.header('Cache-Control', 'no-store')
-    const saved = await getSetting<{ at: string; report: ContentCheckReport }>(db, 'last_check_report')
+    const saved = await getSetting<{
+      at: string
+      ms?: number
+      exitCode?: number
+      only?: string[]
+      report: ContentCheckReport
+    }>(db, 'last_check_report')
     if (saved?.report) {
-      return c.json({ ok: true, report: saved.report, at: saved.at }, 200)
+      return c.json(
+        {
+          ok: saved.report.ok,
+          report: saved.report,
+          at: saved.at,
+          ms: saved.ms ?? 0,
+          exitCode: saved.exitCode ?? (saved.report.ok ? 0 : 1),
+          ...(saved.only ? { only: saved.only } : {}),
+        },
+        200,
+      )
     }
 
+    const started = Date.now()
     const report = scanContentChecks(resolveContentDir(config))
-    return c.json({ ok: true, report, at: new Date().toISOString() }, 200)
+    const ms = Date.now() - started
+    return c.json({ ok: report.ok, report, at: new Date().toISOString(), ms, exitCode: report.ok ? 0 : 1 }, 200)
   })
 
   router.post('/run', async (c) => {
     c.header('Cache-Control', 'no-store')
+    let only: string[] | undefined
+    try {
+      const body = (await c.req.json()) as { only?: unknown }
+      if (Array.isArray(body?.only)) {
+        const clean = body.only.filter((s): s is string => typeof s === 'string' && s.trim() !== '')
+        if (clean.length > 0) only = clean
+      } else if (typeof body?.only === 'string' && body.only.trim() !== '') {
+        only = [body.only.trim()]
+      }
+    } catch {
+      // empty/non-JSON body means run all checks
+    }
+
     const started = Date.now()
     const report = scanContentChecks(resolveContentDir(config))
     const at = new Date().toISOString()
-    const ms = Date.now() - started
+    const ms = Math.max(1, Date.now() - started)
+    const exitCode = report.ok ? 0 : 1
 
-    await setSetting(db, 'last_check_report', { at, report }, c.get('userId') ?? 'admin')
+    await setSetting(
+      db,
+      'last_check_report',
+      { at, ms, exitCode, ...(only ? { only } : {}), report },
+      c.get('userId') ?? 'admin',
+    )
 
     serverLogBuffer.add({
       level: 'info',
@@ -170,7 +207,8 @@ export function createAdminChecksRouter(config: AppConfig, db: Db): Hono<AppEnv>
         ok: report.ok,
         at,
         ms,
-        exitCode: report.ok ? 0 : 1,
+        exitCode,
+        ...(only ? { only } : {}),
         report,
       },
       200,

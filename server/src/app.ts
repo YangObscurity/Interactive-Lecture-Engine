@@ -21,7 +21,8 @@ import { createSessionsRouter } from './routes/sessions.js'
 import { createToolsRouter } from './routes/tools.js'
 import { createAuthRouter } from './routes/auth.js'
 import { createMeRouter } from './routes/me.js'
-import type { McpClientFactory } from './tools/index.js'
+import { getSetting } from './repo/siteSettings.js'
+import { normalizeAiToolsConfig, type McpClientFactory } from './tools/index.js'
 
 export interface AppVariables {
   auth: AuthResult
@@ -76,6 +77,15 @@ export function createApp(config: AppConfig, db: Db, options: AppOptions = {}): 
     now,
     ...(options.modelFactory ? { modelFactory: options.modelFactory } : {}),
     ...(options.mcpClientFactory ? { mcpClientFactory: options.mcpClientFactory } : {}),
+  })
+  aiRuntime.mcpManager.setDbConfigLoader(async () => {
+    const raw = await getSetting<unknown>(effectiveDb, 'ai_tools')
+    if (!raw || typeof raw !== 'object') return null
+    try {
+      return normalizeAiToolsConfig(raw)
+    } catch {
+      return null
+    }
   })
   appCloseHandlers.set(app, () => aiRuntime.mcpManager.closeAll())
   const writeLimiter = new WriteRateLimiter(config.writeRatePerMinute, now)

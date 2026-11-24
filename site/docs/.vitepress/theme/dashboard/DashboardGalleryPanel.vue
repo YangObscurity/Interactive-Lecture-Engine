@@ -16,17 +16,27 @@ import type { FigureGalleryItem, GalleryPayload } from '../../figures/types.ts'
 import { useT } from '../../i18n/useT.ts'
 import { fetchTierJson, tierUrl } from '../access/resolve'
 import { currentAccessConfig, getAccess } from '../access/store'
+import type { OnlineFigureItem } from '../api/admin'
 import { openUnifiedViewer } from '../charts/modal'
+import { dashboardClient } from './dashboardClient'
 
-const props = defineProps<{
-  isDevMode: boolean
-}>()
+const props = withDefaults(
+  defineProps<{
+    isDevMode: boolean
+    canReadOnline?: boolean
+  }>(),
+  {
+    canReadOnline: false,
+  },
+)
 
 const { t, lang } = useT()
 
 const loading = ref(false)
 const loadError = ref('')
 const items = ref<FigureGalleryItem[]>([])
+const onlineManifestItems = ref<OnlineFigureItem[]>([])
+const onlineManifestWarnings = ref<string[]>([])
 
 const filterGroup = ref('')
 const filterPaper = ref('')
@@ -133,6 +143,13 @@ async function loadGallery(): Promise<void> {
       }
     }
     items.value = merged
+    if (props.canReadOnline) {
+      const manifest = await dashboardClient.fetchOnlineFigures().catch(() => null)
+      if (manifest?.ok && manifest.data) {
+        onlineManifestItems.value = manifest.data.items
+        onlineManifestWarnings.value = manifest.data.warnings
+      }
+    }
   } catch (err) {
     loadError.value = err instanceof Error ? err.message : String(err)
   } finally {
@@ -232,6 +249,11 @@ onMounted(() => {
           :aria-label="t('dashboard.gallery.filterSearch')"
         />
       </div>
+
+      <p v-if="onlineManifestItems.length || onlineManifestWarnings.length" class="db-muted" data-gallery-online-manifest>
+        {{ t('dsh.fig.onlineManifestTitle') }}: {{ t('dsh.fig.onlineManifestSummary', { n: onlineManifestItems.length }) }}
+        <template v-if="onlineManifestWarnings.length"> ({{ onlineManifestWarnings.join('; ') }})</template>
+      </p>
 
       <p v-if="loading" class="db-muted">{{ t('dashboard.loading') }}</p>
       <p v-else-if="loadError" class="db-err-text">{{ loadError }}</p>

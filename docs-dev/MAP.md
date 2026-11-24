@@ -144,7 +144,7 @@ over the svg draws the labels that are on screen at screen-pixel size.
   `prefers-color-scheme` and `document.fonts.ready` re-read all.
 - **Styles are read once, not per frame.** The first paint after a `collect()` / class change reads the labels that are on screen,
   idle time (`requestIdle` seam) reads the rest, and the results are kept across frames (cleared on a re-read of everything, element
-  caches cleared when an ancestor's class changes). So once the layer has settled, a pan, drag or zoom frame calls no
+  caches cleared when an ancestor's class changes). Internal `passCache` is invalidated upon any SVG DOM mutation (node additions, removals, or attribute changes) to ensure layout recalculations never reuse stale geometry. So once the layer has settled, a pan, drag or zoom frame calls no
   `getComputedStyle` (unit test and `atlas.spec.ts` drag test spy on it).
 - **Web fonts.** `display: none` text makes the browser fetch nothing, and a canvas draw is not promised to start the download of
   the unicode-range slices (Chrome 157 does), so the layer collects the characters of its labels per distinct font (style, weight, family) and calls
@@ -232,5 +232,14 @@ tidy tree; pure, text widths injected), `skins.ts` (row heights and link anchors
 `theme/map/canvas/`: `CanvasMap.vue` (mounted lazily by `HomeBody.vue` when `mapMode === 'graph'`), `model.ts` (pure view-model builder, reader Beziers, datasheet ortho trace router, counter-clockwise DIP pinout resolver), `CanvasTracePanel.vue` (`#focusbar` floating trace panel).
 
 - **Slots:** `CanvasBackdrop`, `CanvasGroup`, `CanvasNode`, `CanvasEdge` (default reader + `datasheet` theme pack with `compact` / `zones` toggle).
+- **SVG Draw-Order & Layering:**
+  `CanvasMap.vue` enforces a strict SVG element rendering hierarchy:
+  `groups -> intraEdges -> nodes -> traceEdges -> bigLabels`.
+  Intra-group edges render beneath node components so node cards remain cleanly readable, while active trace edges and big LOD group labels render on top to keep trace journeys unobstructed.
+- **Marker Geometry:**
+  Arrowheads (`#cv-ah*`) define `markerUnits="userSpaceOnUse"`, ensuring arrow indicators maintain crisp, predictable physical dimensions independent of SVG coordinate scaling across all zoom levels.
 - **LOD labels:** group big IDs (`big`) `< 0.22`; group titles + numbers (`mid`, `num`, active `ann`) `>= 0.22`; lecture titles + NC (`name`, `nc`) `>= 0.45`.
 - **Trace & bundles:** single click opens (260 ms delay), dblclick group zooms box, dblclick lecture enters trace lock (zooms with trace panel inset), click bundle locks cross-group pair and shows datasheet `ann-tag` annotations only inside `.bundle-g.on`.
+- **Node Trace Roles:**
+  During trace locking, nodes are dynamically assigned crisp visual roles:
+  `locked` (the primary selected lecture), `pre` (direct prerequisites along the upstream chain), `post` (direct subsequents along the downstream chain), and `pair` (the counterpart endpoint in bundle locks), establishing distinct visual priority and high-contrast styling.

@@ -1,14 +1,12 @@
 <script setup lang="ts">
 /**
- * DashboardPage.vue — the Lecture Engine Dashboard (`/dashboard`, `/en/dashboard`), aligned with the confirmed prototype
- * v3 / v3.1 (the dashboard prototype and spec board): nine pages in four groups, the page and tab in the URL hash,
- * unsaved marks in the navigation with a leave prompt, both skins (shapes per theme), and 375 px.
+ * DashboardPage.vue — Lecture Engine Dashboard (`/dashboard`, `/en/dashboard`).
  *
- * Two modes, unchanged boundary (plan_v2_amend_01_generic_engine.md §4.6):
- *   - local author mode (`vitepress dev`): reads and writes through the loopback-only `/__lecture/api/*` middleware; every
- *     write carries the per-process dev token and is same-origin only;
- *   - online (production): read-only for admins (`/api/auth/session` roles), from `/api/admin/overview` and `/api/admin/health`.
- * Features the backend does not offer yet are shown as unavailable with the reason (DbUnavailable), never with sample data.
+ * Two modes:
+ *   - local author mode (`vitepress dev`): reads and writes through loopback `/__lecture/api/*`;
+ *   - online (production): role-based RBAC (`reader`, `author`, `admin`) backed by `/api/auth/status`,
+ *     `/api/me/*`, and `/api/admin/*`, with inline `DashboardLogin` when unauthenticated and hybrid
+ *     gateway bypass support (`AUTH_ADAPTER=hybrid`).
  */
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch, type Component } from 'vue'
 import { useData } from 'vitepress'
@@ -22,34 +20,53 @@ import {
   type AdminOverviewResponse,
   type DevDashboardStatus,
 } from '../api/admin'
+import {
+  fetchAuthMethods,
+  fetchAuthStatus,
+  logoutSession,
+  type AuthMethodInfo,
+  type AuthStatus,
+} from '../api/auth'
 import type { DevAccessSummary } from '../api/devDashboard'
 import type { SiteTexts } from '../../site-texts-schema.ts'
 import { configureSession, currentSession, getSession, resetSession, type SessionState } from '../auth/session'
 import { endBodyHydration } from '../core/bodyHydration'
 import './dashboard.css'
+import DashboardLogin from './DashboardLogin.vue'
 import DbDiff from './DbDiff.vue'
 import PageAccess from './pages/PageAccess.vue'
+import PageAccount from './pages/PageAccount.vue'
 import PageBackup from './pages/PageBackup.vue'
 import PageChecks from './pages/PageChecks.vue'
 import PageCompanion from './pages/PageCompanion.vue'
+import PageDatabase from './pages/PageDatabase.vue'
 import PageFigures from './pages/PageFigures.vue'
 import PageLook from './pages/PageLook.vue'
+import PageMyLearning from './pages/PageMyLearning.vue'
 import PageOverview from './pages/PageOverview.vue'
 import PageRuntime from './pages/PageRuntime.vue'
 import PageTexts from './pages/PageTexts.vue'
+import PageUsers from './pages/PageUsers.vue'
 import {
-  DASHBOARD_NAV,
   answerAsk,
+  applyAuthStatus,
   ask,
   askState,
+  canAccessPage,
   checkState,
+  clearRebuildRequired,
   dashboardHashOf,
   dashboardState,
+  defaultLandingPage,
   dirtyModels,
   discardPage,
   isPageDirty,
+  isReadOnly,
   parseDashboardHash,
+  resetAuthState,
   savePage,
+  say,
+  visibleNavGroups,
   type DashboardPageId,
 } from './useDashboard'
 
@@ -62,6 +79,8 @@ const loading = ref(true)
 const ready = ref(false)
 const gate = ref<'pending' | 'allowed' | 'denied' | 'signin'>('pending')
 const session = ref<SessionState>({ status: 'unknown' })
+const authStatus = ref<AuthStatus | null>(null)
+const authMethods = ref<AuthMethodInfo[]>([])
 const devStatus = ref<DevDashboardStatus | null>(null)
 const overview = ref<AdminOverviewResponse | null>(null)
 const health = ref<AdminHealthResponse | null>(null)
@@ -75,11 +94,6 @@ const devRulesNote = computed(
   () => (devStatus.value as (DevDashboardStatus & { autheliaPreviewNote?: { code: string; detail?: string } | null }) | null)?.autheliaPreviewNote ?? null,
 )
 
-/**
- * Where "sign in" goes. Behind the gateway `/dashboard` itself is admin-only (docs-dev/GATEWAY.md §4), so a full page
- * load of this address sends a signed-out reader to the sign-in portal and back; a site can name its portal with
- * `lectureModules.auth.loginUrl` (`{rd}` = this page, URL-encoded).
- */
 const loginHref = ref('')
 function computeLoginHref(): string {
   const here = window.location.href
@@ -88,6 +102,8 @@ function computeLoginHref(): string {
 }
 
 const PAGE_LABEL: Record<DashboardPageId, MessageKey> = {
+  'my-learning': 'dsh.nav.myLearning',
+  account: 'dsh.nav.account',
   overview: 'dsh.nav.overview',
   checks: 'dsh.nav.checks',
   figures: 'dsh.nav.figures',
@@ -95,11 +111,20 @@ const PAGE_LABEL: Record<DashboardPageId, MessageKey> = {
   companion: 'dsh.nav.companion',
   access: 'dsh.nav.access',
   look: 'dsh.nav.look',
+  database: 'dsh.nav.database',
+  users: 'dsh.nav.users',
   runtime: 'dsh.nav.runtime',
   backup: 'dsh.nav.backup',
 }
-const GROUP_LABEL: Record<'content' | 'site' | 'system', MessageKey> = { content: 'dsh.nav.gContent', site: 'dsh.nav.gSite', system: 'dsh.nav.gSystem' }
+const GROUP_LABEL: Record<'personal' | 'content' | 'site' | 'system', MessageKey> = {
+  personal: 'dsh.nav.gPersonal',
+  content: 'dsh.nav.gContent',
+  site: 'dsh.nav.gSite',
+  system: 'dsh.nav.gSystem',
+}
 const PAGES: Record<DashboardPageId, Component> = {
+  'my-learning': PageMyLearning,
+  account: PageAccount,
   overview: PageOverview,
   checks: PageChecks,
   figures: PageFigures,
@@ -107,11 +132,12 @@ const PAGES: Record<DashboardPageId, Component> = {
   companion: PageCompanion,
   access: PageAccess,
   look: PageLook,
+  database: PageDatabase,
+  users: PageUsers,
   runtime: PageRuntime,
   backup: PageBackup,
 }
 
-/** Counts on navigation items: failing / warning checks, failing health, an admin API that could not be read. */
 function navCount(p: DashboardPageId): { k: 'bad' | 'warn'; n: number; label: string } | null {
   if (p === 'checks') {
     const tot = checkState.run?.report?.totals
@@ -123,11 +149,6 @@ function navCount(p: DashboardPageId): { k: 'bad' | 'warn'; n: number; label: st
   return null
 }
 
-/**
- * Page changes are history entries (the browser's Back returns to the previous page, like the prototype's `#page`
- * links); a tab change, a refused leave and the first sync only replace the current entry. Entries pushed here carry a
- * null state, which VitePress's popstate handler ignores (it would reload the route otherwise).
- */
 function writeHash(push = false): void {
   const next = dashboardHashOf(dashboardState.page, dashboardState.tabs[dashboardState.page] ?? null)
   if (window.location.hash !== next && !(next === '' && window.location.hash === '')) {
@@ -137,7 +158,6 @@ function writeHash(push = false): void {
   }
 }
 
-/** Ask before leaving a page with unsaved changes: stay / discard and leave / save and leave. */
 async function confirmLeave(from: DashboardPageId): Promise<boolean> {
   if (!isPageDirty(from)) return true
   const r = await ask({
@@ -157,8 +177,12 @@ async function confirmLeave(from: DashboardPageId): Promise<boolean> {
   return false
 }
 
-/** `fromHistory`: the URL already changed (Back / Forward / an edited address): only replace, never push. */
 async function go(page: DashboardPageId, tab?: string, fromHistory = false): Promise<void> {
+  if (!canAccessPage(page)) {
+    say(t('dsh.nav.forbiddenPage'))
+    writeHash(false)
+    return
+  }
   if (page !== dashboardState.page && !(await confirmLeave(dashboardState.page))) {
     writeHash()
     return
@@ -178,7 +202,14 @@ function setTab(tab: string): void {
 }
 
 async function onHashChange(): Promise<void> {
+  if (gate.value !== 'allowed') return
   const parsed = parseDashboardHash(window.location.hash)
+  if (!canAccessPage(parsed.page)) {
+    say(t('dsh.nav.forbiddenPage'))
+    dashboardState.page = canAccessPage(dashboardState.page) ? dashboardState.page : defaultLandingPage()
+    writeHash(false)
+    return
+  }
   if (parsed.page === dashboardState.page) {
     if (parsed.tab) dashboardState.tabs[parsed.page] = parsed.tab
     return
@@ -186,7 +217,6 @@ async function onHashChange(): Promise<void> {
   await go(parsed.page, parsed.tab ?? undefined, true)
 }
 
-/** Back / Forward between two Dashboard entries is ours (hashchange above): keep VitePress from reloading the route. */
 let dashPath = ''
 function onPopState(e: PopStateEvent): void {
   if (dashPath && window.location.pathname === dashPath) e.stopImmediatePropagation()
@@ -198,31 +228,134 @@ function onBeforeUnload(e: BeforeUnloadEvent): void {
   e.returnValue = ''
 }
 
+function applyInitialHashForRole(): void {
+  const rawHash = window.location.hash
+  const parsed = parseDashboardHash(rawHash)
+  if (!rawHash) {
+    const landing = defaultLandingPage()
+    dashboardState.page = landing
+    writeHash(false)
+    return
+  }
+  if (!canAccessPage(parsed.page)) {
+    const landing = defaultLandingPage()
+    dashboardState.page = landing
+    writeHash(false)
+    say(t('dsh.nav.forbiddenPage'))
+    return
+  }
+  dashboardState.page = parsed.page
+  if (parsed.tab) dashboardState.tabs[parsed.page] = parsed.tab
+}
+
+function syncSessionFromAuthStatus(st: AuthStatus): void {
+  if (st.authenticated && st.user) {
+    session.value = {
+      status: 'authenticated',
+      user: { id: st.user.id, name: st.user.name ?? st.user.username ?? null, email: st.user.email },
+      roles: [...st.roles],
+      groups: [...st.groups],
+      logoutUrl: null,
+    }
+  } else {
+    session.value = { status: 'anonymous', source: 'server' }
+  }
+}
+
 async function loadOnline(force = false): Promise<void> {
-  if (force) resetSession()
+  if (force) {
+    resetSession()
+    resetAuthState()
+  }
   if (force || currentSession().status === 'unknown') {
     const a = theme.value?.lectureModules?.auth
     configureSession({ adapter: a?.adapter ?? 'none', ...(a?.sessionEndpoint ? { sessionEndpoint: a.sessionEndpoint } : {}) })
   }
+  loginHref.value = computeLoginHref()
+
+  try {
+    const st = await fetchAuthStatus()
+    authStatus.value = st
+    syncSessionFromAuthStatus(st)
+
+    if (!st.authenticated) {
+      resetAuthState()
+      authMethods.value = await fetchAuthMethods().catch(() => [])
+      gate.value = 'signin'
+      return
+    }
+
+    gate.value = 'allowed'
+    dashboardState.mode = 'online'
+    applyAuthStatus(st)
+    applyInitialHashForRole()
+
+    if (dashboardState.canAccessAdmin || dashboardState.canAccessAuthor) {
+      await loadAdmin()
+    } else {
+      overview.value = null
+      health.value = null
+      healthError.value = ''
+    }
+    return
+  } catch {
+    // Fall back to /api/auth/session if /api/auth/status is unavailable (404 / network / legacy proxy)
+  }
+
+  authStatus.value = null
   session.value = await getSession()
   const s = session.value
-  // signed out, or the gateway answered for an expired sign-in: say so and offer the sign-in (plan p65 §WP-D2)
   if ((s.status === 'anonymous' && s.source === 'server') || (s.status === 'unavailable' && s.reason === 'unauthorized')) {
-    loginHref.value = computeLoginHref()
+    resetAuthState()
+    authMethods.value = await fetchAuthMethods().catch(() => [])
     gate.value = 'signin'
     return
   }
-  if (!(s.status === 'authenticated' && s.roles.includes('admin'))) {
+  if (s.status !== 'authenticated') {
+    resetAuthState()
     gate.value = 'denied'
     return
   }
+
+  const synthStatus: AuthStatus = {
+    authAdapter: authAdapter.value,
+    authenticated: true,
+    needsBootstrap: false,
+    authSource: 'gateway',
+    authMethod: 'gateway',
+    rememberMe: false,
+    user: { id: s.user.id, name: s.user.name, email: s.user.email },
+    roles: [...s.roles],
+    groups: [...s.groups],
+    canAccessAdmin: s.roles.includes('admin'),
+    canAccessAuthor: s.roles.includes('admin') || s.roles.includes('author'),
+    visibleSections: [],
+  }
+  authStatus.value = synthStatus
   gate.value = 'allowed'
   dashboardState.mode = 'online'
-  await loadAdmin()
+  applyAuthStatus(synthStatus)
+  applyInitialHashForRole()
+
+  if (dashboardState.canAccessAdmin || dashboardState.canAccessAuthor) {
+    await loadAdmin()
+  } else {
+    overview.value = null
+    health.value = null
+    healthError.value = ''
+  }
 }
 
-/** `/api/admin/overview` + `/api/admin/health`; a failure is kept as `healthError` (a failure item, a nav mark). */
 async function loadAdmin(): Promise<void> {
+  if (dashboardState.mode === 'online' && !dashboardState.canAccessAdmin && !dashboardState.canAccessAuthor) return
+  if (dashboardState.mode === 'online' && !dashboardState.canAccessAdmin) {
+    const ov = await fetchAdminOverview()
+    overview.value = ov.ok ? ov.data : null
+    health.value = null
+    const why = (r: object): string => ('status' in r && r.status ? `HTTP ${String(r.status)}` : 'kind' in r ? String(r.kind) : '')
+    healthError.value = !ov.ok ? t('dsh.rt.healthError', { reason: `overview ${why(ov)}` }) : ''
+    return
+  }
   const [ov, hl] = await Promise.all([fetchAdminOverview(), fetchAdminHealth()])
   overview.value = ov.ok ? ov.data : null
   health.value = hl.ok ? hl.data : null
@@ -242,6 +375,9 @@ async function load(force = false): Promise<void> {
         devStatus.value = dev
         dashboardState.token = dev.csrfToken
         dashboardState.mode = 'dev'
+        dashboardState.roles = ['reader', 'author', 'admin']
+        dashboardState.canAccessAdmin = true
+        dashboardState.canAccessAuthor = true
         gate.value = 'allowed'
         return
       }
@@ -251,6 +387,52 @@ async function load(force = false): Promise<void> {
     loading.value = false
     ready.value = true
   }
+}
+
+async function onAuthenticated(): Promise<void> {
+  await load(true)
+}
+
+function isSafeRedirectUrl(raw: string): boolean {
+  const trimmed = raw.trim()
+  if (!trimmed) return false
+  return /^\/(?!\/)/.test(trimmed) || /^https?:\/\//i.test(trimmed)
+}
+
+async function handleLoggedOut(logoutUrl?: string | null): Promise<void> {
+  resetAuthState()
+  resetSession()
+  overview.value = null
+  health.value = null
+  healthError.value = ''
+  checkState.run = null
+  checkState.scope = ''
+  checkState.error = ''
+  session.value = { status: 'anonymous', source: 'server' }
+
+  if (logoutUrl && isSafeRedirectUrl(logoutUrl) && typeof window !== 'undefined') {
+    window.location.assign(logoutUrl)
+    return
+  }
+  if (typeof window !== 'undefined' && window.location.hash) {
+    window.history.replaceState(null, '', window.location.pathname + window.location.search)
+  }
+
+  authStatus.value = await fetchAuthStatus().catch(() => null)
+  authMethods.value = await fetchAuthMethods().catch(() => [])
+  loginHref.value = computeLoginHref()
+  gate.value = 'signin'
+}
+
+async function onLogout(): Promise<void> {
+  let logoutUrl: string | null = null
+  try {
+    const res = await logoutSession()
+    logoutUrl = res.logoutUrl
+  } catch {
+    // still clear local state and show login
+  }
+  await handleLoggedOut(logoutUrl)
 }
 
 const gateMessage = computed(() => {
@@ -280,7 +462,6 @@ onMounted(() => {
   if (parsed.tab) dashboardState.tabs[parsed.page] = parsed.tab
   window.addEventListener('hashchange', onHashChange)
   window.addEventListener('beforeunload', onBeforeUnload)
-  // capture: runs before VitePress's own popstate listener on window
   dashPath = window.location.pathname
   window.addEventListener('popstate', onPopState, { capture: true })
   void load()
@@ -314,7 +495,7 @@ const pageProps = computed<Record<string, unknown>>(() => {
     class="lec-dashboard"
     :data-dashboard-ready="ready ? '1' : '0'"
     :data-dashboard-mode="dashboardState.mode === 'dev' ? 'dev' : 'online'"
-    :data-dashboard-readonly="dashboardState.mode === 'dev' ? '0' : '1'"
+    :data-dashboard-readonly="isReadOnly ? '1' : '0'"
   >
     <div v-if="loading && !ready" class="db-loading"><p class="db-muted">{{ t('dsh.common.loading') }}</p></div>
 
@@ -326,16 +507,25 @@ const pageProps = computed<Record<string, unknown>>(() => {
       </div>
     </div>
 
-    <div v-else-if="gate === 'signin'" class="db-panel db-gate" data-dashboard-gate="signin" role="region" :aria-label="t('dsh.gate.signinTitle')">
-      <div class="db-pbody">
-        <h2>{{ t('dsh.gate.signinTitle') }}</h2>
-        <p>{{ session.status === 'unavailable' ? t('dsh.gate.signinExpired') : t('dsh.gate.signinBody') }}</p>
-        <div class="db-btns">
-          <a class="db-btn primary" :href="loginHref" target="_self" data-dashboard-login>{{ t('dsh.gate.signin') }}</a>
-          <button type="button" class="db-btn" @click="load(true)">{{ t('dashboard.gateRetry') }}</button>
+    <template v-else-if="gate === 'signin'">
+      <DashboardLogin
+        v-if="authStatus !== null || authMethods.length > 0"
+        :auth-status="authStatus"
+        :methods="authMethods"
+        :gateway-login-url="loginHref"
+        @authenticated="onAuthenticated"
+      />
+      <div v-else class="db-panel db-gate" data-dashboard-gate="signin" role="region" :aria-label="t('dsh.gate.signinTitle')">
+        <div class="db-pbody">
+          <h2>{{ t('dsh.gate.signinTitle') }}</h2>
+          <p>{{ session.status === 'unavailable' ? t('dsh.gate.signinExpired') : t('dsh.gate.signinBody') }}</p>
+          <div class="db-btns">
+            <a class="db-btn primary" :href="loginHref" target="_self" data-dashboard-login>{{ t('dsh.gate.signin') }}</a>
+            <button type="button" class="db-btn" @click="load(true)">{{ t('dashboard.gateRetry') }}</button>
+          </div>
         </div>
       </div>
-    </div>
+    </template>
 
     <div v-else-if="gate === 'allowed'" class="db-shell">
       <aside class="db-side">
@@ -344,7 +534,7 @@ const pageProps = computed<Record<string, unknown>>(() => {
           <span class="db-mode" :data-mode="dashboardState.mode">{{ dashboardState.mode === 'dev' ? t('dsh.modeLocal') : t('dsh.modeOnline') }}</span>
         </div>
         <nav class="db-nav" :aria-label="t('dsh.nav.label')">
-          <template v-for="g in DASHBOARD_NAV" :key="g.group || 'top'">
+          <template v-for="g in visibleNavGroups" :key="g.group || 'top'">
             <h2 v-if="g.group">{{ t(GROUP_LABEL[g.group]) }}</h2>
             <button
               v-for="p in g.pages"
@@ -361,20 +551,47 @@ const pageProps = computed<Record<string, unknown>>(() => {
             </button>
           </template>
         </nav>
+        <div v-if="dashboardState.mode === 'online'" class="db-side-foot">
+          <button type="button" class="db-btn sm" data-dashboard-logout @click="onLogout">{{ t('dsh.nav.logout') }}</button>
+        </div>
       </aside>
-      <label class="db-navsel">
-        <span class="db-vh">{{ t('dsh.nav.label') }}</span>
-        <select :value="dashboardState.page" data-dashboard-navsel @change="go(($event.target as HTMLSelectElement).value as DashboardPageId)">
-          <template v-for="g in DASHBOARD_NAV" :key="g.group || 'top'">
-            <optgroup v-if="g.group" :label="t(GROUP_LABEL[g.group])">
-              <option v-for="p in g.pages" :key="p" :value="p">{{ t(PAGE_LABEL[p]) }}{{ isPageDirty(p) ? ` · ${t('dsh.common.unsaved')}` : '' }}</option>
-            </optgroup>
-            <template v-else><option v-for="p in g.pages" :key="p" :value="p">{{ t(PAGE_LABEL[p]) }}</option></template>
-          </template>
-        </select>
-      </label>
+      <div class="db-navsel-row">
+        <label class="db-navsel">
+          <span class="db-vh">{{ t('dsh.nav.label') }}</span>
+          <select :value="dashboardState.page" data-dashboard-navsel @change="go(($event.target as HTMLSelectElement).value as DashboardPageId)">
+            <template v-for="g in visibleNavGroups" :key="g.group || 'top'">
+              <optgroup v-if="g.group" :label="t(GROUP_LABEL[g.group])">
+                <option v-for="p in g.pages" :key="p" :value="p">{{ t(PAGE_LABEL[p]) }}{{ isPageDirty(p) ? ` · ${t('dsh.common.unsaved')}` : '' }}</option>
+              </optgroup>
+              <template v-else><option v-for="p in g.pages" :key="p" :value="p">{{ t(PAGE_LABEL[p]) }}</option></template>
+            </template>
+          </select>
+        </label>
+        <button v-if="dashboardState.mode === 'online'" type="button" class="db-btn sm" data-dashboard-logout-mobile @click="onLogout">{{ t('dsh.nav.logout') }}</button>
+      </div>
       <main class="db-main" :data-dashboard-pane="dashboardState.page">
-        <component :is="PAGES[dashboardState.page]" :key="dashboardState.page" v-bind="pageProps" @go="go" @tab="setTab" @retry="loadAdmin()" @status="(s: DevDashboardStatus) => (devStatus = s)" />
+        <div v-if="dashboardState.rebuildRequired" class="db-banner db-rebuild-banner" role="status" data-dashboard-rebuild-badge>
+          <span class="db-info" aria-hidden="true"></span>
+          <span class="db-grow">
+            {{ t('dsh.rebuild.banner') }}
+            <template v-if="dashboardState.rebuildReasons.length">
+              ({{ dashboardState.rebuildReasons.join('; ') }})
+            </template>
+          </span>
+          <button type="button" class="db-btn sm" data-dashboard-rebuild-dismiss @click="clearRebuildRequired()">
+            {{ t('dsh.rebuild.dismiss') }}
+          </button>
+        </div>
+        <component
+          :is="PAGES[dashboardState.page]"
+          :key="dashboardState.page"
+          v-bind="pageProps"
+          @go="go"
+          @tab="setTab"
+          @retry="loadAdmin()"
+          @status="(s: DevDashboardStatus) => (devStatus = s)"
+          @logged-out="handleLoggedOut()"
+        />
       </main>
     </div>
 

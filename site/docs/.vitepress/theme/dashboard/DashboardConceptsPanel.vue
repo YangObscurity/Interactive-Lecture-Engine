@@ -28,10 +28,18 @@ import {
   type PreviewConfirmResponse,
 } from '../components/ai/conceptAuthorClient'
 
-const props = defineProps<{
-  isDevMode: boolean
-  csrfToken: string
-}>()
+import { dashboardClient } from './dashboardClient'
+
+const props = withDefaults(
+  defineProps<{
+    isDevMode: boolean
+    csrfToken: string
+    canWrite?: boolean
+  }>(),
+  {
+    canWrite: false,
+  },
+)
 
 const { t } = useT()
 
@@ -108,6 +116,9 @@ async function refreshList(): Promise<void> {
         }))
       } else {
         items.value = []
+      }
+      if (props.canWrite) {
+        await dashboardClient.fetchOnlineFigures().catch(() => null)
       }
     }
     if (items.value.length > 0 && !items.value.some((i) => itemKeyOf(i) === selectedKey.value)) {
@@ -284,8 +295,8 @@ async function handleExecuteDelete(): Promise<void> {
       </div>
     </div>
 
-    <p v-if="!isDevMode" class="db-muted" data-concepts-readonly-notice>
-      {{ t('dashboard.conceptsDevOnlyHint') }}
+    <p v-if="!isDevMode" class="db-muted" :data-concepts-readonly-notice="!canWrite ? '' : undefined" :data-concepts-online-notice="canWrite ? '' : undefined">
+      {{ canWrite ? t('dsh.fig.conceptsOnlineAuthorHint') : t('dashboard.conceptsDevOnlyHint') }}
     </p>
 
     <p v-if="loading && items.length === 0" class="db-muted">{{ t('dashboard.loading') }}</p>

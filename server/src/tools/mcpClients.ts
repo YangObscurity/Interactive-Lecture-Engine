@@ -85,6 +85,8 @@ export class ExternalMcpManager {
   private readonly now: () => number
   private readonly entries = new Map<string, ClientEntry>()
   private readonly inFlight = new Map<string, Promise<ClientEntry>>()
+  private configOverride: AiToolsFileConfig | null = null
+  private dbConfigLoader: (() => Promise<AiToolsFileConfig | null>) | null = null
 
   constructor(
     config: Pick<AppConfig, 'aiToolsFile' | 'aiToolTimeoutMs'>,
@@ -108,7 +110,36 @@ export class ExternalMcpManager {
     })
   }
 
+  setDbConfigLoader(loader: (() => Promise<AiToolsFileConfig | null>) | null): void {
+    this.dbConfigLoader = loader
+  }
+
+  async applyConfigOverride(cfg: AiToolsFileConfig | null): Promise<void> {
+    this.configOverride = cfg
+    if (!cfg) return
+    const keepIds = new Set(cfg.mcpServers.map((s) => s.id))
+    for (const [id, entry] of [...this.entries.entries()]) {
+      const serverCfg = cfg.mcpServers.find((s) => s.id === id)
+      if (!keepIds.has(id) || !serverCfg?.enabled) {
+        if (entry.client) await this.closeEntry(entry)
+        if (!keepIds.has(id)) this.entries.delete(id)
+      }
+    }
+  }
+
   async loadConfig(): Promise<AiToolsFileConfig> {
+    if (this.configOverride) return this.configOverride
+    if (this.dbConfigLoader) {
+      try {
+        const fromDb = await this.dbConfigLoader()
+        if (fromDb) {
+          this.configOverride = fromDb
+          return fromDb
+        }
+      } catch {
+        // fallback to disk config if DB setting cannot be read yet
+      }
+    }
     return this.configStore.load()
   }
 

@@ -1,15 +1,12 @@
 <script setup lang="ts">
 /**
- * PageTexts.vue — 站点文案: name, short name, top-bar text, tagline and home description in both languages. Facts only.
- * The template ships every field empty; grey hints are placeholders, never values. Under each field name: what happens when
- * it stays empty (the same rules the build applies, site-texts-schema.ts), and a preview shows the result.
- * Online: the built values, read-only.
+ * PageTexts.vue — Site texts: name, short name, top-bar text, tagline and home description in both languages.
+ * Supports local dev mode (`/__lecture/api/texts`) and online `author`/`admin` (`/api/admin/texts`).
  */
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useData } from 'vitepress'
 import { useT } from '../../../i18n/useT.ts'
 import type { MessageKey } from '../../../i18n/index.ts'
-import { saveDevSiteTexts } from '../../api/admin'
 import {
   FIELD_LIMITS,
   REQUIRED_FIELDS,
@@ -23,10 +20,11 @@ import {
   type TextIssue,
   type TextsLocale,
 } from '../../../site-texts-schema.ts'
+import { dashboardClient } from '../dashboardClient'
 import DbHead from '../DbHead.vue'
 import PlaceholderEditor from '../PlaceholderEditor.vue'
 import { PLACEHOLDER_SETS } from '../placeholders'
-import { dashboardState, isReadOnly, registerModel, say, touchModels } from '../useDashboard'
+import { canAccessPage, canWritePage, dashboardState, registerModel, say, touchModels } from '../useDashboard'
 
 const props = defineProps<{ texts: SiteTexts | null }>()
 const emit = defineEmits<{ saved: [texts: SiteTexts] }>()
@@ -43,15 +41,25 @@ const FIELD_KEYS: Record<SiteTextField, { label: MessageKey; where: MessageKey; 
 }
 
 const clone = (x: SiteTexts): SiteTexts => JSON.parse(JSON.stringify(x)) as SiteTexts
-const saved = ref<SiteTexts>(clone(props.texts ?? emptySiteTexts()))
-const form = ref<SiteTexts>(clone(saved.value))
-const previewLang = ref<TextsLocale>('zh')
-const showDiff = ref(false)
-const saving = ref(false)
-const feedback = ref('')
-const feedbackError = ref(false)
 
-/** Online: what the build used (`themeConfig.siteMeta`), mapped back onto the five fields. */
+function isSiteTextsShape(v: unknown): v is SiteTexts {
+  if (!v || typeof v !== 'object') return false
+  const rec = v as Record<string, unknown>
+  return typeof rec.zh === 'object' && rec.zh !== null && typeof rec.en === 'object' && rec.en !== null
+}
+
+function normalizeSiteTexts(raw: SiteTexts): SiteTexts {
+  const base = emptySiteTexts()
+  for (const loc of LOCALES) {
+    for (const f of SITE_TEXT_FIELDS) {
+      const val = raw[loc]?.[f]
+      base[loc][f] = typeof val === 'string' ? val : ''
+    }
+  }
+  return base
+}
+
+/** Built values from `themeConfig.siteMeta`, mapped onto the five fields. */
 const onlineTexts = computed<SiteTexts>(() => {
   const m = theme.value?.siteMeta ?? {}
   const en = m.i18n?.en ?? {}
@@ -60,7 +68,19 @@ const onlineTexts = computed<SiteTexts>(() => {
     en: { name: en.name ?? '', shortName: en.shortName ?? '', navText: en.text ?? '', tagline: en.tagline ?? '', description: en.description ?? '' },
   }
 })
-const shown = computed(() => (isReadOnly.value ? onlineTexts.value : form.value))
+
+const initialTexts = props.texts ?? (dashboardState.mode === 'online' ? onlineTexts.value : emptySiteTexts())
+const saved = ref<SiteTexts>(clone(initialTexts))
+const form = ref<SiteTexts>(clone(saved.value))
+const previewLang = ref<TextsLocale>('zh')
+const showDiff = ref(false)
+const saving = ref(false)
+const feedback = ref('')
+const feedbackError = ref(false)
+
+const canWrite = computed(() => canWritePage('texts'))
+const ro = computed(() => !canWrite.value)
+const shown = computed(() => (ro.value ? onlineTexts.value : form.value))
 
 const diffs = computed(() => {
   const out: Array<{ key: string; from: string; to: string }> = []
@@ -86,17 +106,21 @@ function setField(loc: TextsLocale, f: SiteTextField, v: string): void {
 }
 
 async function save(): Promise<boolean> {
-  if (!dirty.value || errors.value.length || !dashboardState.token) return false
+  if (!canWrite.value) return false
+  if (!dirty.value) return true
+  if (errors.value.length) return false
+  if (dashboardState.mode === 'dev' && !dashboardState.token) return false
   saving.value = true
   try {
-    const res = await saveDevSiteTexts(dashboardState.token, form.value)
-    if (res.ok && res.texts) {
-      saved.value = clone(res.texts)
-      form.value = clone(res.texts)
+    const res = await dashboardClient.saveTexts(form.value)
+    if (res.ok) {
+      const next = res.texts && isSiteTextsShape(res.texts) ? normalizeSiteTexts(res.texts) : clone(form.value)
+      saved.value = clone(next)
+      form.value = clone(next)
       feedback.value = t('dsh.tx.saved')
       feedbackError.value = false
       say(t('dsh.tx.saved'))
-      emit('saved', res.texts)
+      emit('saved', next)
       touchModels()
       return true
     }
@@ -114,8 +138,22 @@ function discard(): void {
 }
 
 let unregister: (() => void) | null = null
-onMounted(() => {
+onMounted(async () => {
   unregister = registerModel('texts', { page: 'texts', dirty: () => dirty.value, save, discard })
+  if (dashboardState.mode === 'online' && canAccessPage('texts')) {
+    const res = await dashboardClient.fetchTexts()
+    if (res.ok && isSiteTextsShape(res.texts)) {
+      const normalized = normalizeSiteTexts(res.texts)
+      saved.value = clone(normalized)
+      form.value = clone(normalized)
+      touchModels()
+    } else {
+      const fallback = clone(onlineTexts.value)
+      saved.value = clone(fallback)
+      form.value = clone(fallback)
+      touchModels()
+    }
+  }
 })
 onBeforeUnmount(() => unregister?.())
 
@@ -135,12 +173,18 @@ const rules = computed(() => {
     { k: has('description') ? 'ok' : 'off', text: has('description') ? t('dsh.tx.pvDescOk') : has('tagline') ? t('dsh.tx.descRule') : t('dsh.tx.pvDescNone') },
   ]
 })
+
+const bannerText = computed(() => {
+  if (ro.value) return t('dsh.tx.bannerOnline')
+  if (dashboardState.mode === 'online') return t('dsh.tx.bannerOnlineWritable')
+  return t('dsh.tx.banner')
+})
 </script>
 
 <template>
   <div class="db-page" data-page="texts" data-dashboard-pane-texts>
-    <DbHead :title="t('dsh.nav.texts')" :lead="t('dsh.tx.lead')" :meta="isReadOnly ? [] : [[t('dsh.common.file'), 'site-texts.json']]" />
-    <div class="db-banner"><span class="db-info" aria-hidden="true"></span><span>{{ isReadOnly ? t('dsh.tx.bannerOnline') : t('dsh.tx.banner') }}</span></div>
+    <DbHead :title="t('dsh.nav.texts')" :lead="t('dsh.tx.lead')" :meta="ro ? [] : [[t('dsh.common.file'), 'site-texts.json']]" :read-only="ro" />
+    <div class="db-banner"><span class="db-info" aria-hidden="true"></span><span>{{ bannerText }}</span></div>
 
     <section class="db-panel" data-texts-panel>
       <header><h3>{{ t('dsh.tx.panel') }}</h3></header>
@@ -151,7 +195,7 @@ const rules = computed(() => {
           <small>{{ t(FIELD_KEYS[f].where) }}</small>
           <small>{{ t(FIELD_KEYS[f].rule) }}</small>
         </div>
-        <div v-for="loc in LOCALES" :key="loc" class="db-fld" :class="{ dirty: !isReadOnly && saved[loc][f] !== form[loc][f] }" :data-lang="loc === 'zh' ? t('dsh.common.zh') : 'English'">
+        <div v-for="loc in LOCALES" :key="loc" class="db-fld" :class="{ dirty: !ro && saved[loc][f] !== form[loc][f] }" :data-lang="loc === 'zh' ? t('dsh.common.zh') : 'English'">
           <PlaceholderEditor
             v-if="f === 'description'"
             :id="`db-texts-${loc}-${f}`"
@@ -160,13 +204,13 @@ const rules = computed(() => {
             :label="`${t(FIELD_KEYS[f].label)} (${loc})`"
             :max="FIELD_LIMITS[f]"
             :hint="SITE_TEXT_HINTS[loc][f]"
-            :readonly="isReadOnly"
+            :readonly="ro"
             :empty-text="t('dsh.tx.descRule')"
             small
             :data-texts-input="`${loc}.${f}`"
             @update:model-value="setField(loc, f, $event)"
           />
-          <div v-else-if="isReadOnly" class="pe-ro" :class="{ empty: !shown[loc][f].trim() }" :data-texts-value="`${loc}.${f}`">
+          <div v-else-if="ro" class="pe-ro" :class="{ empty: !shown[loc][f].trim() }" :data-texts-value="`${loc}.${f}`">
             <span class="db-lock" aria-hidden="true"></span><span>{{ shown[loc][f].trim() || t('dsh.common.notFilled') }}</span>
           </div>
           <template v-else>
@@ -190,11 +234,11 @@ const rules = computed(() => {
           </template>
         </div>
       </div>
-      <div v-if="!isReadOnly && errors.length" class="db-pbody db-err" data-texts-errors>
+      <div v-if="!ro && errors.length" class="db-pbody db-err" data-texts-errors>
         <p>{{ t('dsh.tx.errTitle') }}</p>
         <ul><li v-for="e in errors" :key="e">{{ e }}</li></ul>
       </div>
-      <div v-if="!isReadOnly && showDiff" class="db-pbody db-sep" data-texts-diff-panel>
+      <div v-if="!ro && showDiff" class="db-pbody db-sep" data-texts-diff-panel>
         <p v-if="!diffs.length" class="db-muted" data-texts-diff-none>{{ t('dsh.common.noChanges') }}</p>
         <div v-else class="db-tw">
           <table class="db-t" data-texts-diff-table>
@@ -205,7 +249,7 @@ const rules = computed(() => {
           </table>
         </div>
       </div>
-      <div v-if="!isReadOnly" class="db-savebar" data-savebar="texts">
+      <div v-if="!ro" class="db-savebar" data-savebar="texts">
         <span class="db-st" :class="{ 'db-err': feedbackError }" data-texts-feedback>{{ feedback || (dirty ? t('dsh.common.nChanged', { n: diffs.length }) : t('dsh.common.allSaved')) }}</span>
         <button type="button" class="db-btn" :disabled="!dirty" data-texts-discard @click="discard">{{ t('dsh.common.discard') }}</button>
         <button type="button" class="db-btn" :aria-pressed="showDiff" data-texts-preview @click="showDiff = !showDiff">{{ t('dsh.common.previewChanges') }}</button>

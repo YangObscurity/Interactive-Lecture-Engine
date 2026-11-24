@@ -3,8 +3,10 @@
  * PageUsers.vue — Admin-only user & role manager backed by /api/admin/users*.
  * Preserves form state when surfacing 409 cannot_remove_last_admin or validation errors.
  */
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { useT } from '../../../i18n/useT.ts'
+import DbUnavailable from '../DbUnavailable.vue'
+import { canAccessPage, dashboardState } from '../useDashboard'
 import {
   createAdminUser,
   deleteAdminUser,
@@ -22,6 +24,7 @@ import {
 import { shortDateTime } from '../dashboardData'
 
 const { t } = useT()
+const blockedByRole = computed(() => dashboardState.mode === 'online' && !canAccessPage('users'))
 
 const loading = ref(true)
 const users = ref<AdminUser[]>([])
@@ -77,7 +80,7 @@ async function loadUsers(): Promise<void> {
 }
 
 onMounted(() => {
-  if (typeof window !== 'undefined') {
+  if (typeof window !== 'undefined' && !blockedByRole.value) {
     void loadUsers()
   } else {
     loading.value = false
@@ -232,6 +235,9 @@ async function onDeleteUser(u: AdminUser): Promise<void> {
       <p>{{ t('dsh.usr.lead') }}</p>
     </header>
 
+    <DbUnavailable v-if="blockedByRole" id="users" :what="t('dsh.usr.title')" :why="t('dsh.ac.editOnlineWhy')" />
+
+    <template v-else>
     <div v-if="errorMessage" class="db-errbox" role="alert" data-users-error>
       {{ errorMessage }}
     </div>
@@ -485,5 +491,6 @@ async function onDeleteUser(u: AdminUser): Promise<void> {
         </table>
       </div>
     </section>
+    </template>
   </div>
 </template>

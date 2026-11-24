@@ -149,3 +149,31 @@ npm run doctor -- --json
 - 内容根：环境变量 `LECTURE_CONTENT_DIR` > 仓库根 `content/`（有 `site.config.ts` 或 `groups.ts` 才算）> 原位模式。`npm run init` 用 `templates/content/` 生成内容目录。
 - `npm run dev` 在内容模式下自动起单向监视（`content:watch`），内容目录的改动随时同步到 `site/docs/`，不用另开终端。`LECTURE_CONTENT_WATCH=0` 关掉；仍可单独跑 `npm run content:watch`。
 - `check:content` 的附加规则（例如每讲必须有的标题）写在内容目录的 `check.config.json`，规则见 `docs/authoring/lecture-contract.md`。
+
+---
+
+## 9. 服务端认证与会话配置 (Server Auth & Session Configuration)
+
+`lecture-api` 支持灵活的统一认证架构与会话持久化：
+
+### 9.1 认证适配器 (`AUTH_ADAPTER`)
+- `none`: 开放模式，所有请求作为 `anonymous` 处理。
+- `trusted-header`: 纯反向代理信任标头模式，仅信任上游网关传递的 `Remote-User`、`Remote-Groups`、`Remote-Email`、`Remote-Name`。
+- `local`: 本地独立认证模式，基于数据库用户表、密码哈希与 WebAuthn Passkeys。
+- `hybrid`: **混合网关模式**。优先检查反向代理网关标头（`Remote-User` / `Remote-Groups`）；若标头存在则直接以网关身份通过验证，若不存在或为空则回退到本地 Cookie 与 Passkey 登录，实现统一认证网关与本地兜底登录无缝并存。
+
+### 9.2 会话与 Cookie 策略
+- `SESSION_TTL_HOURS`: 服务端会话生命周期（小时），默认 12 小时。
+- **免登录与记住我 (rememberMe)**:
+  - 勾选「记住我」(`rememberMe = true`)：签发持久 Cookie，包含 `Max-Age=2592000`（30 天有效），浏览器关闭重启后仍保持登录状态。
+  - 未勾选：签发标准会话 Cookie，不带 `Max-Age`/`Expires`，浏览器关闭即失效。
+
+### 9.3 WebAuthn Passkey 配置
+启用 Passkey 免密认证时在环境变量中配置：
+- `WEBAUTHN_RP_ID`: 依赖方 ID（RP ID），通常为站点主域名（如 `docs.example.com` 或开发环境 `localhost`）。
+- `WEBAUTHN_RP_NAME`: 依赖方显示名称（如 `Lecture Site`）。
+- `WEBAUTHN_ORIGIN`: 浏览器 Origin 完整地址（如 `https://docs.example.com` 或 `http://localhost:5173`），用于校验客户端签名。
+
+### 9.4 角色路由划分
+- `/api/me/*`: 读者个人自服务接口（学习概览与 KPI、最近阅读会话、个人凭据管理、Passkey 绑定与删除、活跃会话列表与吊销），只要通过身份验证（`reader` / `author` / `admin`）即可访问。
+- `/api/admin/*`: 外层由 `requireAdminOrAuthor` 鉴权。其中内容作者端点（`/overview`、`/checks`、`/figures`、`/texts`、`/companion`）向 `author` 与 `admin` 开放；高危管理与运维端点（`/health`、`/ai-tools`、`/users`、`/access`、`/look`、`/runtime`、`/logs`、`/backups`、`/db`、`/settings`）由内层 `requireStrictAdmin` 严格限制为仅 `admin` 角色可访问。
