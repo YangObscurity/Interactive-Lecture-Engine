@@ -8,9 +8,9 @@
 
 ![License: MIT](https://img.shields.io/badge/license-MIT-2155c4?style=flat-square) ![Node.js 20+](https://img.shields.io/badge/node-%E2%89%A520-2155c4?style=flat-square&logo=node.js&logoColor=white) ![VitePress 1.6](https://img.shields.io/badge/VitePress-1.6-2155c4?style=flat-square&logo=vite&logoColor=white) ![Vue 3](https://img.shields.io/badge/Vue-3-2155c4?style=flat-square&logo=vue.js&logoColor=white) ![TypeScript](https://img.shields.io/badge/TypeScript-2155c4?style=flat-square&logo=typescript&logoColor=white) ![Hono](https://img.shields.io/badge/backend-Hono-2155c4?style=flat-square&logo=hono&logoColor=white)
 
-<p>[中文](./README.md) · **English**</p>
+<p><a href="./README.md">中文</a> · <b>English</b></p>
 
-<p>[Highlights](#highlights) · [Screenshots](#screenshots) · [Quick start](#quick-start) · [How it works](#how-it-works) · [Features](#features) · [Docs](#documentation)</p>
+<p><a href="#highlights">Highlights</a> · <a href="#screenshots">Screenshots</a> · <a href="#quick-start">Quick start</a> · <a href="#how-it-works">How it works</a> · <a href="#features">Features</a> · <a href="#documentation">Docs</a></p>
 
 </div>
 

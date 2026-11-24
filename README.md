@@ -8,9 +8,9 @@
 
 ![License: MIT](https://img.shields.io/badge/license-MIT-2155c4?style=flat-square) ![Node.js 20+](https://img.shields.io/badge/node-%E2%89%A520-2155c4?style=flat-square&logo=node.js&logoColor=white) ![VitePress 1.6](https://img.shields.io/badge/VitePress-1.6-2155c4?style=flat-square&logo=vite&logoColor=white) ![Vue 3](https://img.shields.io/badge/Vue-3-2155c4?style=flat-square&logo=vue.js&logoColor=white) ![TypeScript](https://img.shields.io/badge/TypeScript-2155c4?style=flat-square&logo=typescript&logoColor=white) ![Hono](https://img.shields.io/badge/backend-Hono-2155c4?style=flat-square&logo=hono&logoColor=white)
 
-<p>**中文** · [English](./README.en.md)</p>
+<p><b>中文</b> · <a href="./README.en.md">English</a></p>
 
-<p>[亮点](#亮点) · [截图](#截图) · [快速开始](#快速开始) · [工作方式](#工作方式) · [功能](#功能) · [文档](#文档)</p>
+<p><a href="#亮点">亮点</a> · <a href="#截图">截图</a> · <a href="#快速开始">快速开始</a> · <a href="#工作方式">工作方式</a> · <a href="#功能">功能</a> · <a href="#文档">文档</a></p>
 
 </div>
 
