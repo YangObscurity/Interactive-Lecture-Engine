@@ -1,0 +1,35 @@
+# yaml-language-server: $schema=https://cubic.dev/schema/cubic-repository-config.schema.json
+version: 1
+
+reviews:
+  enabled: true
+  sensitivity: medium
+  incremental_commits: true
+  check_drafts: false
+  resolve_threads_when_addressed: true
+  merge_confidence_summary: true
+  auto_approve_behavior: disabled
+  auto_approve: disabled
+  ultrareview: manual
+  custom_instructions: |
+    请全部使用简体中文提供审查意见。
+    请遵循根目录 AGENTS.md 的安全、隐私与内容/引擎分离规范：不得将私有 content/ 内容、密钥或 .env 纳入版本库，也不要建议直接修改自动生成/同步目录。
+    仅针对真实 bug、逻辑缺陷、并发或安全隐患给出可操作、尽量可直接采纳的最小修复建议。
+  ignore:
+    files:
+      - "**/.refactor-backup/**"
+      - "**/package-lock.json"
+      - "site/.e2e-demo/**"
+      - "site/docs/.vitepress/dist/**"
+      - "site/docs/.vitepress/cache/**"
+      - "server/dist/**"
+
+pr_descriptions:
+  generate: true
+  skip_if_author_description: true
+  cubic_review_link: true
+
+issues:
+  fix_with_cubic_buttons: false
+  pr_comment_fixes: false
+  auto_fix: "off"

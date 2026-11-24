@@ -1,0 +1,22 @@
+{
+  "strictness": 2,
+  "commentTypes": [
+    "logic",
+    "syntax"
+  ],
+  "autoReview": [
+    "open"
+  ],
+  "effort": "base",
+  "statusCheck": true,
+  "ignorePatterns": ".refactor-backup/\n**/package-lock.json\nsite/.e2e-demo/\nsite/docs/.vitepress/dist/\nsite/docs/.vitepress/cache/\nserver/dist/",
+  "instructions": "请全部使用简体中文提供审查意见，尽量给出可直接采纳的最小修改方案。请遵守根目录 AGENTS.md 的安全、隐私与内容/引擎分离约定，不要建议把 content/ 或密钥写入版本库，也不要建议修改自动同步/构建产物目录。",
+  "customContext": {
+    "files": [
+      {
+        "path": "AGENTS.md",
+        "description": "Repository engineering rules covering content/engine separation, privacy scanning, and security invariants."
+      }
+    ]
+  }
+}

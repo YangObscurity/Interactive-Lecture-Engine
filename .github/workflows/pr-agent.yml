@@ -1,0 +1,89 @@
+name: PR-Agent (ClinePass)
+
+on:
+  pull_request:
+    # Omit synchronize to avoid burning ClinePass quota on fixup pushes; comment /review when re-review is needed.
+    types: [opened, reopened, ready_for_review]
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+
+jobs:
+  prepare:
+    permissions:
+      contents: read
+      pull-requests: read
+    if: >-
+      github.event.sender.type != 'Bot' &&
+      (
+        (
+          github.event_name == 'pull_request' &&
+          github.event.pull_request.head.repo.full_name == github.repository &&
+          !github.event.pull_request.draft
+        ) ||
+        (
+          github.event_name == 'issue_comment' &&
+          github.event.issue.pull_request &&
+          contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.comment.author_association) &&
+          startsWith(github.event.comment.body, '/')
+        )
+      )
+    runs-on: ubuntu-latest
+    outputs:
+      allowed: ${{ steps.gate.outputs.allowed }}
+    steps:
+      - id: gate
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.issue.number }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            echo "allowed=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          head_repo="$(gh api "repos/${GH_REPO}/pulls/${PR_NUMBER}" --jq '.head.repo.full_name // ""')"
+          if [ "$head_repo" = "$GH_REPO" ]; then
+            echo "allowed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::Skipping PR-Agent secret job for fork PR comment ($head_repo)"
+            echo "allowed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  pr_agent:
+    needs: prepare
+    if: needs.prepare.outputs.allowed == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: write
+    steps:
+      - name: Run PR-Agent
+        uses: qodo-ai/pr-agent@e673a02076ce09a4726c3d0c3cc85780e59ca52b # v0.50.0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OPENAI_KEY: ${{ secrets.CLINE_API_KEY }}
+          OPENAI__API_BASE: https://api.cline.bot/api/v1
+          LITELLM__EXTRA_HEADERS: '{"X-Response-Format": "openai"}'
+          CONFIG__MODEL: openai/cline-pass/deepseek-v4.1-flash
+          CONFIG__MODEL_WEAK: openai/cline-pass/deepseek-v4.1-flash
+          CONFIG__MODEL_REASONING: openai/cline-pass/deepseek-v4.1-flash
+          CONFIG__FALLBACK_MODELS: '["openai/cline-pass/deepseek-v4.1-flash-1017", "openai/cline-pass/mimo-v2.6-flash"]'
+          CONFIG__CUSTOM_MODEL_MAX_TOKENS: '256000'
+          CONFIG__MAX_MODEL_TOKENS: '256000'
+          CONFIG__RESPONSE_LANGUAGE: 'zh-CN'
+          CONFIG__USE_REPO_SETTINGS_FILE: 'false'
+          CONFIG__DISABLE_AUTO_FEEDBACK: 'false'
+          GITHUB_ACTION_CONFIG__AUTO_DESCRIBE: 'true'
+          GITHUB_ACTION_CONFIG__AUTO_REVIEW: 'true'
+          GITHUB_ACTION_CONFIG__AUTO_IMPROVE: 'true'
+          GITHUB_ACTION_CONFIG__FAIL_ON_COMMAND_ERRORS: 'true'
+          PR_REVIEWER__REQUIRE_RISK_ASSESSMENT: 'true'
+          PR_REVIEWER__REQUIRE_MERGE_RECOMMENDATION: 'true'
+          PR_CODE_SUGGESTIONS__COMMITTABLE_CODE_SUGGESTIONS: 'false'
+          PR_CODE_SUGGESTIONS__DUAL_PUBLISHING_SCORE_THRESHOLD: '7'

@@ -1,0 +1,18 @@
+title = "Interactive-Lecture-Engine Gitleaks config"
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Synthetic test sentinel strings in unit and integration tests"
+condition = "AND"
+paths = [
+  '''^server/tests/''',
+  '''^site/tests/''',
+]
+regexes = [
+  '''SENTINEL_UNCLOSED_SECRET_42''',
+  '''dify-sec-sentinel-777-XYZ-SECRET''',
+  '''openai-sec-sentinel-888-ABC-SECRET''',
+  '''grp-[0-9a-f]{8}''',
+]
