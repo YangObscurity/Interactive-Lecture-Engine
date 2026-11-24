@@ -63,8 +63,8 @@ export class AuthProviderRegistry {
       implemented: true,
       extensible: false,
       endpoints: {
-        registerStart: '/api/auth/methods/passkey/register/start',
-        registerFinish: '/api/auth/methods/passkey/register/finish',
+        registerStart: '/api/me/passkeys/register/start',
+        registerFinish: '/api/me/passkeys/register/finish',
         loginStart: '/api/auth/methods/passkey/login/start',
         loginFinish: '/api/auth/methods/passkey/login/finish',
       },

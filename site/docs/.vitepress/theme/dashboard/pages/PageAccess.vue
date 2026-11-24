@@ -437,6 +437,27 @@ onMounted(async () => {
       onlineAccess.value = normalized
       initFromAccess(normalized)
       touchModels()
+    } else if (res.ok && !res.access) {
+      const la = (theme.value as { lectureAccess?: { default?: string; enforcement?: string; tiers?: unknown[]; inlineTier?: string } } | undefined)?.lectureAccess
+      const isRestrictedInTheme = Boolean(
+        la && (
+          (la.default && la.default !== 'public') ||
+          (la.enforcement && la.enforcement !== 'none') ||
+          (Array.isArray(la.tiers) && la.tiers.length > 0) ||
+          (la.inlineTier && la.inlineTier !== 'public')
+        )
+      )
+      if (res.source === 'uninitialized_restricted' || isRestrictedInTheme) {
+        onlineLoadError.value = t('dsh.ac.uninitializedRestrictedErr') || 'Existing site restrictions detected. Initialize access.json or export from site.config.ts before editing online to prevent overwriting restrictions.'
+        feedback.value = onlineLoadError.value
+        feedbackError.value = true
+      } else {
+        const cleanDefaults = { default: 'public', enforcement: 'none', groups: {} }
+        const normalized = normalizeOnlineAccess(cleanDefaults)
+        onlineAccess.value = normalized
+        initFromAccess(normalized)
+        touchModels()
+      }
     } else {
       onlineLoadError.value = res.error || t('dsh.ac.loadOnlineErr')
       feedback.value = t('dsh.ac.loadOnlineErr')

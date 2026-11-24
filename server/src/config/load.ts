@@ -15,7 +15,6 @@ import {
   type LogLevel,
 } from './schema.js'
 
-export type EnvConfig = AppConfig
 export { ConfigError }
 
 export interface LoadConfigOptions {
@@ -322,6 +321,7 @@ export function loadConfig(
     webauthnRpName:
       (resolved.get('WEBAUTHN_RP_NAME') as string | undefined) ?? 'Interactive Lecture Engine',
     webauthnOrigin: (resolved.get('WEBAUTHN_ORIGIN') as string | undefined) ?? '',
+    authBootstrapToken: (resolved.get('AUTH_BOOTSTRAP_TOKEN') as string | null) ?? null,
     dbAutoMigrate: Boolean(resolved.get('DB_AUTO_MIGRATE')),
     notionHealthUrl: (resolved.get('NOTION_HEALTH_URL') as string | null) ?? null,
     allowNonLoopback,

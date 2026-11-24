@@ -330,6 +330,7 @@ async function probe(): Promise<void> {
 }
 
 // ---- Online non-secret settings (/api/admin/settings/:key) ----
+const RESERVED_SETTING_KEYS = new Set(['access', 'texts', 'look', 'ai_tools', 'companion_prompts', 'last_check_report'])
 const onlineSettingKey = ref('site_notice')
 const onlineSettingValue = ref('')
 const onlineSettingMsg = ref('')
@@ -357,6 +358,11 @@ async function saveOnlineSettingKey(): Promise<void> {
   if (!canWrite.value) return
   const key = onlineSettingKey.value.trim()
   if (!key) return
+  if (RESERVED_SETTING_KEYS.has(key)) {
+    onlineSettingErr.value = true
+    onlineSettingMsg.value = t('dsh.lk.onlineSettingReservedErr')
+    return
+  }
   let parsed: unknown
   try {
     parsed = JSON.parse(onlineSettingValue.value || 'null')
@@ -372,7 +378,7 @@ async function saveOnlineSettingKey(): Promise<void> {
   onlineSettingBusy.value = false
   if (!res.ok) {
     onlineSettingErr.value = true
-    onlineSettingMsg.value = res.error ?? 'save_failed'
+    onlineSettingMsg.value = res.error === 'reserved_setting_key' ? t('dsh.lk.onlineSettingReservedErr') : (res.error ?? 'save_failed')
     return
   }
   onlineSettingMsg.value = t('dsh.lk.onlineSettingSaved', { key })
@@ -678,7 +684,7 @@ onBeforeUnmount(() => {
         <div class="db-pbody db-muted">{{ t('dsh.lk.modulesOnline') }}</div>
       </section>
       <section v-else-if="!isDev" class="db-panel" data-look-online-settings>
-        <header><h3>{{ t('dsh.lk.onlineSettingsTitle') }}</h3></header>
+        <header><h3>{{ t('dsh.lk.onlineSettingsTitle') }}</h3><span class="db-hm">{{ t('dsh.lk.onlineSettingsReservedHint') }}</span></header>
         <div class="db-grid">
           <div class="db-frow one">
             <label class="db-fl" for="lk-online-key">{{ t('dsh.lk.onlineSettingKey') }}</label>

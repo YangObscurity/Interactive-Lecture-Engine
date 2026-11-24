@@ -13,14 +13,12 @@ import { basename, resolve, sep } from 'node:path'
 import { gunzipSync, gzipSync } from 'node:zlib'
 import { Hono } from 'hono'
 import type { AppEnv } from '../../app.js'
+import { resolveBackupDir } from '../../db/backupDir.js'
 import type { Db } from '../../db/types.js'
 import { serverLogBuffer } from '../../http/logBuffer.js'
 
-const DEFAULT_BACKUP_DIR = resolve('./backups')
-
 function getBackupDir(): string {
-  const envDir = process.env.BACKUP_DIR?.trim()
-  return envDir ? resolve(envDir) : DEFAULT_BACKUP_DIR
+  return resolveBackupDir()
 }
 
 function formatStamp(): string {
@@ -63,6 +61,7 @@ export function createAdminBackupsRouter(db: Db): Hono<AppEnv> {
           : null
         return {
           filename,
+          kind: filename.endsWith('.tar.gz') ? ('physical-tar' as const) : ('logical-json' as const),
           sizeBytes: st.size,
           sha256,
           createdAt: st.mtime.toISOString(),
@@ -93,6 +92,16 @@ export function createAdminBackupsRouter(db: Db): Hono<AppEnv> {
         'SELECT id, user_id, lecture_id, group_id, title, is_archived, created_at, updated_at FROM ai_sessions',
       )
     ).rows
+    const aiMessages = (
+      await db.query(
+        'SELECT id, user_id, session_id, role, content, selected_context, model, prompt_tokens, completion_tokens, created_at FROM ai_messages',
+      )
+    ).rows
+    const aiReviewChecklists = (
+      await db.query(
+        'SELECT id, user_id, lecture_id, group_id, topic_title, section_anchor, is_completed, pptx_source, priority, created_at, updated_at FROM ai_review_checklists',
+      )
+    ).rows
     const users = (
       await db.query(
         'SELECT id, username, email, display_name, roles, disabled, last_login_at, created_at, updated_at FROM auth_users',
@@ -108,6 +117,8 @@ export function createAdminBackupsRouter(db: Db): Hono<AppEnv> {
         site_settings_history: history,
         progress,
         ai_sessions: aiSessions,
+        ai_messages: aiMessages,
+        ai_review_checklists: aiReviewChecklists,
         auth_users_public: users,
       },
     }
@@ -147,6 +158,8 @@ export function createAdminBackupsRouter(db: Db): Hono<AppEnv> {
             site_settings_history: history.length,
             progress: progress.length,
             ai_sessions: aiSessions.length,
+            ai_messages: aiMessages.length,
+            ai_review_checklists: aiReviewChecklists.length,
             auth_users_public: users.length,
           },
           createdAt: snapshotPayload.createdAt,

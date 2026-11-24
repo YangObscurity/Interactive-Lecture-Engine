@@ -71,6 +71,7 @@ export interface AppConfig {
   sessionTtlHours: number
   rememberMeDays: number
   authMethodsEnabled: string
+  authBootstrapToken: string | null
   webauthnRpId: string
   webauthnRpName: string
   webauthnOrigin: string
@@ -618,6 +619,17 @@ export const CONFIG_SCHEMA: readonly SettingSpec[] = [
     description: '启用的认证方法列表（逗号分隔：password,passkey,gateway 等）',
     example: 'password,passkey,gateway',
     validator: validateAuthMethods,
+  },
+  {
+    name: 'AUTH_BOOTSTRAP_TOKEN',
+    configKey: 'authBootstrapToken',
+    group: 'auth',
+    type: 'string',
+    required: false,
+    secret: true,
+    description: '首次初始化管理员所需的令牌（留空时不要求令牌，仅在非网关环境或网关管理员首次配置时生效）',
+    example: 'my-secret-bootstrap-token',
+    validator: validateOptionalString,
   },
   {
     name: 'WEBAUTHN_RP_ID',

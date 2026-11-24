@@ -436,7 +436,7 @@ export function createMeRouter(config: AppConfig, db: Db): Hono<AppEnv> {
         { id: userId, username: userRes.rows[0].username },
         body as Parameters<typeof verifyRegistrationResponse>[4],
       )
-      return c.json(result, 200)
+      return c.json(result, 201)
     } catch (err) {
       return c.json(
         { error: 'passkey_verification_failed', message: err instanceof Error ? err.message : String(err) },

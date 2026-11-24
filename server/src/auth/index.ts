@@ -1,6 +1,7 @@
 import type { MiddlewareHandler } from 'hono'
 import type { AppConfig } from '../config/schema.js'
 import type { Db } from '../db/types.js'
+import { isOriginAllowed } from './origin.js'
 import { createHybridAuthAdapter } from './hybrid.js'
 import { createLocalAuthAdapter } from './local.js'
 import { createNoneAuthAdapter } from './none.js'
@@ -52,80 +53,6 @@ export function createAuthAdapter(config: AppConfig, db?: Db): AuthAdapter {
  * - c.set('canAccessAdmin', authResult.canAccessAdmin)
  * - c.set('canAccessAuthor', authResult.canAccessAuthor)
  */
-function isCsrfOriginValid(
-  candidateOriginRaw: string,
-  config: AppConfig,
-  reqUrlStr: string,
-  hostHeader: string | undefined,
-  forwardedProto: string | undefined,
-): boolean {
-  let candidateOrigin: URL
-  try {
-    candidateOrigin = new URL(candidateOriginRaw)
-  } catch {
-    return false
-  }
-  if (candidateOrigin.protocol !== 'http:' && candidateOrigin.protocol !== 'https:') {
-    return false
-  }
-  const actualOrigin = candidateOrigin.origin.toLowerCase()
-
-  // When WEBAUTHN_ORIGIN is explicitly configured, treat it as a strict allowlist (no fallthrough).
-  if (config.webauthnOrigin && config.webauthnOrigin.trim() !== '') {
-    const allowedOrigins = config.webauthnOrigin
-      .split(',')
-      .map((s) => s.trim())
-      .filter(Boolean)
-    for (const rawAllowed of allowedOrigins) {
-      try {
-        if (new URL(rawAllowed).origin.toLowerCase() === actualOrigin) {
-          return true
-        }
-      } catch {
-        // skip invalid configured origin entry
-      }
-    }
-    return false
-  }
-
-  let reqUrl: URL | null = null
-  const protoToken = forwardedProto?.split(',')[0]?.trim().toLowerCase()
-  try {
-    reqUrl = new URL(reqUrlStr)
-    if (reqUrl.origin.toLowerCase() === actualOrigin) {
-      return true
-    }
-    // Support TLS-terminating reverse proxies forwarding https over http loopback
-    if ((config.authCookieSecure === 'true' || protoToken === 'https') && reqUrl.host) {
-      if (`https://${reqUrl.host}`.toLowerCase() === actualOrigin) {
-        return true
-      }
-    }
-    return false
-  } catch {
-    reqUrl = null
-  }
-
-  if (hostHeader) {
-    const cleanHost = hostHeader.trim()
-    if (!cleanHost || /[\s/@\\]/.test(cleanHost)) {
-      return false
-    }
-    const effectiveProto =
-      config.authCookieSecure === 'true' || protoToken === 'https' ? 'https:' : 'http:'
-    try {
-      const hostOrigin = new URL(`${effectiveProto}//${cleanHost}`).origin.toLowerCase()
-      if (hostOrigin === actualOrigin) {
-        return true
-      }
-    } catch {
-      // ignore invalid host header
-    }
-  }
-
-  return false
-}
-
 export function createAuthMiddleware(
   config: AppConfig,
   db?: Db,
@@ -157,12 +84,12 @@ export function createAuthMiddleware(
           )
         }
         if (headerToCheck) {
-          const valid = isCsrfOriginValid(
+          const valid = isOriginAllowed(
             headerToCheck,
             config,
             c.req.url,
             c.req.header('host'),
-            c.req.header('x-forwarded-proto'),
+            (name) => c.req.header(name),
           )
           if (!valid) {
             return c.json({ error: 'forbidden', message: 'CSRF origin mismatch' }, 403)

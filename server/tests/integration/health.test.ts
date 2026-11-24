@@ -58,6 +58,7 @@ function makeTestConfig(overrides: Partial<AppConfig> = {}): AppConfig {
     webauthnRpId: '',
     webauthnRpName: 'Interactive Lecture Engine',
     webauthnOrigin: '',
+    authBootstrapToken: null,
     ...overrides,
   }
 }

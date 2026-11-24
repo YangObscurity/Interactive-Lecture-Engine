@@ -24,6 +24,9 @@ const snippets = reactive(new Map<string, Snippet | 'loading' | 'none'>())
 const showAll = ref(new Set<string>())
 
 const CATEGORIES = ['lecture', 'chart', 'link', 'translation', 'concept', 'figure', 'graph', 'texts', 'group'] as const
+const CLI_ONLY_CATS: ReadonlySet<string> = new Set(['chart', 'link', 'translation', 'concept', 'figure', 'graph'])
+const isOnlineMode = computed(() => report.value?.mode === 'online' || !isDev.value)
+
 const CAT_LABEL: Record<(typeof CATEGORIES)[number], MessageKey> = {
   lecture: 'dsh.chk.catLecture',
   chart: 'dsh.chk.catChart',
@@ -37,11 +40,13 @@ const CAT_LABEL: Record<(typeof CATEGORIES)[number], MessageKey> = {
 }
 const categories = computed(() =>
   CATEGORIES.map((c) => {
+    const isCliOnly = isOnlineMode.value && CLI_ONLY_CATS.has(c)
     const list = report.value?.issues.filter((i) => i.code.split('.')[0] === c) ?? []
     const fail = list.filter((i) => i.level === 'fail').length
     const warn = list.filter((i) => i.level === 'warn').length
     const info = list.filter((i) => i.level === 'info').length
-    return { c, label: t(CAT_LABEL[c]), fail, warn, info, k: fail ? 'bad' : warn ? 'warn' : 'ok' }
+    const k = isCliOnly ? 'off' : fail ? 'bad' : warn ? 'warn' : 'ok'
+    return { c, label: t(CAT_LABEL[c]), fail, warn, info, k, isCliOnly }
   }),
 )
 
@@ -199,20 +204,35 @@ onMounted(() => {
       </section>
 
       <section class="db-panel" data-checks-all>
-        <header><h3>{{ t('dsh.chk.allChecks') }}</h3><span class="db-hm"><code>npm run check:content</code></span></header>
+        <header>
+          <h3>{{ isOnlineMode ? t('dsh.chk.onlineSummaryTitle') : t('dsh.chk.allChecks') }}</h3>
+          <span class="db-hm"><code>{{ isOnlineMode ? 'CONTENT_DIR summary' : 'npm run check:content' }}</code></span>
+        </header>
         <div class="db-tw">
           <table class="db-t">
             <thead><tr><th>{{ t('dsh.chk.colCheck') }}</th><th>{{ t('dsh.chk.colResult') }}</th><th>{{ t('dsh.chk.fail') }}</th><th>{{ t('dsh.chk.warn') }}</th><th>{{ t('dsh.chk.info') }}</th><th></th></tr></thead>
             <tbody>
               <tr v-for="c in categories" :key="c.c" :class="{ cur: checkState.scope === c.c }">
                 <td :data-l="t('dsh.chk.colCheck')"><b>{{ c.label }}</b> <code>{{ c.c }}.*</code></td>
-                <td :data-l="t('dsh.chk.colResult')"><span class="db-stat"><span class="dm" :data-k="report ? c.k : 'off'" aria-hidden="true"></span>{{ !report ? t('dsh.chk.notRun') : c.fail ? t('dsh.chk.fail') : c.warn ? t('dsh.chk.warn') : t('dsh.chk.pass') }}</span></td>
-                <td :data-l="t('dsh.chk.fail')" class="n">{{ c.fail }}</td>
-                <td :data-l="t('dsh.chk.warn')" class="n">{{ c.warn }}</td>
-                <td :data-l="t('dsh.chk.info')" class="n">{{ c.info }}</td>
+                <td :data-l="t('dsh.chk.colResult')">
+                  <span class="db-stat">
+                    <span class="dm" :data-k="report ? c.k : 'off'" aria-hidden="true"></span>
+                    {{ !report ? t('dsh.chk.notRun') : c.isCliOnly ? t('dsh.chk.cliOnly') : c.fail ? t('dsh.chk.fail') : c.warn ? t('dsh.chk.warn') : t('dsh.chk.pass') }}
+                  </span>
+                </td>
+                <td :data-l="t('dsh.chk.fail')" class="n">{{ c.isCliOnly ? '—' : c.fail }}</td>
+                <td :data-l="t('dsh.chk.warn')" class="n">{{ c.isCliOnly ? '—' : c.warn }}</td>
+                <td :data-l="t('dsh.chk.info')" class="n">{{ c.isCliOnly ? '—' : c.info }}</td>
                 <td class="n">
-                  <button type="button" class="db-btn sm" :disabled="checkState.running || !report" :aria-label="t('dsh.chk.rerunLabel', { cat: c.label })" :data-checks-rerun-cat="c.c" @click="rerun(c.c)">
-                    {{ checkState.scope === c.c ? t('dsh.chk.running') : t('dsh.chk.rerun') }}
+                  <button
+                    type="button"
+                    class="db-btn sm"
+                    :disabled="c.isCliOnly || checkState.running || !report"
+                    :aria-label="t('dsh.chk.rerunLabel', { cat: c.label })"
+                    :data-checks-rerun-cat="c.c"
+                    @click="rerun(c.c)"
+                  >
+                    {{ checkState.scope === c.c ? t('dsh.chk.running') : c.isCliOnly ? t('dsh.chk.cliOnly') : t('dsh.chk.rerun') }}
                   </button>
                 </td>
               </tr>

@@ -1,5 +1,3 @@
-export type { AppConfig as EnvConfig } from './schema.js'
-
 export class ConfigError extends Error {
   readonly invalidKeys: string[]
 

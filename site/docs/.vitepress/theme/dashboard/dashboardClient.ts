@@ -10,7 +10,6 @@ import {
   fetchOnlineAccess,
   fetchOnlineAiTools,
   fetchOnlineBackups,
-  fetchOnlineChecks,
   fetchOnlineCompanion,
   fetchOnlineCompanionHistory,
   fetchOnlineFigures,
@@ -24,13 +23,11 @@ import {
   isAdminOk,
   reloadOnlineRuntime,
   restoreOnlineBackup,
-  runOnlineChecks,
   saveDevCompanionPrompts,
   saveDevSiteTexts,
   saveOnlineAccess,
   saveOnlineAiTools,
   saveOnlineCompanion,
-  saveOnlineCompanionAction,
   saveOnlineLook,
   saveOnlineSetting,
   saveOnlineTexts,
@@ -47,13 +44,11 @@ import {
 } from '../api/admin'
 import {
   fetchDevLogs,
-  fetchLastCheck,
   fetchPromptsHistory,
   fetchRuntime,
   fetchThemeConfig,
   fetchTools,
   previewDevAccess,
-  runCheckNow,
   saveDevAccess,
   savePromptsWithMessage,
   saveThemeConfig,
@@ -76,65 +71,6 @@ function handlePersistence(persistence?: OnlinePersistenceInfo | null): void {
 }
 
 export const dashboardClient = {
-  isDev(): boolean {
-    return dashboardState.mode === 'dev'
-  },
-
-  isOnline(): boolean {
-    return dashboardState.mode === 'online'
-  },
-
-  // ── Checks ──────────────────────────────────────────────────────────────────
-  async fetchChecks(): Promise<{ ok: boolean; run: CheckRunPayload | null; error?: string }> {
-    if (dashboardState.mode === 'dev') {
-      const run = await fetchLastCheck()
-      return { ok: true, run }
-    }
-    const res = await fetchOnlineChecks()
-    if (isAdminOk(res)) {
-      return {
-        ok: true,
-        run: {
-          at: res.data.at,
-          ms: res.data.ms ?? 0,
-          exitCode: res.data.exitCode ?? (res.data.ok ? 0 : 1),
-          ...(res.data.only ? { only: res.data.only } : {}),
-          report: res.data.report,
-        },
-      }
-    }
-    return {
-      ok: false,
-      run: null,
-      error: isAdminError(res) ? formatAdminError(res.error) : 'request_failed',
-    }
-  },
-
-  async runChecks(only?: readonly string[]): Promise<{ ok: boolean; run: CheckRunPayload | null; error?: string }> {
-    if (dashboardState.mode === 'dev') {
-      const run = await runCheckNow(dashboardState.token, only)
-      return { ok: Boolean(run), run, ...(run ? {} : { error: 'request_failed' }) }
-    }
-    const res = await runOnlineChecks(only)
-    if (isAdminOk(res)) {
-      return {
-        ok: true,
-        run: {
-          at: res.data.at,
-          ms: res.data.ms ?? 0,
-          exitCode: res.data.exitCode ?? (res.data.ok ? 0 : 1),
-          ...(res.data.only ? { only: res.data.only } : {}),
-          report: res.data.report,
-        },
-      }
-    }
-    return {
-      ok: false,
-      run: null,
-      error: isAdminError(res) ? formatAdminError(res.error) : 'request_failed',
-    }
-  },
-
   // ── Figures ─────────────────────────────────────────────────────────────────
   async fetchOnlineFigures(): Promise<{ ok: boolean; data?: OnlineFiguresPayload; error?: string }> {
     const res = await fetchOnlineFigures()
@@ -248,21 +184,6 @@ export const dashboardClient = {
     }
   },
 
-  async saveCompanionAction(
-    name: string,
-    action: Record<string, unknown> | null,
-  ): Promise<{ ok: boolean; action?: unknown; persistence?: OnlinePersistenceInfo; error?: string }> {
-    const res = await saveOnlineCompanionAction(name, action)
-    if (isAdminOk(res)) {
-      handlePersistence(res.data.persistence)
-      return { ok: true, action: res.data.action, persistence: res.data.persistence }
-    }
-    return {
-      ok: false,
-      error: isAdminError(res) ? formatAdminError(res.error) : 'request_failed',
-    }
-  },
-
   async fetchCompanionHistory(): Promise<{
     ok: boolean
     devHistory?: HistoryPayload | null
@@ -349,10 +270,10 @@ export const dashboardClient = {
   },
 
   // ── Access ──────────────────────────────────────────────────────────────────
-  async fetchAccess(): Promise<{ ok: boolean; access?: Record<string, unknown>; error?: string }> {
+  async fetchAccess(): Promise<{ ok: boolean; access?: Record<string, unknown> | null; source?: string; error?: string }> {
     const res = await fetchOnlineAccess()
     if (isAdminOk(res)) {
-      return { ok: true, access: res.data.access }
+      return { ok: true, access: res.data.access, source: res.data.source }
     }
     return {
       ok: false,

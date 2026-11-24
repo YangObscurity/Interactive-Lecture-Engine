@@ -109,6 +109,7 @@ export const dashboardState = reactive({
   tabs: {} as Partial<Record<DashboardPageId, string>>,
   toast: '',
   roles: [] as string[],
+  visibleSections: [] as DashboardPageId[],
   authSource: 'none' as string,
   authMethod: 'anonymous' as string,
   canAccessAdmin: false,
@@ -131,6 +132,9 @@ const AUTHOR_PAGES: ReadonlySet<DashboardPageId> = new Set([
 export function canAccessPage(page: DashboardPageId): boolean {
   if (dashboardState.mode === 'dev') return true
   if (dashboardState.mode !== 'online') return false
+  if (dashboardState.visibleSections.length > 0) {
+    return dashboardState.visibleSections.includes(page)
+  }
   if (dashboardState.canAccessAdmin || dashboardState.roles.includes('admin')) return true
   if (dashboardState.canAccessAuthor || dashboardState.roles.includes('author')) {
     return AUTHOR_PAGES.has(page)
@@ -155,6 +159,10 @@ export const visibleNavGroups = computed(() =>
 
 export function defaultLandingPage(): DashboardPageId {
   if (dashboardState.mode === 'dev') return 'overview'
+  if (dashboardState.visibleSections.length > 0) {
+    if (dashboardState.visibleSections.includes('overview')) return 'overview'
+    return dashboardState.visibleSections[0] ?? 'overview'
+  }
   if (dashboardState.canAccessAdmin || dashboardState.roles.includes('admin')) return 'overview'
   return 'my-learning'
 }
@@ -179,12 +187,22 @@ export function applyAuthStatus(st: AuthStatus): void {
   dashboardState.authMethod = st.authMethod || 'anonymous'
   dashboardState.canAccessAdmin = Boolean(st.canAccessAdmin || roles.includes('admin'))
   dashboardState.canAccessAuthor = Boolean(st.canAccessAuthor || dashboardState.canAccessAdmin || roles.includes('author'))
+
+  const validSet = new Set<DashboardPageId>(DASHBOARD_PAGES)
+  if (Array.isArray(st.visibleSections) && st.visibleSections.length > 0) {
+    dashboardState.visibleSections = st.visibleSections.filter((s): s is DashboardPageId =>
+      validSet.has(s as DashboardPageId),
+    )
+  } else {
+    dashboardState.visibleSections = []
+  }
 }
 
 export function resetAuthState(): void {
   dashboardState.page = 'overview'
   dashboardState.tabs = {}
   dashboardState.roles = []
+  dashboardState.visibleSections = []
   dashboardState.authSource = 'none'
   dashboardState.authMethod = 'anonymous'
   dashboardState.canAccessAdmin = false

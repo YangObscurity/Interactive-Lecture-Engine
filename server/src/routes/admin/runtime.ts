@@ -22,10 +22,10 @@ export function createAdminRuntimeRouter(config: AppConfig, aiRuntime?: AiRuntim
     )
   })
 
-  router.post('/reload', (c) => {
+  router.post('/reload', async (c) => {
     c.header('Cache-Control', 'no-store')
     try {
-      aiRuntime?.prompts?.reload()
+      await aiRuntime?.prompts?.reload()
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
       serverLogBuffer.add({

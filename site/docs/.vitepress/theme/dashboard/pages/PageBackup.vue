@@ -163,6 +163,11 @@ onMounted(() => {
         <span>{{ statusMessage }}</span>
       </div>
 
+      <div class="db-banner db-small" data-backup-distinction style="margin-bottom: 1rem;">
+        <span class="db-info" aria-hidden="true"></span>
+        <span style="white-space: pre-line;">{{ t('dsh.bk.distinctionNote') }}</span>
+      </div>
+
       <section class="db-panel" data-backup-panel>
         <header>
           <h3>{{ t('dsh.bk.listTitle') }}</h3>
@@ -201,6 +206,7 @@ onMounted(() => {
               <thead>
                 <tr>
                   <th>{{ t('dsh.bk.colFile') }}</th>
+                  <th>{{ t('dsh.bk.colType') }}</th>
                   <th>{{ t('dsh.bk.colSize') }}</th>
                   <th>{{ t('dsh.bk.colSha') }}</th>
                   <th>{{ t('dsh.bk.colCreated') }}</th>
@@ -211,6 +217,11 @@ onMounted(() => {
                 <tr v-for="b in backups" :key="b.filename" :data-backup-row="b.filename">
                   <td :data-l="t('dsh.bk.colFile')" class="db-mono db-small">
                     <code>{{ b.filename }}</code>
+                  </td>
+                  <td :data-l="t('dsh.bk.colType')">
+                    <span class="db-badge" :data-k="b.filename.endsWith('.tar.gz') ? 'info' : 'neutral'">
+                      {{ b.filename.endsWith('.tar.gz') ? t('dsh.bk.typePhysical') : t('dsh.bk.typeLogical') }}
+                    </span>
                   </td>
                   <td :data-l="t('dsh.bk.colSize')" class="db-mono db-small">
                     {{ formatBytes(b.sizeBytes) }}
@@ -227,7 +238,11 @@ onMounted(() => {
                       class="db-btns"
                       data-backup-restore-confirm
                     >
-                      <span class="db-small db-warn">{{ t('dsh.bk.restoreWarn', { file: b.filename }) }}</span>
+                      <span class="db-small db-warn">
+                        {{ b.filename.endsWith('.tar.gz')
+                          ? t('dsh.bk.restoreWarnPhysical', { file: b.filename })
+                          : t('dsh.bk.restoreWarnLogical', { file: b.filename }) }}
+                      </span>
                       <button
                         type="button"
                         class="db-btn sm danger"

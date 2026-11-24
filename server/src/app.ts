@@ -22,7 +22,8 @@ import { createToolsRouter } from './routes/tools.js'
 import { createAuthRouter } from './routes/auth.js'
 import { createMeRouter } from './routes/me.js'
 import { getSetting } from './repo/siteSettings.js'
-import { normalizeAiToolsConfig, type McpClientFactory } from './tools/index.js'
+import { normalizeAiToolsConfig, type AiToolsFileConfig, type McpClientFactory } from './tools/index.js'
+import { validateCompanionPrompts } from './prompts/companion.js'
 
 export interface AppVariables {
   auth: AuthResult
@@ -78,11 +79,48 @@ export function createApp(config: AppConfig, db: Db, options: AppOptions = {}): 
     ...(options.modelFactory ? { modelFactory: options.modelFactory } : {}),
     ...(options.mcpClientFactory ? { mcpClientFactory: options.mcpClientFactory } : {}),
   })
+  aiRuntime.prompts.setDbLoader(async () => {
+    const raw = await getSetting<unknown>(effectiveDb, 'companion_prompts')
+    const v = validateCompanionPrompts(raw)
+    return v.ok ? v.value : null
+  })
   aiRuntime.mcpManager.setDbConfigLoader(async () => {
     const raw = await getSetting<unknown>(effectiveDb, 'ai_tools')
     if (!raw || typeof raw !== 'object') return null
     try {
-      return normalizeAiToolsConfig(raw)
+      const dbConfig = normalizeAiToolsConfig(raw)
+      const diskConfig = await aiRuntime.mcpManager.configStore.load()
+
+      const mergedEngineTools: AiToolsFileConfig['engineTools'] = {}
+      for (const [toolName, toolConf] of Object.entries(diskConfig.engineTools)) {
+        mergedEngineTools[toolName] = {
+          enabled: dbConfig.engineTools[toolName]?.enabled ?? toolConf.enabled,
+        }
+      }
+
+      const mergedServers = diskConfig.mcpServers.map((diskServer) => {
+        const dbServer = dbConfig.mcpServers.find((s) => s.id === diskServer.id)
+        if (!dbServer) return diskServer
+
+        const mergedTools: Record<string, { enabled: boolean }> = {}
+        for (const [toolName, toolConf] of Object.entries(diskServer.tools ?? {})) {
+          mergedTools[toolName] = {
+            enabled: dbServer.tools?.[toolName]?.enabled ?? toolConf.enabled,
+          }
+        }
+
+        return {
+          ...diskServer,
+          enabled: dbServer.enabled ?? diskServer.enabled,
+          tools: mergedTools,
+        }
+      })
+
+      return {
+        version: 1,
+        engineTools: mergedEngineTools,
+        mcpServers: mergedServers,
+      }
     } catch {
       return null
     }
@@ -215,12 +253,45 @@ export function createApp(config: AppConfig, db: Db, options: AppOptions = {}): 
   }
 
   const limitAuthWrites: MiddlewareHandler<AppEnv> = async (c, next) => {
-    const forwarded = c.req.header('x-forwarded-for')?.split(',')[0]?.trim()
-    const clientIp = forwarded || c.req.header('x-real-ip')?.trim() || 'auth-client'
-    const decision = authLimiter.check(`auth:${clientIp}`)
-    if (!decision.ok) {
-      throw rateLimited(decision.kind ?? 'auth_rate', decision.retryAfterSec)
+    const realIp = c.req.header('x-real-ip')?.trim()
+    let clientIp = realIp
+    if (!clientIp) {
+      const xff = c.req.header('x-forwarded-for')?.split(',').map((s) => s.trim()).filter(Boolean)
+      if (xff && xff.length > 0) {
+        clientIp = xff[xff.length - 1]
+      }
     }
+    if (!clientIp) {
+      const incoming = (c.env as { incoming?: { socket?: { remoteAddress?: string } } } | undefined)?.incoming
+      if (incoming?.socket?.remoteAddress) {
+        clientIp = incoming.socket.remoteAddress
+      }
+    }
+    const ipKey = clientIp ? `auth:ip:${clientIp}` : 'auth:ip:direct'
+    const ipDecision = authLimiter.check(ipKey)
+    if (!ipDecision.ok) {
+      throw rateLimited(ipDecision.kind ?? 'auth_rate', ipDecision.retryAfterSec)
+    }
+
+    if (c.req.method === 'POST' && c.req.path === '/api/auth/login') {
+      let normUser: string | null = null
+      try {
+        const cloned = c.req.raw.clone()
+        const body = (await cloned.json()) as { username?: unknown }
+        if (body && typeof body === 'object' && typeof body.username === 'string') {
+          normUser = body.username.trim().toLowerCase().slice(0, 64) || null
+        }
+      } catch {
+        // Let endpoint handle malformed JSON
+      }
+      if (normUser) {
+        const userDecision = authLimiter.check(`auth:user:${normUser}`)
+        if (!userDecision.ok) {
+          throw rateLimited(userDecision.kind ?? 'auth_rate', userDecision.retryAfterSec)
+        }
+      }
+    }
+
     await next()
   }
 

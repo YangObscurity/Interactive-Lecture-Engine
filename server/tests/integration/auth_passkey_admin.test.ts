@@ -1,12 +1,12 @@
 import { createHash, createSign, generateKeyPairSync } from 'node:crypto'
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { createApp } from '../../src/app.js'
 import { cborEncode } from '../../src/auth/providers/cbor.js'
 import { defaultAuthRegistry } from '../../src/auth/providers/registry.js'
-import { isOriginAllowed } from '../../src/auth/providers/passkey.js'
+import { isOriginAllowed } from '../../src/auth/origin.js'
 import type { AuthMethodProvider } from '../../src/auth/providers/types.js'
 import { loadConfig } from '../../src/config/load.js'
 import type { AppConfig } from '../../src/config/schema.js'
@@ -15,6 +15,8 @@ import { runMigrations } from '../../src/db/migrate.js'
 import type { Db } from '../../src/db/types.js'
 import { serverLogBuffer } from '../../src/http/logBuffer.js'
 import { createServerPromptStore, type CompanionPromptsFile } from '../../src/prompts/companion.js'
+import { resetGatewayAuthSeenForTests } from '../../src/routes/auth.js'
+import { RESERVED_DOMAIN_SETTING_KEYS, setSetting } from '../../src/repo/siteSettings.js'
 
 function makeTestConfig(overrides: Partial<AppConfig> = {}): AppConfig {
   return {
@@ -72,6 +74,7 @@ function makeTestConfig(overrides: Partial<AppConfig> = {}): AppConfig {
     webauthnRpId: 'localhost',
     webauthnRpName: 'Test Lecture Engine',
     webauthnOrigin: 'http://localhost:8100',
+    authBootstrapToken: null,
     ...overrides,
   }
 }
@@ -353,7 +356,7 @@ describe('WP-2: Backend Authentication, Cookies, Passkeys, Hybrid, Me & Admin', 
     })
 
     it('generates registration options and single-use challenge', async () => {
-      const res = await app.request('/api/auth/methods/passkey/register/options', {
+      const res = await app.request('/api/me/passkeys/register/start', {
         method: 'POST',
         headers: {
           Cookie: `lec_session=${adminCookie}`,
@@ -377,7 +380,7 @@ describe('WP-2: Backend Authentication, Cookies, Passkeys, Hybrid, Me & Admin', 
     })
 
     it('completes P-256 WebAuthn registration and deletes challenge atomically', async () => {
-      const optRes = await app.request('/api/auth/methods/passkey/register/options', {
+      const optRes = await app.request('/api/me/passkeys/register/start', {
         method: 'POST',
         headers: {
           Cookie: `lec_session=${adminCookie}`,
@@ -433,7 +436,7 @@ describe('WP-2: Backend Authentication, Cookies, Passkeys, Hybrid, Me & Admin', 
       attestationMap.set('authData', authData)
       const attestationObject = cborEncode(attestationMap)
 
-      const verifyRes = await app.request('/api/auth/methods/passkey/register/verify', {
+      const verifyRes = await app.request('/api/me/passkeys/register/finish', {
         method: 'POST',
         headers: {
           Cookie: `lec_session=${adminCookie}`,
@@ -465,7 +468,7 @@ describe('WP-2: Backend Authentication, Cookies, Passkeys, Hybrid, Me & Admin', 
 
     it('authenticates with P-256 passkey signature and enforces anti-replay sign_count', async () => {
       // 1. Get auth options
-      const optRes = await app.request('/api/auth/methods/passkey/auth/options', {
+      const optRes = await app.request('/api/auth/methods/passkey/login/start', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username: 'admin' }),
@@ -495,7 +498,7 @@ describe('WP-2: Backend Authentication, Cookies, Passkeys, Hybrid, Me & Admin', 
       const signature = signer.sign({ key: keyPair.privateKey, dsaEncoding: 'der' })
 
       // 3. Verify authentication
-      const verifyRes = await app.request('/api/auth/methods/passkey/auth/verify', {
+      const verifyRes = await app.request('/api/auth/methods/passkey/login/finish', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -518,7 +521,7 @@ describe('WP-2: Backend Authentication, Cookies, Passkeys, Hybrid, Me & Admin', 
       expect(cookie.value).toBeTruthy()
 
       // 4. Test anti-replay: repeat authentication with the SAME or LOWER sign_count (sign_count = 1)
-      const optRes2 = await app.request('/api/auth/methods/passkey/auth/options', {
+      const optRes2 = await app.request('/api/auth/methods/passkey/login/start', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username: 'admin' }),
@@ -539,7 +542,7 @@ describe('WP-2: Backend Authentication, Cookies, Passkeys, Hybrid, Me & Admin', 
       replaySigner.update(replaySignedData)
       const replaySignature = replaySigner.sign({ key: keyPair.privateKey, dsaEncoding: 'der' })
 
-      const replayRes = await app.request('/api/auth/methods/passkey/auth/verify', {
+      const replayRes = await app.request('/api/auth/methods/passkey/login/finish', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1461,6 +1464,335 @@ describe('WP-2: Backend Authentication, Cookies, Passkeys, Hybrid, Me & Admin', 
       for (const issue of checksTextsBody.report.issues) {
         expect(issue.code.startsWith('texts.')).toBe(true)
       }
+    })
+  })
+
+  describe('WP-ENTIRE-R1 Security & Integrity Verifications', () => {
+    it('1. returns uninitialized_restricted and access: null when access manifest has restrictions and DB/disk access is empty', async () => {
+      const savedEnvContent = process.env['CONTENT_DIR']
+      delete process.env['CONTENT_DIR']
+      const testDistDir = mkdtempSync(join(tmpdir(), 'lec-dist-'))
+      try {
+        const manifestDir = join(testDistDir, '.lecture-build')
+        mkdirSync(manifestDir, { recursive: true })
+        writeFileSync(
+          join(manifestDir, 'access-manifest.json'),
+          JSON.stringify({
+            version: 1,
+            defaultTier: 'public',
+            enforcement: 'gateway',
+            tiers: [{ id: 'authenticated', groups: ['G01'] }],
+          }),
+          'utf8',
+        )
+
+        const memDb = createDb('pglite:memory')
+        await runMigrations(memDb)
+        const distConfig = makeTestConfig({ siteDistDir: testDistDir, authAdapter: 'local' })
+        const distApp = createApp(distConfig, memDb)
+
+        // Bootstrap an admin to get admin cookie
+        const bRes = await distApp.request('/api/auth/bootstrap', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username: 'distadmin', password: 'Password123!' }),
+        })
+        const adminCookie = extractCookie(bRes).value!
+
+        const accessRes = await distApp.request('/api/admin/access', {
+          headers: { Cookie: `lec_session=${adminCookie}` },
+        })
+        expect(accessRes.status).toBe(200)
+        const accessBody = await accessRes.json()
+        expect(accessBody.ok).toBe(true)
+        expect(accessBody.source).toBe('uninitialized_restricted')
+        expect(accessBody.access).toBeNull()
+      } finally {
+        if (savedEnvContent !== undefined) {
+          process.env['CONTENT_DIR'] = savedEnvContent
+        } else {
+          delete process.env['CONTENT_DIR']
+        }
+        rmSync(testDistDir, { recursive: true, force: true })
+      }
+    })
+
+    it('2. hybrid gateway auth is ignored when gateway is omitted from AUTH_METHODS_ENABLED', async () => {
+      const memDb = createDb('pglite:memory')
+      await runMigrations(memDb)
+      const noGwConfig = makeTestConfig({
+        authAdapter: 'hybrid',
+        authMethodsEnabled: 'password,passkey',
+      })
+      const noGwApp = createApp(noGwConfig, memDb)
+
+      const statusRes = await noGwApp.request('/api/auth/status', {
+        headers: {
+          'Remote-User': 'alice',
+          'Remote-Groups': 'admins',
+        },
+      })
+      expect(statusRes.status).toBe(200)
+      const body = await statusRes.json()
+      expect(body.authenticated).toBe(false)
+      expect(body.authSource).toBe('none')
+    })
+
+    it('3. hydrates companion_prompts from DB on fresh app instance', async () => {
+      const memDb = createDb('pglite:memory')
+      await runMigrations(memDb)
+
+      const customPrompts: CompanionPromptsFile = {
+        version: 1,
+        system: {
+          zh: 'Custom DB hydrated system prompt ZH',
+          en: 'Custom DB hydrated system prompt EN',
+        },
+        actions: [
+          {
+            id: 'explain',
+            label: { zh: '解释', en: 'Explain' },
+            template: { zh: '请解释：{selection}', en: 'Explain: {selection}' },
+            needsSelection: true,
+            surfaces: ['panel'],
+            enabled: true,
+          },
+        ],
+      }
+      await setSetting(memDb, 'companion_prompts', customPrompts, 'test-setup')
+
+      const cfg = makeTestConfig({ authAdapter: 'local' })
+      const hydratedApp = createApp(cfg, memDb)
+
+      // Bootstrap an admin
+      const bRes = await hydratedApp.request('/api/auth/bootstrap', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: 'promptadmin', password: 'Password123!' }),
+      })
+      const adminCookie = extractCookie(bRes).value!
+
+      const compRes = await hydratedApp.request('/api/admin/companion', {
+        headers: { Cookie: `lec_session=${adminCookie}` },
+      })
+      expect(compRes.status).toBe(200)
+      const compBody = await compRes.json()
+      expect(compBody.ok).toBe(true)
+      expect(compBody.prompts.system.zh).toBe('Custom DB hydrated system prompt ZH')
+      expect(compBody.source).toBe('db')
+    })
+
+    it('4. enforces rate limit: rightmost XFF proxy IP blocked on rotation; per-username rate limit blocked across different IPs', async () => {
+      const memDb = createDb('pglite:memory')
+      await runMigrations(memDb)
+      const tightConfig = makeTestConfig({
+        authAdapter: 'local',
+        writeRatePerMinute: 2,
+      })
+      const tightApp = createApp(tightConfig, memDb)
+
+      // Bootstrap admin
+      await tightApp.request('/api/auth/bootstrap', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: 'targetuser', password: 'Password123!' }),
+      })
+
+      // Test 4a: Rightmost XFF IP rate limit (proxy IP cannot be spoofed by rotating client IP)
+      const proxyIp = '198.51.100.55'
+      // 2 allowed requests
+      for (let i = 0; i < 2; i++) {
+        const res = await tightApp.request('/api/auth/login', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Forwarded-For': `10.0.0.${i}, ${proxyIp}`,
+          },
+          body: JSON.stringify({ username: 'user_a', password: 'WrongPassword!' }),
+        })
+        expect(res.status).toBe(401)
+      }
+      // 3rd request from same proxy IP but different spoofed client IP -> 429
+      const blockedRes = await tightApp.request('/api/auth/login', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Forwarded-For': `10.0.0.99, ${proxyIp}`,
+        },
+        body: JSON.stringify({ username: 'user_a', password: 'WrongPassword!' }),
+      })
+      expect(blockedRes.status).toBe(429)
+
+      // Test 4b: Per-username rate limit across different client IPs
+      const freshDb = createDb('pglite:memory')
+      await runMigrations(freshDb)
+      const userTightConfig = makeTestConfig({
+        authAdapter: 'local',
+        writeRatePerMinute: 2,
+      })
+      const userTightApp = createApp(userTightConfig, freshDb)
+
+      // Bootstrap user
+      await userTightApp.request('/api/auth/bootstrap', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: 'bruteforce_target', password: 'Password123!' }),
+      })
+
+      // 2 failed attempts from different IPs for bruteforce_target
+      for (let i = 1; i <= 2; i++) {
+        const res = await userTightApp.request('/api/auth/login', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Forwarded-For': `203.0.113.${i}`,
+          },
+          body: JSON.stringify({ username: 'bruteforce_target', password: 'WrongPassword!' }),
+        })
+        expect(res.status).toBe(401)
+      }
+
+      // 3rd attempt from a completely NEW IP for same username -> 429
+      const userBlockedRes = await userTightApp.request('/api/auth/login', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Forwarded-For': '192.0.2.200',
+        },
+        body: JSON.stringify({ username: 'bruteforce_target', password: 'WrongPassword!' }),
+      })
+      expect(userBlockedRes.status).toBe(429)
+      const blockedBody = await userBlockedRes.json()
+      expect(blockedBody.error).toBe('rate_limited')
+    })
+
+    it('5. PUT /api/admin/settings/:key and DB manager reject reserved keys with 400', async () => {
+      const memDb = createDb('pglite:memory')
+      await runMigrations(memDb)
+      const cfg = makeTestConfig({ authAdapter: 'local' })
+      const app = createApp(cfg, memDb)
+
+      const bRes = await app.request('/api/auth/bootstrap', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: 'admin5', password: 'Password123!' }),
+      })
+      const cookie = extractCookie(bRes).value!
+
+      for (const reserved of Array.from(RESERVED_DOMAIN_SETTING_KEYS)) {
+        const putRes = await app.request(`/api/admin/settings/${reserved}`, {
+          method: 'PUT',
+          headers: { Cookie: `lec_session=${cookie}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ value: { injected: true } }),
+        })
+        expect(putRes.status).toBe(400)
+        const putBody = await putRes.json()
+        expect(putBody.error).toBe('reserved_setting_key')
+
+        const patchRes = await app.request(`/api/admin/db/tables/site_settings/rows/${reserved}`, {
+          method: 'PATCH',
+          headers: { Cookie: `lec_session=${cookie}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ value: { injected: true } }),
+        })
+        expect(patchRes.status).toBe(400)
+        const patchBody = await patchRes.json()
+        expect(patchBody.error).toBe('reserved_setting_key')
+
+        const delRes = await app.request(`/api/admin/db/tables/site_settings/rows/${reserved}`, {
+          method: 'DELETE',
+          headers: { Cookie: `lec_session=${cookie}` },
+        })
+        expect(delRes.status).toBe(400)
+        const delBody = await delRes.json()
+        expect(delBody.error).toBe('reserved_setting_key')
+      }
+    })
+
+    it('6. hybrid bootstrap gating and AUTH_BOOTSTRAP_TOKEN protection', async () => {
+      resetGatewayAuthSeenForTests()
+      // 6a: In hybrid mode once gateway traffic is observed, unauthenticated bootstrap returns 403
+      const memDb = createDb('pglite:memory')
+      await runMigrations(memDb)
+      const hybridCfg = makeTestConfig({ authAdapter: 'hybrid', logoutUrl: null })
+      const hybridApp = createApp(hybridCfg, memDb)
+
+      // First check status before gateway traffic: needsBootstrap is true
+      const s1 = await hybridApp.request('/api/auth/status')
+      expect((await s1.json()).needsBootstrap).toBe(true)
+
+      // Gateway user visits
+      const gwRes = await hybridApp.request('/api/auth/status', {
+        headers: { 'Remote-User': 'gw-user' },
+      })
+      expect((await gwRes.json()).authenticated).toBe(true)
+
+      // Now unauthenticated status shows needsBootstrap: false
+      const s2 = await hybridApp.request('/api/auth/status')
+      expect((await s2.json()).needsBootstrap).toBe(false)
+
+      // Unauthenticated bootstrap returns 403
+      const bootRes = await hybridApp.request('/api/auth/bootstrap', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: 'hacker', password: 'Password123!' }),
+      })
+      expect(bootRes.status).toBe(403)
+
+      // Gateway admin CAN bootstrap
+      const gwAdminBoot = await hybridApp.request('/api/auth/bootstrap', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Remote-User': 'gw-admin',
+          'Remote-Groups': 'admins',
+        },
+        body: JSON.stringify({ username: 'localadmin', password: 'Password123!' }),
+      })
+      expect(gwAdminBoot.status).toBe(201)
+
+      // 6b: When AUTH_BOOTSTRAP_TOKEN is configured, requires matching token
+      const tokenDb = createDb('pglite:memory')
+      await runMigrations(tokenDb)
+      const tokenCfg = makeTestConfig({
+        authAdapter: 'local',
+        authBootstrapToken: 'super-secret-bootstrap-token',
+      })
+      const tokenApp = createApp(tokenCfg, tokenDb)
+
+      const statusCheck = await tokenApp.request('/api/auth/status')
+      const statusCheckBody = await statusCheck.json()
+      expect(statusCheckBody.needsBootstrap).toBe(false)
+      expect(statusCheckBody.bootstrapTokenRequired).toBe(true)
+
+      // Missing token -> 403
+      const missingTokenRes = await tokenApp.request('/api/auth/bootstrap', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: 'admintoken', password: 'Password123!' }),
+      })
+      expect(missingTokenRes.status).toBe(403)
+
+      // Wrong token -> 403
+      const wrongTokenRes = await tokenApp.request('/api/auth/bootstrap', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Bootstrap-Token': 'wrong-token',
+        },
+        body: JSON.stringify({ username: 'admintoken', password: 'Password123!' }),
+      })
+      expect(wrongTokenRes.status).toBe(403)
+
+      // Correct token -> 201
+      const correctTokenRes = await tokenApp.request('/api/auth/bootstrap', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Bootstrap-Token': 'super-secret-bootstrap-token',
+        },
+        body: JSON.stringify({ username: 'admintoken', password: 'Password123!' }),
+      })
+      expect(correctTokenRes.status).toBe(201)
     })
   })
 })

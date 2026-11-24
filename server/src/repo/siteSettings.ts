@@ -1,5 +1,14 @@
 import type { Db, DbClient } from '../db/types.js'
 
+export const RESERVED_DOMAIN_SETTING_KEYS: ReadonlySet<string> = new Set([
+  'access',
+  'texts',
+  'look',
+  'ai_tools',
+  'companion_prompts',
+  'last_check_report',
+])
+
 export interface SiteSettingRow<T = unknown> {
   key: string
   value: T

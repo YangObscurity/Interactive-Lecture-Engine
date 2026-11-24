@@ -3,12 +3,7 @@ import { accessSync, constants, existsSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { Hono, type Context } from 'hono'
 import type { AppEnv } from '../../app.js'
-import {
-  hashPassword,
-  PasswordValidationError,
-  validatePasswordStrength,
-} from '../../auth/password.js'
-import { validateDatabaseUrl, type Role } from '../../config/schema.js'
+import { validateDatabaseUrl } from '../../config/schema.js'
 import {
   canonicalDbTarget,
   createDb,
@@ -17,14 +12,21 @@ import {
   type DbManager,
 } from '../../db/index.js'
 import { getMigrationStatus, runMigrations } from '../../db/migrate.js'
-import type { Db, DbClient } from '../../db/types.js'
+import type { Db } from '../../db/types.js'
 import { serverLogBuffer } from '../../http/logBuffer.js'
+import { RESERVED_DOMAIN_SETTING_KEYS } from '../../repo/siteSettings.js'
+import {
+  createManagedUser,
+  deleteManagedUser,
+  updateManagedUser,
+  UserManagementError,
+  type CreateManagedUserInput,
+  type UpdateManagedUserInput,
+} from '../../services/usersService.js'
 
 const CONNECTION_TIMEOUT_MS = 8000
 const MIGRATION_TIMEOUT_MS = 30000
 const TRANSFER_BATCH_SIZE = 100
-const ADMIN_LOCK_KEY = 4928174
-const VALID_ROLES = new Set<Role>(['reader', 'author', 'admin'])
 
 type ColumnKind = 'text' | 'boolean' | 'integer' | 'bigint' | 'timestamptz' | 'jsonb'
 
@@ -544,55 +546,6 @@ function isClientConstraintError(err: unknown): boolean {
   return /violates check constraint|null value in column|invalid input syntax|out of range|value too long/i.test(
     msg,
   )
-}
-
-function parseStoredRoles(raw: unknown): Role[] {
-  let roles: Role[]
-  if (Array.isArray(raw)) {
-    roles = raw.filter((r): r is Role => typeof r === 'string' && VALID_ROLES.has(r as Role))
-  } else if (typeof raw === 'string') {
-    try {
-      const parsed: unknown = JSON.parse(raw)
-      roles = Array.isArray(parsed)
-        ? parsed.filter((r): r is Role => typeof r === 'string' && VALID_ROLES.has(r as Role))
-        : ['reader']
-    } catch {
-      roles = ['reader']
-    }
-  } else {
-    roles = ['reader']
-  }
-  if (!roles.includes('reader')) {
-    roles = ['reader', ...roles]
-  }
-  return [...new Set(roles)]
-}
-
-function parseRequestedRoles(
-  raw: unknown,
-): { ok: true; roles: Role[] } | { ok: false; message: string } {
-  if (!Array.isArray(raw)) {
-    return { ok: false, message: 'roles must be an array' }
-  }
-  const normalized: Role[] = []
-  for (const item of raw) {
-    if (typeof item !== 'string' || !VALID_ROLES.has(item as Role)) {
-      return { ok: false, message: `Unsupported role value: ${String(item)}` }
-    }
-    normalized.push(item as Role)
-  }
-  if (!normalized.includes('reader')) {
-    normalized.unshift('reader')
-  }
-  return { ok: true, roles: [...new Set(normalized)] }
-}
-
-async function countActiveAdmins(client: DbClient): Promise<number> {
-  const res = await client.query<{ count: string | number }>(
-    `SELECT COUNT(*)::int AS count FROM auth_users
-     WHERE disabled = FALSE AND roles @> '["admin"]'::jsonb`,
-  )
-  return Number(res.rows[0]?.count ?? 0)
 }
 
 async function countTableRowsSafe(db: Db, tableName: string): Promise<number | null> {
@@ -1632,81 +1585,28 @@ export function createAdminDbRouter(dbManager: DbManager): Hono<AppEnv> {
     }
 
     if (spec.name === 'auth_users') {
-      const idVal =
-        typeof body.id === 'string' && body.id.trim() !== '' ? body.id.trim() : randomUUID()
-      pushField('id', idVal, false)
-
-      const cleanUsername = typeof body.username === 'string' ? body.username.trim() : ''
-      if (!cleanUsername || cleanUsername.length < 3 || cleanUsername.length > 64) {
+      try {
+        const user = await createManagedUser(activeDb, body as CreateManagedUserInput)
+        const row = Object.fromEntries(
+          spec.columns.map((col) => [
+            col,
+            col === 'roles' ? user.roles : (user as unknown as Record<string, unknown>)[col] ?? null,
+          ]),
+        )
         return c.json(
-          { error: 'invalid_username', message: 'Username must be between 3 and 64 characters' },
-          400,
+          {
+            ok: true,
+            table: spec.name,
+            row,
+            persistence: { mode: 'db_live', effect: 'live' },
+          },
+          201,
         )
-      }
-      pushField('username', cleanUsername, false)
-
-      if (body.email !== undefined) {
-        if (body.email !== null && typeof body.email !== 'string') {
-          return c.json({ error: 'invalid_request', message: 'email must be string or null' }, 400)
+      } catch (err) {
+        if (err instanceof UserManagementError) {
+          return c.json({ error: err.code, message: err.message }, err.status)
         }
-        pushField(
-          'email',
-          typeof body.email === 'string' && body.email.trim() !== '' ? body.email.trim() : null,
-          false,
-        )
-      }
-
-      if (body.display_name !== undefined) {
-        if (typeof body.display_name !== 'string') {
-          return c.json({ error: 'invalid_request', message: 'display_name must be a string' }, 400)
-        }
-        pushField('display_name', body.display_name, false)
-      }
-
-      if (body.roles !== undefined) {
-        const rolesParsed = parseRequestedRoles(body.roles)
-        if (!rolesParsed.ok) {
-          return c.json({ error: 'invalid_roles', message: rolesParsed.message }, 400)
-        }
-        pushField('roles', rolesParsed.roles, true)
-      }
-
-      if (body.disabled !== undefined) {
-        if (typeof body.disabled !== 'boolean') {
-          return c.json({ error: 'invalid_request', message: 'disabled must be boolean' }, 400)
-        }
-        pushField('disabled', body.disabled, false)
-      }
-
-      if (body.password !== undefined && body.password !== null && body.password !== '') {
-        if (typeof body.password !== 'string') {
-          return c.json({ error: 'invalid_password', message: 'password must be a string' }, 400)
-        }
-        try {
-          validatePasswordStrength(body.password)
-        } catch (err) {
-          return c.json(
-            {
-              error: 'invalid_password',
-              message: err instanceof PasswordValidationError || err instanceof Error ? err.message : String(err),
-            },
-            400,
-          )
-        }
-        const hashed = await hashPassword(body.password)
-        pushField('password_hash', hashed, false)
-      } else {
-        pushField('password_hash', '', false)
-      }
-
-      if (body.last_login_at !== undefined) {
-        pushField('last_login_at', body.last_login_at, false)
-      }
-      if (body.created_at !== undefined) {
-        pushField('created_at', body.created_at, false)
-      }
-      if (body.updated_at !== undefined) {
-        pushField('updated_at', body.updated_at, false)
+        throw err
       }
     } else {
       const payload: Record<string, unknown> = { ...body }
@@ -1730,6 +1630,16 @@ export function createAdminDbRouter(dbManager: DbManager): Hono<AppEnv> {
       }
 
       if (spec.name === 'site_settings') {
+        const settingKey = typeof payload.key === 'string' ? payload.key.trim() : ''
+        if (RESERVED_DOMAIN_SETTING_KEYS.has(settingKey)) {
+          return c.json(
+            {
+              error: 'reserved_setting_key',
+              message: `Cannot insert reserved domain setting key "${settingKey}". Use the dedicated domain API.`,
+            },
+            400,
+          )
+        }
         if (typeof payload.updated_by !== 'string' || payload.updated_by.trim() === '') {
           payload.updated_by = c.get('userId') ?? 'admin'
         } else {
@@ -1873,149 +1783,36 @@ export function createAdminDbRouter(dbManager: DbManager): Hono<AppEnv> {
       }
     }
 
+    if (spec.name === 'site_settings') {
+      const settingKey = pkExtracted.values[0] ?? ''
+      if (RESERVED_DOMAIN_SETTING_KEYS.has(settingKey)) {
+        return c.json(
+          {
+            error: 'reserved_setting_key',
+            message: `Cannot modify reserved domain setting key "${settingKey}". Use the dedicated domain API.`,
+          },
+          400,
+        )
+      }
+    }
+
     if (spec.name === 'auth_users') {
-      let parsedNewRoles: Role[] | undefined
-      if (data.roles !== undefined) {
-        const check = parseRequestedRoles(data.roles)
-        if (!check.ok) {
-          return c.json({ error: 'invalid_roles', message: check.message }, 400)
-        }
-        parsedNewRoles = check.roles
-      }
-
-      if (data.disabled !== undefined && typeof data.disabled !== 'boolean') {
-        return c.json({ error: 'invalid_request', message: 'disabled must be boolean' }, 400)
-      }
-
-      let passwordHashUpdate: string | null = null
-      if (data.password !== undefined) {
-        if (typeof data.password !== 'string') {
-          return c.json({ error: 'invalid_password', message: 'password must be a string' }, 400)
-        }
-        // Blank password string leaves existing credential untouched (parity with /api/admin/users)
-        if (data.password.length > 0) {
-          try {
-            validatePasswordStrength(data.password)
-          } catch (err) {
-            return c.json(
-              {
-                error: 'invalid_password',
-                message: err instanceof Error ? err.message : String(err),
-              },
-              400,
-            )
-          }
-          passwordHashUpdate = await hashPassword(data.password)
-        }
-      }
-
       const targetUserId = pkExtracted.values[0]!
-      const dbKindAtStart = activeDb.kind
       try {
-        const updated = await activeDb.tx(async (txClient) => {
-          if (dbKindAtStart === 'pg') {
-            await txClient.query(`SELECT pg_advisory_xact_lock(${ADMIN_LOCK_KEY})`)
-          }
-
-          const existingRes = await txClient.query<{
-            id: string
-            roles: unknown
-            disabled: boolean
-          }>('SELECT id, roles, disabled FROM auth_users WHERE id = $1', [targetUserId])
-
-          if (existingRes.rowCount === 0 || !existingRes.rows[0]) {
-            throw new Error('not_found')
-          }
-
-          const existing = existingRes.rows[0]
-          const currentRoles = parseStoredRoles(existing.roles)
-          const isActiveAdmin = !existing.disabled && currentRoles.includes('admin')
-          const nextRoles = parsedNewRoles ?? currentRoles
-          const nextDisabled =
-            data.disabled !== undefined ? Boolean(data.disabled) : existing.disabled
-
-          if (isActiveAdmin && (nextDisabled || !nextRoles.includes('admin'))) {
-            const adminCount = await countActiveAdmins(txClient)
-            if (adminCount <= 1) {
-              throw new Error('cannot_remove_last_admin')
-            }
-          }
-
-          const setClauses: string[] = ['"updated_at" = NOW()']
-          const params: unknown[] = [targetUserId]
-
-          if (data.username !== undefined) {
-            const cleanUsername = typeof data.username === 'string' ? data.username.trim() : ''
-            if (!cleanUsername || cleanUsername.length < 3 || cleanUsername.length > 64) {
-              throw new Error('invalid_username')
-            }
-            params.push(cleanUsername)
-            setClauses.push(`"username" = $${params.length}`)
-          }
-          if (data.email !== undefined) {
-            if (data.email !== null && typeof data.email !== 'string') {
-              throw new Error('invalid_email')
-            }
-            params.push(
-              typeof data.email === 'string' && data.email.trim() !== ''
-                ? data.email.trim()
-                : null,
-            )
-            setClauses.push(`"email" = $${params.length}`)
-          }
-          if (data.display_name !== undefined) {
-            if (typeof data.display_name !== 'string') {
-              throw new Error('invalid_display_name')
-            }
-            params.push(data.display_name)
-            setClauses.push(`"display_name" = $${params.length}`)
-          }
-          if (parsedNewRoles !== undefined) {
-            params.push(JSON.stringify(parsedNewRoles))
-            setClauses.push(`"roles" = $${params.length}::jsonb`)
-          }
-          if (data.disabled !== undefined) {
-            params.push(nextDisabled)
-            setClauses.push(`"disabled" = $${params.length}`)
-          }
-          if (passwordHashUpdate !== null) {
-            params.push(passwordHashUpdate)
-            setClauses.push(`"password_hash" = $${params.length}`)
-          }
-
-          const updRes = await txClient.query<Record<string, unknown>>(
-            `UPDATE auth_users SET ${setClauses.join(', ')} WHERE id = $1
-             RETURNING ${formatCrudColumnsSql(spec.columns)}`,
-            params,
-          )
-
-          if (nextDisabled || passwordHashUpdate !== null) {
-            await txClient.query('DELETE FROM auth_sessions WHERE user_id = $1', [targetUserId])
-          }
-
-          return updRes.rows[0] ?? null
-        })
-
-        return c.json({ ok: true, table: spec.name, row: updated }, 200)
+        const user = await updateManagedUser(activeDb, targetUserId, data as UpdateManagedUserInput)
+        const row = Object.fromEntries(
+          spec.columns.map((col) => [
+            col,
+            col === 'roles' ? user.roles : (user as unknown as Record<string, unknown>)[col] ?? null,
+          ]),
+        )
+        return c.json({ ok: true, table: spec.name, row }, 200)
       } catch (err) {
+        if (err instanceof UserManagementError) {
+          return c.json({ error: err.code, message: err.message }, err.status)
+        }
         if (isUniqueViolation(err)) {
           return c.json({ error: 'conflict', message: scrubErrorMessage(err) }, 409)
-        }
-        const msg = err instanceof Error ? err.message : String(err)
-        if (msg === 'not_found') {
-          return c.json({ error: 'not_found', message: 'Row not found' }, 404)
-        }
-        if (msg === 'cannot_remove_last_admin') {
-          return c.json(
-            {
-              error: 'cannot_remove_last_admin',
-              message: 'Cannot disable or remove admin role from the last active administrator',
-            },
-            409,
-          )
-        }
-        if (msg === 'invalid_username' || msg === 'invalid_email' || msg === 'invalid_display_name') {
-          return c.json({ error: 'invalid_request', message: msg }, 400)
         }
         throw err
       }
@@ -2161,55 +1958,27 @@ export function createAdminDbRouter(dbManager: DbManager): Hono<AppEnv> {
       return c.json({ error: 'invalid_primary_key', message: pkExtracted.message }, 400)
     }
 
+    if (spec.name === 'site_settings') {
+      const settingKey = pkExtracted.values[0] ?? ''
+      if (RESERVED_DOMAIN_SETTING_KEYS.has(settingKey)) {
+        return c.json(
+          {
+            error: 'reserved_setting_key',
+            message: `Cannot delete reserved domain setting key "${settingKey}". Use the dedicated domain API.`,
+          },
+          400,
+        )
+      }
+    }
+
     if (spec.name === 'auth_users') {
       const targetUserId = pkExtracted.values[0]!
-      const dbKindAtStart = activeDb.kind
       try {
-        const deleted = await activeDb.tx(async (txClient) => {
-          if (dbKindAtStart === 'pg') {
-            await txClient.query(`SELECT pg_advisory_xact_lock(${ADMIN_LOCK_KEY})`)
-          }
-          const userRes = await txClient.query<{
-            id: string
-            roles: unknown
-            disabled: boolean
-          }>('SELECT id, roles, disabled FROM auth_users WHERE id = $1', [targetUserId])
-
-          if (userRes.rowCount === 0 || !userRes.rows[0]) {
-            throw new Error('not_found')
-          }
-
-          const targetUser = userRes.rows[0]
-          const isActiveAdmin =
-            !targetUser.disabled && parseStoredRoles(targetUser.roles).includes('admin')
-          if (isActiveAdmin) {
-            const adminCount = await countActiveAdmins(txClient)
-            if (adminCount <= 1) {
-              throw new Error('cannot_remove_last_admin')
-            }
-          }
-
-          const delRes = await txClient.query<Record<string, unknown>>(
-            'DELETE FROM auth_users WHERE id = $1 RETURNING id',
-            [targetUserId],
-          )
-          return delRes.rows[0] ?? null
-        })
-
-        return c.json({ ok: true, table: spec.name, deleted }, 200)
+        const deleted = await deleteManagedUser(activeDb, targetUserId)
+        return c.json({ ok: true, table: spec.name, deleted: { id: deleted.id } }, 200)
       } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err)
-        if (msg === 'not_found') {
-          return c.json({ error: 'not_found', message: 'Row not found' }, 404)
-        }
-        if (msg === 'cannot_remove_last_admin') {
-          return c.json(
-            {
-              error: 'cannot_remove_last_admin',
-              message: 'Cannot delete the last active administrator',
-            },
-            409,
-          )
+        if (err instanceof UserManagementError) {
+          return c.json({ error: err.code, message: err.message }, err.status)
         }
         throw err
       }

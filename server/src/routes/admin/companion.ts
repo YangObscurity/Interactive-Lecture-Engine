@@ -47,7 +47,7 @@ export function createAdminCompanionRouter(
 
     if (!prompts && aiRuntime?.prompts) {
       try {
-        prompts = aiRuntime.prompts.get()
+        prompts = await aiRuntime.prompts.load()
         if (prompts) source = 'disk'
       } catch {
         // fallback

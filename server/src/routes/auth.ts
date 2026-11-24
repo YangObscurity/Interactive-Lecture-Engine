@@ -6,9 +6,7 @@ import {
 } from '../auth/providers/registry.js'
 import {
   createAuthenticationOptions,
-  createRegistrationOptions,
   verifyAuthenticationResponse,
-  verifyRegistrationResponse,
 } from '../auth/providers/passkey.js'
 import {
   createSessionRow,
@@ -25,7 +23,8 @@ import {
 } from '../auth/password.js'
 import type { AppConfig, Role } from '../config/schema.js'
 import type { Db } from '../db/types.js'
-import { randomUUID } from 'node:crypto'
+import { randomUUID, timingSafeEqual } from 'node:crypto'
+import { getSetting, setSetting } from '../repo/siteSettings.js'
 
 export function computeVisibleSections(roles: readonly Role[]): string[] {
   if (roles.includes('admin')) {
@@ -67,6 +66,143 @@ function getRequestContext(c: Context<AppEnv>) {
   }
 }
 
+let inMemoryGatewaySeen = false
+
+export function resetGatewayAuthSeenForTests(): void {
+  inMemoryGatewaySeen = false
+}
+
+interface BootstrapCheckResult {
+  allowed: boolean
+  status: 200 | 201 | 400 | 403 | 409
+  error?: string
+  message?: string
+  needsBootstrap: boolean
+  bootstrapTokenRequired?: boolean
+}
+
+export async function canBootstrapNow(
+  config: AppConfig,
+  db: Db,
+  c: Context<AppEnv>,
+  providedToken?: string | null,
+): Promise<BootstrapCheckResult> {
+  const passwordEnabled = defaultAuthRegistry.get('password')?.isEnabled(config) ?? false
+  if (!passwordEnabled || config.authAdapter === 'none' || config.authAdapter === 'trusted-header') {
+    return {
+      allowed: false,
+      status: 403,
+      error: 'auth_method_disabled',
+      message: 'Password bootstrap is disabled for current auth configuration',
+      needsBootstrap: false,
+    }
+  }
+
+  const userCountRes = await db.query<{ count: string | number }>(
+    'SELECT COUNT(*)::int AS count FROM auth_users',
+  )
+  const totalUsers = Number(userCountRes.rows[0]?.count ?? 0)
+  if (totalUsers > 0) {
+    return {
+      allowed: false,
+      status: 409,
+      error: 'already_bootstrapped',
+      message: 'System has already been bootstrapped',
+      needsBootstrap: false,
+    }
+  }
+
+  const authSource = c.get('authSource')
+  const canAccessAdmin = c.get('canAccessAdmin') ?? false
+
+  if (config.authBootstrapToken && config.authBootstrapToken.trim() !== '') {
+    const isGatewayAdmin = authSource === 'gateway' && canAccessAdmin
+    if (isGatewayAdmin) {
+      return { allowed: true, status: 200, needsBootstrap: true, bootstrapTokenRequired: true }
+    }
+
+    const tokenFromHeader =
+      c.req.header('x-bootstrap-token')?.trim() || c.req.header('X-Bootstrap-Token')?.trim()
+    const token =
+      (providedToken && typeof providedToken === 'string' ? providedToken.trim() : '') ||
+      tokenFromHeader ||
+      ''
+
+    if (!token) {
+      return {
+        allowed: false,
+        status: 403,
+        error: 'bootstrap_token_required',
+        message: 'Bootstrap token is required to initialize admin account',
+        needsBootstrap: false,
+        bootstrapTokenRequired: true,
+      }
+    }
+
+    const expectedBuf = Buffer.from(config.authBootstrapToken.trim())
+    const providedBuf = Buffer.from(token)
+    const matches =
+      expectedBuf.length === providedBuf.length && timingSafeEqual(expectedBuf, providedBuf)
+
+    if (!matches) {
+      return {
+        allowed: false,
+        status: 403,
+        error: 'invalid_bootstrap_token',
+        message: 'Invalid bootstrap token',
+        needsBootstrap: false,
+        bootstrapTokenRequired: true,
+      }
+    }
+
+    return { allowed: true, status: 200, needsBootstrap: true, bootstrapTokenRequired: true }
+  }
+
+  if (config.authAdapter === 'hybrid') {
+    if (authSource === 'gateway' && !canAccessAdmin) {
+      return {
+        allowed: false,
+        status: 403,
+        error: 'forbidden',
+        message: 'Gateway user does not have admin permissions to bootstrap local admin',
+        needsBootstrap: false,
+      }
+    }
+
+    if (authSource === 'gateway' && canAccessAdmin) {
+      return { allowed: true, status: 200, needsBootstrap: true }
+    }
+
+    let gatewaySeen =
+      inMemoryGatewaySeen || Boolean(config.logoutUrl && config.logoutUrl.trim() !== '')
+    if (!gatewaySeen) {
+      try {
+        const seenSetting = await getSetting<{ seen?: boolean }>(db, 'gateway_auth_seen')
+        if (seenSetting?.seen) {
+          gatewaySeen = true
+          inMemoryGatewaySeen = true
+        }
+      } catch {
+        // ignore
+      }
+    }
+
+    if (gatewaySeen) {
+      return {
+        allowed: false,
+        status: 403,
+        error: 'bootstrap_requires_gateway_admin',
+        message: 'Gateway authentication is active; bootstrap requires an authenticated gateway admin',
+        needsBootstrap: false,
+      }
+    }
+
+    return { allowed: true, status: 200, needsBootstrap: true }
+  }
+
+  return { allowed: true, status: 200, needsBootstrap: true }
+}
+
 export function createAuthRouter(
   config: AppConfig,
   db: Db,
@@ -80,11 +216,14 @@ export function createAuthRouter(
     const session = c.get('session')
     const auth = c.get('auth')
 
-    const userCountRes = await db.query<{ count: string | number }>(
-      'SELECT COUNT(*)::int AS count FROM auth_users',
-    )
-    const totalUsers = Number(userCountRes.rows[0]?.count ?? 0)
-    const needsBootstrap = totalUsers === 0
+    if (c.get('authSource') === 'gateway') {
+      if (!inMemoryGatewaySeen) {
+        inMemoryGatewaySeen = true
+        setSetting(db, 'gateway_auth_seen', { seen: true }).catch(() => {})
+      }
+    }
+
+    const check = await canBootstrapNow(config, db, c)
 
     const roles = session?.roles ?? ['reader']
     const visibleSections = computeVisibleSections(roles)
@@ -93,7 +232,8 @@ export function createAuthRouter(
       {
         authAdapter: config.authAdapter,
         authenticated: session?.authenticated ?? false,
-        needsBootstrap,
+        needsBootstrap: check.needsBootstrap,
+        ...(check.bootstrapTokenRequired ? { bootstrapTokenRequired: true } : {}),
         authSource: auth?.authSource ?? 'none',
         authMethod: auth?.authMethod ?? 'anonymous',
         rememberMe: auth?.rememberMe ?? false,
@@ -117,12 +257,6 @@ export function createAuthRouter(
   // 3. POST /bootstrap — first-time admin registration
   router.post('/bootstrap', async (c) => {
     c.header('Cache-Control', 'no-store')
-    if (!registry.get('password')?.isEnabled(config)) {
-      return c.json(
-        { error: 'auth_method_disabled', message: 'Password bootstrap is disabled for current auth configuration' },
-        403,
-      )
-    }
 
     let body: {
       username?: unknown
@@ -130,6 +264,7 @@ export function createAuthRouter(
       displayName?: unknown
       email?: unknown
       rememberMe?: unknown
+      setupToken?: unknown
     }
     try {
       body = await c.req.json()
@@ -139,6 +274,16 @@ export function createAuthRouter(
 
     if (!body || typeof body !== 'object' || Array.isArray(body)) {
       return c.json({ error: 'invalid_request', message: 'Invalid payload' }, 400)
+    }
+
+    const check = await canBootstrapNow(
+      config,
+      db,
+      c,
+      typeof body.setupToken === 'string' ? body.setupToken : null,
+    )
+    if (!check.allowed) {
+      return c.json({ error: check.error, message: check.message }, check.status)
     }
 
     const username = typeof body.username === 'string' ? body.username.trim() : ''
@@ -390,106 +535,6 @@ export function createAuthRouter(
   })
 
   // 6. Passkey endpoints
-  // Register start
-  const handlePasskeyRegisterStart = async (c: Context<AppEnv>) => {
-    c.header('Cache-Control', 'no-store')
-    if (!registry.get('passkey')?.isEnabled(config)) {
-      return c.json({ error: 'auth_method_disabled', message: 'Passkey method is disabled' }, 403)
-    }
-    const effectiveUserId = c.get('effectiveUserId')
-    const authSource = c.get('authSource')
-    if (!effectiveUserId || effectiveUserId === 'anonymous' || authSource === 'none') {
-      return c.json({ error: 'unauthenticated' }, 401)
-    }
-
-    const userRes = await db.query<{ id: string; username: string; display_name: string }>(
-      'SELECT id, username, display_name FROM auth_users WHERE id = $1',
-      [effectiveUserId],
-    )
-    if (userRes.rowCount === 0 || !userRes.rows[0]) {
-      return c.json(
-        {
-          error: 'gateway_managed_account',
-          message: 'Passkey registration requires a persistent local user record',
-        },
-        400,
-      )
-    }
-    const u = userRes.rows[0]
-
-    const reqCtx = getRequestContext(c)
-    try {
-      const options = await createRegistrationOptions(db, config, reqCtx, {
-        id: u.id,
-        username: u.username,
-        displayName: u.display_name || u.username,
-      })
-      return c.json(options, 200)
-    } catch (err) {
-      return c.json(
-        { error: 'passkey_error', message: err instanceof Error ? err.message : String(err) },
-        400,
-      )
-    }
-  }
-
-  router.post('/methods/passkey/register/start', handlePasskeyRegisterStart)
-  router.post('/methods/passkey/register/options', handlePasskeyRegisterStart)
-
-  // Register finish
-  const handlePasskeyRegisterFinish = async (c: Context<AppEnv>) => {
-    c.header('Cache-Control', 'no-store')
-    if (!registry.get('passkey')?.isEnabled(config)) {
-      return c.json({ error: 'auth_method_disabled', message: 'Passkey method is disabled' }, 403)
-    }
-    const effectiveUserId = c.get('effectiveUserId')
-    const authSource = c.get('authSource')
-    if (!effectiveUserId || effectiveUserId === 'anonymous' || authSource === 'none') {
-      return c.json({ error: 'unauthenticated' }, 401)
-    }
-
-    const userRes = await db.query<{ id: string; username: string }>(
-      'SELECT id, username FROM auth_users WHERE id = $1',
-      [effectiveUserId],
-    )
-    if (userRes.rowCount === 0 || !userRes.rows[0]) {
-      return c.json(
-        {
-          error: 'gateway_managed_account',
-          message: 'Passkey registration requires a persistent local user record',
-        },
-        400,
-      )
-    }
-
-    let body: unknown
-    try {
-      body = await c.req.json()
-    } catch {
-      return c.json({ error: 'invalid_request', message: 'Invalid JSON payload' }, 400)
-    }
-
-    const reqCtx = getRequestContext(c)
-    try {
-      const result = await verifyRegistrationResponse(
-        db,
-        config,
-        reqCtx,
-        { id: effectiveUserId, username: userRes.rows[0].username },
-        body as Parameters<typeof verifyRegistrationResponse>[4],
-      )
-      return c.json(result, 201)
-    } catch (err) {
-      return c.json(
-        { error: 'passkey_verification_failed', message: err instanceof Error ? err.message : String(err) },
-        400,
-      )
-    }
-  }
-
-  router.post('/methods/passkey/register/finish', handlePasskeyRegisterFinish)
-  router.post('/methods/passkey/register/verify', handlePasskeyRegisterFinish)
-
   // Login start
   const handlePasskeyLoginStart = async (c: Context<AppEnv>) => {
     c.header('Cache-Control', 'no-store')
@@ -520,7 +565,6 @@ export function createAuthRouter(
   }
 
   router.post('/methods/passkey/login/start', handlePasskeyLoginStart)
-  router.post('/methods/passkey/auth/options', handlePasskeyLoginStart)
 
   // Login finish
   const handlePasskeyLoginFinish = async (c: Context<AppEnv>) => {
@@ -614,7 +658,6 @@ export function createAuthRouter(
   }
 
   router.post('/methods/passkey/login/finish', handlePasskeyLoginFinish)
-  router.post('/methods/passkey/auth/verify', handlePasskeyLoginFinish)
 
   return router
 }

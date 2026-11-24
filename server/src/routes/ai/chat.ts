@@ -647,7 +647,7 @@ export function createChatHandler(config: AppConfig, rt: AiRuntime) {
     }
 
     const req = parseChatRequest(rawBody, config, rt, userId)
-    const prompts = rt.prompts.require()
+    const prompts = (await rt.prompts.load()) ?? rt.prompts.require()
 
     const record = c.get('aiCall') ?? fallbackRecord(rt)
     record.promptVersion = prompts.version

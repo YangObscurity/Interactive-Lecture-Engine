@@ -3,7 +3,7 @@ import type { AppEnv } from '../../app.js'
 import type { AppConfig } from '../../config/schema.js'
 import { createDbManager, type DbManager } from '../../db/manager.js'
 import type { Db } from '../../db/types.js'
-import { getSetting, setSetting } from '../../repo/siteSettings.js'
+import { getSetting, setSetting, RESERVED_DOMAIN_SETTING_KEYS } from '../../repo/siteSettings.js'
 import type { AiRuntime } from '../ai/runtime.js'
 import { createAdminAccessRouter } from './access.js'
 import { createAdminAiToolsHandler, createAdminAiToolsSaveHandler } from './aiTools.js'
@@ -95,6 +95,15 @@ export function createAdminRouter(
     if (!/^[a-zA-Z0-9._:-]{1,64}$/.test(key)) {
       return c.json({ error: 'invalid_setting_key', message: 'Invalid setting key' }, 400)
     }
+    if (RESERVED_DOMAIN_SETTING_KEYS.has(key)) {
+      return c.json(
+        {
+          error: 'reserved_setting_key',
+          message: `Cannot modify reserved domain setting key "${key}" via generic settings endpoint. Use the dedicated domain API.`,
+        },
+        400,
+      )
+    }
     const val = await getSetting(db, key)
     return c.json({ ok: true, key, value: val }, 200)
   })
@@ -102,6 +111,15 @@ export function createAdminRouter(
     const key = c.req.param('key')
     if (!/^[a-zA-Z0-9._:-]{1,64}$/.test(key)) {
       return c.json({ error: 'invalid_setting_key', message: 'Invalid setting key' }, 400)
+    }
+    if (RESERVED_DOMAIN_SETTING_KEYS.has(key)) {
+      return c.json(
+        {
+          error: 'reserved_setting_key',
+          message: `Cannot modify reserved domain setting key "${key}" via generic settings endpoint. Use the dedicated domain API.`,
+        },
+        400,
+      )
     }
     let body: unknown
     try {

@@ -65,6 +65,7 @@ function makeMockConfig<T extends Partial<AppConfig>>(overrides: T = {} as T): A
     webauthnRpId: '',
     webauthnRpName: 'Interactive Lecture Engine',
     webauthnOrigin: '',
+    authBootstrapToken: null,
     ...overrides,
   }
 }

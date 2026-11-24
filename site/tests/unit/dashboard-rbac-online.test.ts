@@ -897,4 +897,72 @@ describe('WP-5 RBAC Online Dashboard Suite', () => {
       unsub()
     }
   })
+
+  it('d) visibleSections from authStatus drives navigation tabs directly', async () => {
+    const currentAuthStatus = {
+      authAdapter: 'hybrid',
+      authenticated: true,
+      needsBootstrap: false,
+      authSource: 'session',
+      authMethod: 'password',
+      rememberMe: false,
+      user: { id: 'custom-user', name: 'Custom Section User', email: 'custom@example.com' },
+      roles: ['reader', 'author', 'admin'],
+      groups: [],
+      canAccessAdmin: true,
+      canAccessAuthor: true,
+      visibleSections: ['my-learning', 'overview', 'figures'],
+    }
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = typeof input === 'string' ? input : input.toString()
+        if (url.endsWith('/api/auth/status')) return jsonResponse(currentAuthStatus)
+        if (url.includes('/api/admin/overview')) {
+          return jsonResponse({
+            generatedAt: '2026-11-24T00:00:00.000Z',
+            totals: { users: 1, progressRows: 0, completedLectures: 0, sessions: 0, messages: 0, checklistItems: 0, completedChecklistItems: 0 },
+            byStatus: {},
+            byGroup: [],
+            recentActivity: {},
+          })
+        }
+        return jsonResponse({ ok: true })
+      }),
+    )
+
+    const wrapper = mount(DashboardPage)
+    await flushPromises()
+
+    const navTabs = wrapper.findAll('[data-dashboard-tab]').map((w) => w.attributes('data-dashboard-tab'))
+    expect(navTabs).toEqual(['my-learning', 'overview', 'figures'])
+  })
+
+  it('e) PageAccess refuses downgrade when server returns uninitialized_restricted and access is null', async () => {
+    dashboardState.mode = 'online'
+    dashboardState.canAccessAdmin = true
+    dashboardState.roles = ['admin']
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = typeof input === 'string' ? input : input.toString()
+        if (url.includes('/api/admin/access')) {
+          return jsonResponse({
+            ok: true,
+            source: 'uninitialized_restricted',
+            access: null,
+          })
+        }
+        return jsonResponse({ ok: true })
+      }),
+    )
+
+    const wrapper = mount(PageAccess, { props: { access: null, autheliaPreview: '' } })
+    await flushPromises()
+
+    expect(wrapper.find('[data-access-load-error]').exists()).toBe(true)
+    expect(wrapper.find('[data-access-save-btn]').exists()).toBe(false)
+  })
 })

@@ -1,5 +1,5 @@
 import { existsSync, readFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import { Hono } from 'hono'
 import type { AppEnv } from '../../app.js'
 import type { AppConfig } from '../../config/schema.js'
@@ -11,12 +11,6 @@ import { resolveContentDir, saveSiteContentSetting } from '../../services/conten
 const VALID_DEFAULTS = new Set(['public', 'authenticated'])
 const VALID_ENFORCEMENTS = new Set(['none', 'gateway'])
 const ALLOWED_TOP_KEYS = new Set(['default', 'enforcement', 'groups'])
-
-const DEFAULT_ACCESS = {
-  default: 'public',
-  enforcement: 'none',
-  groups: {},
-}
 
 function isPlainObject(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v)
@@ -84,6 +78,47 @@ function readDiskAccess(config: AppConfig): Record<string, unknown> | null {
   }
 }
 
+function detectManifestRestrictions(config: AppConfig): boolean {
+  const candidatePaths: string[] = []
+  if (config.siteDistDir) {
+    candidatePaths.push(
+      resolve(config.siteDistDir, '../../.lecture-build/access-manifest.json'),
+      resolve(config.siteDistDir, '../.lecture-build/access-manifest.json'),
+      resolve(config.siteDistDir, '.lecture-build/access-manifest.json'),
+      resolve(config.siteDistDir, 'access-manifest.json'),
+    )
+  }
+  candidatePaths.push(
+    resolve(process.cwd(), '../site/.lecture-build/access-manifest.json'),
+    resolve(process.cwd(), 'site/.lecture-build/access-manifest.json'),
+    resolve(process.cwd(), '.lecture-build/access-manifest.json'),
+  )
+  for (const p of candidatePaths) {
+    if (existsSync(p)) {
+      try {
+        const raw = JSON.parse(readFileSync(p, 'utf8').replace(/^\uFEFF/, '')) as {
+          defaultTier?: unknown
+          enforcement?: unknown
+          tiers?: unknown
+        }
+        const hasNonPublicDefault = typeof raw.defaultTier === 'string' && raw.defaultTier !== 'public'
+        const hasEnforcement = typeof raw.enforcement === 'string' && raw.enforcement !== 'none'
+        const hasTiers = Array.isArray(raw.tiers) && raw.tiers.length > 0
+        const hasGroups =
+          (raw as { groups?: unknown }).groups &&
+          typeof (raw as { groups?: unknown }).groups === 'object' &&
+          Object.keys((raw as { groups: Record<string, unknown> }).groups).length > 0
+        if (hasNonPublicDefault || hasEnforcement || hasTiers || hasGroups) {
+          return true
+        }
+      } catch {
+        // ignore parse error
+      }
+    }
+  }
+  return false
+}
+
 export function createAdminAccessRouter(config: AppConfig, db: Db): Hono<AppEnv> {
   const router = new Hono<AppEnv>()
 
@@ -91,8 +126,24 @@ export function createAdminAccessRouter(config: AppConfig, db: Db): Hono<AppEnv>
     c.header('Cache-Control', 'no-store')
     const saved = await getSetting<unknown>(db, 'access')
     const validSaved = isValidAccessConfig(saved)
-    const access = validSaved.ok ? validSaved.value : (readDiskAccess(config) ?? DEFAULT_ACCESS)
-    return c.json({ ok: true, access }, 200)
+    if (validSaved.ok) {
+      return c.json({ ok: true, source: 'db', access: validSaved.value }, 200)
+    }
+
+    const diskAccess = readDiskAccess(config)
+    if (diskAccess) {
+      return c.json({ ok: true, source: 'disk', access: diskAccess }, 200)
+    }
+
+    const restricted = detectManifestRestrictions(config)
+    return c.json(
+      {
+        ok: true,
+        source: restricted ? 'uninitialized_restricted' : 'none',
+        access: null,
+      },
+      200,
+    )
   })
 
   router.put('/', async (c) => {

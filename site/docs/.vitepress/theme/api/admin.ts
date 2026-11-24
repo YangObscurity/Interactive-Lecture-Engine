@@ -616,7 +616,8 @@ export function fetchOnlineCompanionHistory(): Promise<
 
 export interface OnlineAccessPayload {
   ok: boolean
-  access: Record<string, unknown>
+  access: Record<string, unknown> | null
+  source?: string
   persistence?: OnlinePersistenceInfo
 }
 
@@ -682,6 +683,7 @@ export function fetchOnlineLogs(params?: {
 
 export interface OnlineBackupEntry {
   filename: string
+  kind?: 'logical-json' | 'physical-tar'
   sizeBytes: number
   sha256: string | null
   createdAt: string
