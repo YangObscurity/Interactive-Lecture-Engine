@@ -506,6 +506,7 @@ html.dark[data-lec-theme='datasheet'] .lec-dashboard .db-unsaved { background: v
 .lec-dashboard .db-srv-h { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; padding: 10px 16px; }
 .lec-dashboard .db-srv-b { display: grid; gap: 10px; padding: 0 16px 14px; }
 .lec-dashboard .db-grow { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lec-dashboard .db-in.db-grow { flex: 1 1 12rem; width: auto; min-width: 0; }
 /* a changed table row (access tiers, tools): the accent bar on its first cell (原型 .tp-btn.dirty{border-left:3px solid accent}) */
 .lec-dashboard .db-t tr.dirty td:first-child { box-shadow: inset 3px 0 0 var(--lec-accent); }
 
