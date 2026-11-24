@@ -84,7 +84,7 @@
     "html-to-image": "^1.11.13",
     "katex": "^0.16.47",
     "marked": "16.4.2",
-    "mermaid": "^11.4.1",
+    "mermaid": "^12.3.0",
     "minisearch": "^7.2.0",
     "photoswipe": "5.4.4",
     "shiki": "2.5.0",
