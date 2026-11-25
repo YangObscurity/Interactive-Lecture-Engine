@@ -31,6 +31,7 @@ scripts/check_body_links.py
 scripts/check_figs2.py
 scripts/check_header_spoof.mjs
 scripts/check_lecture_contracts.py
+scripts/check_readme_sync.mjs
 scripts/config.py
 scripts/content_paths.py
 scripts/deploy_config.py

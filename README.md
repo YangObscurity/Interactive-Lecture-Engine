@@ -138,7 +138,7 @@ npm run build      # 输出到 site/docs/.vitepress/dist，任何静态托管都
 <summary><picture><source media="(prefers-color-scheme: dark)" srcset="docs/brand/icons/access-dark.svg"><img alt="" src="docs/brand/icons/access-light.svg" width="22"></picture>&nbsp; <b>访问控制</b> · 按课程组分档，受限内容不进公开文件</summary>
 
 - 每个课程组可以设访问档：公开、登录用户、指定的用户组。
-- 构建时受限内容（标题、正文、图表数据、搜索索引）不进公开文件，同时生成给 nginx 用的网关清单。读者身份由前置网关（例如 Authelia）通过请求头传给站点和后端。
+- 构建时受限内容（标题、正文、图表数据、搜索索引）不进公开文件，同时生成给 nginx 用的网关清单。读者身份可由内置账号（邮箱密码或 Passkey）、前置网关（例如 Authelia）通过请求头传入，或两者混合（`hybrid`）。
 
 </details>
 
@@ -154,10 +154,10 @@ npm run build      # 输出到 site/docs/.vitepress/dist，任何静态托管都
 </details>
 
 <details>
-<summary><picture><source media="(prefers-color-scheme: dark)" srcset="docs/brand/icons/layers-dark.svg"><img alt="" src="docs/brand/icons/layers-light.svg" width="22"></picture>&nbsp; <b>Dashboard</b> · 内容检查、站点文案、提示词、课程组、运行状态</summary>
+<summary><picture><source media="(prefers-color-scheme: dark)" srcset="docs/brand/icons/layers-dark.svg"><img alt="" src="docs/brand/icons/layers-light.svg" width="22"></picture>&nbsp; <b>Dashboard</b> · 学习概览、内容检查、访问控制、数据库与系统运维</summary>
 
-- `/dashboard` 页面：内容检查结果、站点文案、伴读提示词和快捷动作、课程组与访问档、主题、运行状态和终端日志。
-- 只有本机开发服务器上可以编辑，要求本机访问并带开发令牌；线上部署是只读的。
+- `/dashboard` 页面按角色分三档：`reader` 查看个人学习记录与账号安全（密码、Passkey、会话）；`author` 增加内容检查、图包、站点文案与伴读提示词；`admin` 再增加访问档、外观主题、用户角色、运行状态与日志、备份归档及数据库切换与表编辑。
+- 本机开发服务器上直接读写 `content/`（要求本机访问并带开发令牌）；接入 `lecture-api` 后可按角色在线读写数据库，挂有可写 `CONTENT_DIR` 时同步写盘，改动静态构建输入后会提示需要重新构建。
 
 </details>
 
@@ -172,7 +172,7 @@ npm run build      # 输出到 site/docs/.vitepress/dist，任何静态托管都
 
 ## 后端 lecture-api（可选）
 
-只发布静态站点可以不要后端。需要多设备进度、登录身份或线上 AI 伴读时再部署它。
+只发布静态站点可以不要后端。需要多设备进度、账号登录、在线 Dashboard 或线上 AI 伴读时再部署它。
 
 <table>
 <tr>
@@ -185,7 +185,7 @@ npm run build      # 输出到 site/docs/.vitepress/dist，任何静态托管都
 </tr>
 <tr>
 <td width="190"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/brand/icons/gateway-dark.svg"><img alt="" src="docs/brand/icons/gateway-light.svg" width="22"></picture>&nbsp; <b>部署</b></td>
-<td>放在 nginx 和登录网关后面，由网关传入用户身份</td>
+<td>支持内置账号与 Passkey，也可放在 nginx 和登录网关后面（或 <code>hybrid</code> 混合），按角色校验身份</td>
 </tr>
 </table>
 
@@ -215,6 +215,7 @@ npm run build      # 输出到 site/docs/.vitepress/dist，任何静态托管都
 <a href="docs-dev/I18N.md">多语言</a><br>
 <a href="docs-dev/PROGRESS.md">学习进度</a><br>
 <a href="docs-dev/ACCESS.md">访问档</a><br>
+<a href="docs-dev/DASHBOARD.md">Dashboard</a><br>
 <a href="docs-dev/DEBUGGING.md">前端调试</a>
 
 </td>
@@ -226,7 +227,8 @@ npm run build      # 输出到 site/docs/.vitepress/dist，任何静态托管都
 <a href="docs-dev/GATEWAY.md">网关</a><br>
 <a href="docs-dev/BACKUP.md">备份</a><br>
 <a href="docs-dev/UPGRADE.md">升级</a><br>
-<a href="server/README.md">后端</a>
+<a href="server/README.md">后端</a><br>
+<a href="docs-dev/README_SYNC.md">README 同步规范</a>
 
 </td>
 </tr>
@@ -259,7 +261,7 @@ npm test             # 后端测试
 
 > [!NOTE]
 > - 界面文字目前只有中文和英文。
-> - Dashboard 只能在本机开发服务器上编辑。读者用量、备份列表等几项后端还没有接口，页面上标为暂不可用。
+> - 未接入 `lecture-api` 的纯静态部署下 Dashboard 只读；概念草稿页只在本地开发服务器上可编辑。Dashboard 上的备份“恢复”只执行归档只读校验（校验和、解压与表计数），物理还原需先停服再执行 `npm run db:restore`。
 > - 导出 PDF 和长图要下载无头 Chromium，默认不装。
 > - 大站点构建占内存多：约 450 页时峰值约 6 GB，小内存主机的做法见 [BUILD.md](docs-dev/BUILD.md)。
 > - AI 伴读需要一个 OpenAI 兼容的模型接口，费用由部署者承担。
