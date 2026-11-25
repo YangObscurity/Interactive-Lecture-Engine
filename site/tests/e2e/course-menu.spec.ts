@@ -3,7 +3,7 @@
  *
  * Covers:
  *   - Both skins (reader, datasheet)
- *   - Open via single click on .cm-trigger (no hover open)
+ *   - Open automatically on desktop hover over .cm-trigger and via click/keyboard
  *   - Hover preview (hovering a group row previews its lectures without navigating)
  *   - Click group row / link opens group page
  *   - Click lecture row opens lecture
@@ -100,7 +100,7 @@ for (const [theme, expectedImpl] of SKINS) {
       await expect(trigger).toHaveAttribute('aria-haspopup', 'dialog')
       await expect(trigger).toHaveAttribute('aria-expanded', 'false')
 
-      // 1. Single click opens the menu; no hover open
+      // 1. Desktop click pins the course menu open
       await trigger.click()
       await expect(trigger).toHaveAttribute('aria-expanded', 'true')
       const dialog = page.locator('.cm[role="dialog"]')
@@ -145,6 +145,37 @@ for (const [theme, expectedImpl] of SKINS) {
       await firstLec.click()
       await expect(page).toHaveURL(/\/pln\/L0?1\/?$/)
       await expect(dialog).toBeHidden()
+
+      expect(pageErrors.map(String)).toEqual([])
+    })
+
+    test('desktop: hover opens menu, allows previewing groups, and closes on leave', async ({ page, pageErrors }) => {
+      await page.setViewportSize({ width: 1280, height: 800 })
+      await useTheme(page, theme, 'light')
+      await mockProgress(page)
+      await page.context().addInitScript(() => localStorage.setItem('lecture:debug', '1'))
+      await gotoAndSettle(page, '/pln/L02')
+      await storeReady(page)
+
+      const trigger = page.locator('.cm-trigger')
+      const dialog = page.locator('.cm[role="dialog"]')
+      await expect(trigger).toHaveAttribute('aria-expanded', 'false')
+      await expect(dialog).toBeHidden()
+
+      // Hovering trigger opens menu automatically without needing a click
+      await trigger.hover()
+      await expect(dialog).toBeVisible()
+      await expect(trigger).toHaveAttribute('aria-expanded', 'true')
+
+      // Moving pointer into flyout keeps menu open and previews hovered group
+      await page.locator('.cm-groups li a').first().hover()
+      await expect(dialog).toBeVisible()
+      await expect(page.locator('.cm-lec header b')).toContainText('MEA')
+
+      // Moving pointer away outside menu closes it after leave grace delay
+      await page.mouse.move(20, 650)
+      await expect(dialog).toBeHidden()
+      await expect(trigger).toHaveAttribute('aria-expanded', 'false')
 
       expect(pageErrors.map(String)).toEqual([])
     })

@@ -511,8 +511,11 @@ export interface NavCourseMenuProps {
   activeColumn: 'groups' | 'lectures'
   expandedGroupIds: readonly string[]
   labels: CourseMenuLabels
+  openMode?: 'hover' | 'explicit' | null
   onToggle: () => void
   onClose: () => void
+  onHoverEnter?: (ev?: Event) => void
+  onHoverLeave?: (ev?: Event) => void
   onSelectGroup: (groupId: string) => void
   onToggleGroupExpand: (groupId: string) => void
   onOpenGroup: (group: CourseMenuGroupView, ev?: MouseEvent) => void

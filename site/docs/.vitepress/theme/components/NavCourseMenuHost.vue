@@ -12,6 +12,7 @@ import { useT } from '../../i18n/useT.ts'
 import { getRootLang, normalizeLang, pickLocalized, type LangCode } from '../../i18n/index.ts'
 import type { I18nPages } from '../../i18n/data.ts'
 import { localizedLecture } from '../core/langLinks.ts'
+import { createCourseMenuHoverController, type CourseMenuOpenMode } from '../core/courseMenuHover.ts'
 import { parseLecture } from '../core/route.ts'
 import { trapFocus } from '../core/focusTrap.ts'
 import { useProgress } from '../progress/useProgress.ts'
@@ -54,6 +55,7 @@ const progress = useProgress()
 const closeScreen = inject('close-screen', null) as (() => void) | null
 
 const isOpen = ref(false)
+const openMode = ref<CourseMenuOpenMode | null>(null)
 const activeGroupId = ref<string>('')
 const activeColumn = ref<'groups' | 'lectures'>('groups')
 const activeLectureIndex = ref<number>(-1)
@@ -61,6 +63,14 @@ const expandedGroupIds = ref<string[]>([])
 const wrapRef = ref<HTMLElement | null>(null)
 
 let restoreFocusEl: HTMLElement | null = null
+
+const hoverController = createCourseMenuHoverController({
+  isMobile: () => Boolean(props.screenMenu),
+  isOpen: () => isOpen.value,
+  getMode: () => openMode.value,
+  openHover: () => openMenu('hover'),
+  closeHover: () => closeMenu(false),
+})
 
 const localeKeys = computed(() =>
   Object.keys(site.value.locales ?? {}).filter((k) => k !== 'root'),
@@ -191,7 +201,8 @@ watch(
   { immediate: true },
 )
 
-function openMenu(): void {
+function openMenu(mode: CourseMenuOpenMode = 'explicit'): void {
+  hoverController.clearTimer()
   if (typeof document !== 'undefined') {
     restoreFocusEl = document.activeElement instanceof HTMLElement ? document.activeElement : null
   }
@@ -200,21 +211,35 @@ function openMenu(): void {
   }
   activeColumn.value = 'groups'
   activeLectureIndex.value = -1
+  openMode.value = mode
   isOpen.value = true
 }
 
-function closeMenu(): void {
+function closeMenu(restoreFocus = true): void {
+  hoverController.clearTimer()
+  const wasExplicit = openMode.value === 'explicit'
+  openMode.value = null
   isOpen.value = false
   const target = restoreFocusEl
   restoreFocusEl = null
-  if (target && typeof requestAnimationFrame !== 'undefined') {
+  if (restoreFocus && wasExplicit && target && typeof requestAnimationFrame !== 'undefined') {
     requestAnimationFrame(() => target.focus())
   }
 }
 
 function toggleMenu(): void {
-  if (isOpen.value) closeMenu()
-  else openMenu()
+  hoverController.clearTimer()
+  if (isOpen.value) {
+    if (openMode.value === 'hover') {
+      const triggerEl = wrapRef.value?.querySelector<HTMLElement>('.cm-trigger') ?? null
+      if (triggerEl) restoreFocusEl = triggerEl
+      openMode.value = 'explicit'
+      return
+    }
+    closeMenu()
+  } else {
+    openMenu('explicit')
+  }
 }
 
 function selectGroup(groupId: string): void {
@@ -233,14 +258,16 @@ function toggleGroupExpand(groupId: string): void {
 }
 
 function handleOpenGroup(group: CourseMenuGroupView, ev?: MouseEvent): void {
+  void group
   if (ev && (ev.metaKey || ev.ctrlKey || ev.shiftKey || ev.altKey || ev.button !== 0)) return
-  isOpen.value = false
+  closeMenu(false)
   closeScreen?.()
 }
 
 function handleOpenLecture(lecture: CourseMenuLectureView, ev?: MouseEvent): void {
+  void lecture
   if (ev && (ev.metaKey || ev.ctrlKey || ev.shiftKey || ev.altKey || ev.button !== 0)) return
-  isOpen.value = false
+  closeMenu(false)
   closeScreen?.()
 }
 
@@ -324,6 +351,14 @@ function handleDocumentClick(ev: MouseEvent): void {
   }
 }
 
+function handleDocumentKeyDown(ev: KeyboardEvent): void {
+  if (!isOpen.value || props.screenMenu) return
+  if (ev.key === 'Escape') {
+    ev.preventDefault()
+    closeMenu(openMode.value === 'explicit')
+  }
+}
+
 const labels = computed<CourseMenuLabels>(() => ({
   groups: t('nav.groups'),
   dialogLabel: t('cmenu.dialogLabel'),
@@ -348,8 +383,11 @@ const slotProps = computed<NavCourseMenuProps>(() => ({
   activeColumn: activeColumn.value,
   expandedGroupIds: expandedGroupIds.value,
   labels: labels.value,
+  openMode: openMode.value,
   onToggle: toggleMenu,
   onClose: closeMenu,
+  onHoverEnter: hoverController.onHoverEnter,
+  onHoverLeave: hoverController.onHoverLeave,
   onSelectGroup: selectGroup,
   onToggleGroupExpand: toggleGroupExpand,
   onOpenGroup: handleOpenGroup,
@@ -360,16 +398,19 @@ const slotProps = computed<NavCourseMenuProps>(() => ({
 watch(
   () => route.path,
   () => {
-    isOpen.value = false
+    closeMenu(false)
   },
 )
 
 onMounted(() => {
   document.addEventListener('click', handleDocumentClick, true)
+  document.addEventListener('keydown', handleDocumentKeyDown)
 })
 
 onBeforeUnmount(() => {
+  hoverController.clearTimer()
   document.removeEventListener('click', handleDocumentClick, true)
+  document.removeEventListener('keydown', handleDocumentKeyDown)
 })
 </script>
 
