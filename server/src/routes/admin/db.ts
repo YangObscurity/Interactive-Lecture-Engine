@@ -1029,16 +1029,6 @@ export function createAdminDbRouter(
         (canonicalDbTarget(targetUrl) === canonicalDbTarget(dbManager.getCurrentUrl()) &&
           targetDirectUrl === dbManager.getCurrentDirectUrl())
 
-      if (sameTarget) {
-        return c.json(
-          {
-            error: 'same_database_target',
-            message: 'Target database is already the active database',
-          },
-          400,
-        )
-      }
-
       if (!dryRun && canonicalDbTarget(targetUrl) === 'pglite:memory://') {
         return c.json(
           {

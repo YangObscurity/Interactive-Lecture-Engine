@@ -954,29 +954,33 @@ describe('WP-3: Admin DB Selector, Hot-Swap, Transfer & Whitelisted 6-Table CRUD
         // Hot-swap active engine to PgDb over TCP wire protocol
         const createDbSpy = vi.spyOn(dbModule, 'createDb')
         const swapToSpy = vi.spyOn(dbManager, 'swapTo')
+        try {
+          const swapRes = await app.request('/api/admin/db/switch', {
+            method: 'POST',
+            headers: { ...ADMIN_HEADERS, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ targetUrl: pgUrl, autoMigrate: true }),
+          })
+          expect(swapRes.status).toBe(200)
+          const swapData = await swapRes.json()
+          expect(swapData.ok).toBe(true)
+          expect(swapData.previousKind).toBe('pglite')
+          expect(swapData.currentKind).toBe('pg')
+          expect(JSON.stringify(swapData)).not.toContain('wireSecretPwd')
 
-        const swapRes = await app.request('/api/admin/db/switch', {
-          method: 'POST',
-          headers: { ...ADMIN_HEADERS, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ targetUrl: pgUrl, autoMigrate: true }),
-        })
-        expect(swapRes.status).toBe(200)
-        const swapData = await swapRes.json()
-        expect(swapData.ok).toBe(true)
-        expect(swapData.previousKind).toBe('pglite')
-        expect(swapData.currentKind).toBe('pg')
-        expect(JSON.stringify(swapData)).not.toContain('wireSecretPwd')
-
-        // REV2-2: verify probe used statementTimeoutMs: 30000, while switched runtime pool createDb contract
-        // used standard pool options (no statementTimeoutMs: 30000)
-        expect(swapToSpy).toHaveBeenCalledTimes(1)
-        const createDbCallsForPg = createDbSpy.mock.calls.filter((call) => call[0] === pgUrl)
-        expect(createDbCallsForPg.length).toBeGreaterThanOrEqual(2)
-        // Probe call carries probe timeouts
-        expect(createDbCallsForPg[0]![1]?.pg?.statementTimeoutMs).toBe(30000)
-        expect(createDbCallsForPg[0]![1]?.pg?.connectionTimeoutMillis).toBe(8000)
-        // Switched runtime pool call does NOT get pinned to probe options
-        expect(createDbCallsForPg[1]![1]).toBeUndefined()
+          // REV2-2: verify probe used statementTimeoutMs: 30000, while switched runtime pool createDb contract
+          // used standard pool options (no statementTimeoutMs: 30000)
+          expect(swapToSpy).toHaveBeenCalledTimes(1)
+          const createDbCallsForPg = createDbSpy.mock.calls.filter((call) => call[0] === pgUrl)
+          expect(createDbCallsForPg.length).toBeGreaterThanOrEqual(2)
+          // Probe call carries probe timeouts
+          expect(createDbCallsForPg[0]![1]?.pg?.statementTimeoutMs).toBe(30000)
+          expect(createDbCallsForPg[0]![1]?.pg?.connectionTimeoutMillis).toBe(8000)
+          // Switched runtime pool call does NOT get pinned to probe options
+          expect(createDbCallsForPg[1]![1]).toBeUndefined()
+        } finally {
+          swapToSpy.mockRestore()
+          createDbSpy.mockRestore()
+        }
 
         // Live CRUD query on swapped PgDb
         const rowsRes = await app.request('/api/admin/db/tables/site_settings/rows', {
@@ -1245,6 +1249,22 @@ describe('WP-3: Admin DB Selector, Hot-Swap, Transfer & Whitelisted 6-Table CRUD
       })
 
       try {
+        // Same-target switch keeps dryRun: true working while rejecting live !dryRun swap
+        const switchSameDryRes = await app.request('/api/admin/db/switch', {
+          method: 'POST',
+          headers: { ...ADMIN_HEADERS, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ targetUrl: `pglite:${dbDir}`, dryRun: true }),
+        })
+        expect(switchSameDryRes.status).toBe(200)
+        const switchSameDryBody = (await switchSameDryRes.json()) as {
+          ok: boolean
+          dryRun: boolean
+          sameTarget: boolean
+        }
+        expect(switchSameDryBody.ok).toBe(true)
+        expect(switchSameDryBody.dryRun).toBe(true)
+        expect(switchSameDryBody.sameTarget).toBe(true)
+
         // 1. REV2-7(a): Reject pglite:memory on /switch when dryRun is false
         const switchMemRes = await app.request('/api/admin/db/switch', {
           method: 'POST',
