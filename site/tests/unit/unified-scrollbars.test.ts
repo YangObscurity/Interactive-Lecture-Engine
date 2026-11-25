@@ -13,9 +13,9 @@ describe('unified theme scrollbar stylesheet contract', () => {
     expect(sbIdx).toBeGreaterThan(baseIdx)
 
     const css = fs.readFileSync(path.join(ROOT, 'theme/styles/scrollbars.css'), 'utf8')
-    expect(css).toContain('::-webkit-scrollbar-button')
-    expect(css).toContain('var(--lec-border)')
+    expect(css).toMatch(/:where\(\*\)::-webkit-scrollbar-button\s*\{[^}]*display:\s*none\s*;/)
     expect(css).toContain('var(--lec-text-muted)')
+    expect(css).toContain('var(--lec-text)')
     expect(css).toContain('var(--lec-accent)')
     expect(css).toContain('@supports not selector(::-webkit-scrollbar)')
   })

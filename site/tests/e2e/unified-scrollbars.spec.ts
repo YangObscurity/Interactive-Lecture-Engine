@@ -12,10 +12,13 @@ for (const theme of ['reader', 'datasheet'] as const) {
     await expect(cmGroups).toBeVisible()
 
     const sb = await cmGroups.evaluate((el) => {
+      const host = getComputedStyle(el)
       const bar = getComputedStyle(el, '::-webkit-scrollbar')
       const thumb = getComputedStyle(el, '::-webkit-scrollbar-thumb')
       const btn = getComputedStyle(el, '::-webkit-scrollbar-button')
       return {
+        scrollbarWidth: host.scrollbarWidth,
+        scrollbarColor: host.scrollbarColor,
         width: bar.width,
         radius: thumb.borderTopLeftRadius,
         thumbBg: thumb.backgroundColor,
@@ -23,6 +26,8 @@ for (const theme of ['reader', 'datasheet'] as const) {
       }
     })
 
+    expect(sb.scrollbarWidth).toBe('auto')
+    expect(sb.scrollbarColor).toBe('auto')
     expect(sb.width).toBe('6px')
     expect(sb.btnDisplay).toBe('none')
     expect(sb.thumbBg).not.toBe('rgba(0, 0, 0, 0)')
