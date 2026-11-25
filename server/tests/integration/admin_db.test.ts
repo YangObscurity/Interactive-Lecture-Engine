@@ -1416,5 +1416,73 @@ describe('WP-3: Admin DB Selector, Hot-Swap, Transfer & Whitelisted 6-Table CRUD
         await dbManager.close()
       }
     })
+
+    it('preserves JSON null values across push/pull transfer without violating JSONB NOT NULL constraints', async () => {
+      const mainDir = join(tempRoot, 'json-null-transfer-main')
+      const extDir = join(tempRoot, 'json-null-transfer-ext')
+      const mainDb = createDb(`pglite:${mainDir}`)
+      const extDb = createDb(`pglite:${extDir}`)
+      await runMigrations(mainDb)
+      await runMigrations(extDb)
+      await extDb.close()
+
+      const dbManager = createDbManager(mainDb, { databaseUrl: `pglite:${mainDir}` })
+      const app = createApp(makeTestConfig({ databaseUrl: `pglite:${mainDir}` }), dbManager.asDb(), {
+        dbManager,
+      })
+
+      try {
+        // Store a JSON null setting AND delete a setting (writes new_value='null'::jsonb in history)
+        const putNullRes = await app.request('/api/admin/settings/null_setting', {
+          method: 'PUT',
+          headers: { ...ADMIN_HEADERS, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ value: null }),
+        })
+        expect(putNullRes.status).toBe(200)
+
+        await app.request('/api/admin/settings/to_delete', {
+          method: 'PUT',
+          headers: { ...ADMIN_HEADERS, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ value: 'temp' }),
+        })
+        const delRes = await app.request('/api/admin/db/tables/site_settings/rows/to_delete', {
+          method: 'DELETE',
+          headers: ADMIN_HEADERS,
+        })
+        expect(delRes.status).toBe(200)
+
+        const pushRes = await app.request('/api/admin/db/transfer', {
+          method: 'POST',
+          headers: { ...ADMIN_HEADERS, 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            targetUrl: `pglite:${extDir}`,
+            direction: 'push',
+            conflictStrategy: 'upsert',
+            dryRun: false,
+          }),
+        })
+        expect(pushRes.status).toBe(200)
+
+        const verifyExtDb = createDb(`pglite:${extDir}`)
+        try {
+          const extSetting = await verifyExtDb.query<{ key: string; value: unknown }>(
+            `SELECT key, value FROM site_settings WHERE key = 'null_setting'`,
+          )
+          expect(extSetting.rows).toHaveLength(1)
+          expect(extSetting.rows[0]?.value).toBeNull()
+
+          const extHistory = await verifyExtDb.query<{ setting_key: string; previous_value: unknown; new_value: unknown }>(
+            `SELECT setting_key, previous_value, new_value FROM site_settings_history WHERE setting_key = 'to_delete' ORDER BY id ASC`,
+          )
+          expect(extHistory.rows.length).toBeGreaterThanOrEqual(2)
+          expect(extHistory.rows[0]?.previous_value).toBeNull()
+          expect(extHistory.rows[extHistory.rows.length - 1]?.new_value).toBeNull()
+        } finally {
+          await verifyExtDb.close()
+        }
+      } finally {
+        await dbManager.close()
+      }
+    })
   })
 })

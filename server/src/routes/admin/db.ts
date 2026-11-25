@@ -567,7 +567,7 @@ function serializeColumnValue(value: unknown, kind: ColumnKind): unknown {
     return null
   }
   if (kind === 'jsonb') {
-    return JSON.stringify(value)
+    return typeof value === 'string' ? value : JSON.stringify(value)
   }
   if (kind === 'timestamptz') {
     if (value instanceof Date) {
@@ -1385,7 +1385,9 @@ export function createAdminDbRouter(
             }
             rem = assertSourceDeadline()
             await applyPgStatementTimeout(srcTx, sourceKind, rem)
-            const colsSql = table.columns.map((col) => `"${col.name}"`).join(', ')
+            const colsSql = table.columns
+              .map((col) => (col.kind === 'jsonb' ? `"${col.name}"::text AS "${col.name}"` : `"${col.name}"`))
+              .join(', ')
             const orderBySql = table.pkColumns.map((pk) => `"${pk}" ASC`).join(', ')
             const rowsRes = await srcTx.query<Record<string, unknown>>(
               `SELECT ${colsSql} FROM "${table.name}" ORDER BY ${orderBySql}`,
