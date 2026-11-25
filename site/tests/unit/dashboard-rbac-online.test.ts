@@ -1526,4 +1526,84 @@ describe('WP-5 RBAC Online Dashboard Suite', () => {
 
     wrapper.unmount()
   })
+
+  it('preserves restricted rules for hidden groups absent from theme.groups when saving PageAccess', async () => {
+    dashboardState.mode = 'online'
+    dashboardState.canAccessAuthor = true
+    dashboardState.canAccessAdmin = true
+    dashboardState.roles = ['reader', 'author', 'admin']
+
+    const fullAccess = {
+      default: 'public',
+      enforcement: 'gateway',
+      groups: {
+        G01: { read: 'public' },
+        G_HIDDEN_STAFF: { read: ['staff'] },
+        G_HIDDEN_LOGIN: { read: 'authenticated' },
+      },
+    }
+    const putAccessPayloads: Array<Record<string, unknown>> = []
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = typeof input === 'string' ? input : input.toString()
+        const method = (init?.method ?? 'GET').toUpperCase()
+        if (url.endsWith('/api/admin/access')) {
+          if (method === 'GET') {
+            return jsonResponse({ ok: true, source: 'db', access: fullAccess })
+          }
+          if (method === 'PUT' && typeof init?.body === 'string') {
+            const parsed = JSON.parse(init.body) as { access: Record<string, unknown> }
+            putAccessPayloads.push(parsed.access)
+            return jsonResponse({
+              ok: true,
+              access: parsed.access,
+              persistence: { mode: 'db', effect: 'rebuild_required' },
+            })
+          }
+        }
+        return jsonResponse({ ok: true })
+      }),
+    )
+
+    const wrapper = mount(PageAccess, { props: { access: null, autheliaPreview: '' } })
+    await flushPromises()
+
+    // 1. Change visible group G01 -> authenticated and save
+    await wrapper.find('[data-tpopen="G01"]').trigger('click')
+    await wrapper.find('[data-tpv="login"]').trigger('click')
+    await wrapper.find('[data-access-save-btn]').trigger('click')
+    await flushPromises()
+
+    expect(putAccessPayloads).toHaveLength(1)
+    expect(putAccessPayloads[0]).toEqual({
+      default: 'public',
+      enforcement: 'gateway',
+      groups: {
+        G01: { read: 'authenticated' },
+        G_HIDDEN_STAFF: { read: ['staff'] },
+        G_HIDDEN_LOGIN: { read: 'authenticated' },
+      },
+    })
+
+    // 2. Revert visible group G01 -> public and save again -> hidden restricted groups + enforcement='gateway' must remain intact
+    await wrapper.find('[data-tpopen="G01"]').trigger('click')
+    await wrapper.find('[data-tpv="public"]').trigger('click')
+    await wrapper.find('[data-access-save-btn]').trigger('click')
+    await flushPromises()
+
+    expect(putAccessPayloads).toHaveLength(2)
+    expect(putAccessPayloads[1]).toEqual({
+      default: 'public',
+      enforcement: 'gateway',
+      groups: {
+        G01: { read: 'public' },
+        G_HIDDEN_STAFF: { read: ['staff'] },
+        G_HIDDEN_LOGIN: { read: 'authenticated' },
+      },
+    })
+
+    wrapper.unmount()
+  })
 })

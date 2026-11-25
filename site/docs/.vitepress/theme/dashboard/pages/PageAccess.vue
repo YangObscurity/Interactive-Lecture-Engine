@@ -164,21 +164,43 @@ watch(
   },
 )
 
+function preservedHiddenGroupRules(): Record<string, { read: ReadRule }> {
+  const visibleIds = new Set(groups.value.map((g) => g.id))
+  const out: Record<string, { read: ReadRule }> = {}
+  const rawGroups = (effectiveAccess.value?.rawAccess as { groups?: unknown } | undefined)?.groups
+  if (rawGroups && typeof rawGroups === 'object' && !Array.isArray(rawGroups)) {
+    for (const [id, entry] of Object.entries(rawGroups as Record<string, { read?: ReadRule }>)) {
+      if (!visibleIds.has(id) && entry && entry.read !== undefined) {
+        out[id] = { read: JSON.parse(JSON.stringify(entry.read)) as ReadRule }
+      }
+    }
+  }
+  for (const item of effectiveAccess.value?.groups ?? []) {
+    if (!visibleIds.has(item.id) && !(item.id in out)) {
+      out[item.id] = { read: JSON.parse(JSON.stringify(item.read)) as ReadRule }
+    }
+  }
+  return out
+}
+
 const hasRestricted = computed(() => {
-  return Object.values(draft.value).some((r) => r !== 'public')
+  const def = effectiveAccess.value?.default ?? 'public'
+  if (def !== 'public') return true
+  if (Object.values(draft.value).some((r) => r !== 'public')) return true
+  return Object.values(preservedHiddenGroupRules()).some((rule) => rule.read !== 'public')
 })
 
 function buildConfigFrom(source: Record<string, ReadRule>): AccessConfig {
   const def = effectiveAccess.value?.default ?? 'public'
-  const restricted = Object.values(source).some((r) => r !== 'public')
-  const enf = restricted ? 'gateway' : (effectiveAccess.value?.enforcement ?? 'none')
-  const groupRules: Record<string, { read: ReadRule }> = {}
+  const groupRules: Record<string, { read: ReadRule }> = preservedHiddenGroupRules()
   for (const g of groups.value) {
     const r = source[g.id]
     if (r !== undefined) {
       groupRules[g.id] = { read: r }
     }
   }
+  const restricted = def !== 'public' || Object.values(groupRules).some((rule) => rule.read !== 'public')
+  const enf = restricted ? 'gateway' : (effectiveAccess.value?.enforcement ?? 'none')
   return {
     default: def,
     enforcement: enf,
