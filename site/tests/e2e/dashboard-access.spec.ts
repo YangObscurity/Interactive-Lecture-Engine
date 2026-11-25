@@ -29,31 +29,59 @@ async function open(page: Page, hash = '#access'): Promise<void> {
 const onlineOnly = () => test.skip(test.info().project.name === 'dev', 'online mode exists only on the built site')
 const devOnly = () => test.skip(test.info().project.name !== 'dev', 'local author mode exists only on the dev server')
 
-test.describe('Dashboard Access: online read-only', () => {
+test.describe('Dashboard Access: online RBAC and fail-closed modes', () => {
   test.beforeEach(onlineOnly)
 
-  test('online mode displays read-only banner, locked tiers, and gateway rules panel', async ({ page, pageErrors }) => {
+  test('online admin displays online-writable banner, tier pickers, bulk bar, and gateway rules panel', async ({ page, pageErrors }) => {
     await session(page, ADMIN)
+    await page.context().route('**/api/admin/access', (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json; charset=utf-8',
+        body: JSON.stringify({
+          ok: true,
+          access: { default: 'public', enforcement: 'none', groups: {} },
+        }),
+      }),
+    )
     await open(page, '#access')
 
-    // Read-only banner is displayed
-    await expect(page.locator('[data-access-ro-banner]')).toBeVisible()
+    // Online-writable banner is displayed for admin
+    await expect(page.locator('[data-access-online-banner]')).toBeVisible()
 
-    // Table rows have lock icons and no checkboxes
+    // Table rows expose interactive pickers and checkboxes
     const rows = page.locator('[data-access-group]')
     expect(await rows.count()).toBeGreaterThan(0)
-    await expect(page.locator('input[data-bsel]')).toHaveCount(0)
-    await expect(page.locator('[data-bulk-bar]')).toHaveCount(0)
-    await expect(page.locator('.db-lock').first()).toBeVisible()
-
-    // Edit unavailable card is shown
-    await expect(page.locator('[data-dashboard-unavailable="access-edit"]')).toBeVisible()
-
-    // Savebar is not rendered
-    await expect(page.locator('[data-savebar="access"]')).toHaveCount(0)
+    expect(await page.locator('input[data-bsel]').count()).toBeGreaterThan(0)
+    await expect(page.locator('[data-bulk-bar]')).toBeVisible()
+    await expect(page.locator('[data-savebar="access"]')).toBeVisible()
 
     // Gateway rules panel is visible
     await expect(page.locator('[data-access-rules]')).toBeVisible()
+    expect(pageErrors).toEqual([])
+  })
+
+  test('online mode locks editing fail-closed when existing restrictions are uninitialized', async ({ page, pageErrors }) => {
+    await session(page, ADMIN)
+    await page.context().route('**/api/admin/access', (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json; charset=utf-8',
+        body: JSON.stringify({
+          ok: true,
+          source: 'uninitialized_restricted',
+          access: null,
+        }),
+      }),
+    )
+    await open(page, '#access')
+
+    await expect(page.locator('[data-access-load-error]')).toBeVisible()
+    await expect(page.locator('input[data-bsel]')).toHaveCount(0)
+    await expect(page.locator('[data-bulk-bar]')).toHaveCount(0)
+    await expect(page.locator('.db-lock').first()).toBeVisible()
+    await expect(page.locator('[data-dashboard-unavailable="access-edit"]')).toBeVisible()
+    await expect(page.locator('[data-savebar="access"]')).toHaveCount(0)
     expect(pageErrors).toEqual([])
   })
 })

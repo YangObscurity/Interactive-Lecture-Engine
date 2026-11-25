@@ -28,11 +28,18 @@ async function open(page: Page, hash = ''): Promise<void> {
 const onlineOnly = () => test.skip(test.info().project.name === 'dev', 'online (session-gated) mode exists only on the built site')
 const devOnly = () => test.skip(test.info().project.name !== 'dev', 'local author mode exists only on the dev server')
 
-test.describe('S6Z-3 & S6Z-4: Online Read-Only Mode', () => {
+test.describe('S6Z-3 & S6Z-4: Online RBAC Mode', () => {
   test.beforeEach(onlineOnly)
 
-  test('online: Look shows skin, swatches, live contrast check, preview card and read-only status', async ({ page }) => {
+  test('online: Look shows skin, swatches, live contrast check, preview card and admin savebar', async ({ page }) => {
     await session(page, ADMIN)
+    await page.context().route('**/api/admin/look', (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json; charset=utf-8',
+        body: JSON.stringify({ ok: true, look: { skin: 'reader', base: 'paper', custom: '#FBF9F5' } }),
+      }),
+    )
     await open(page, '#look:theme')
 
     // Skin selector
@@ -54,12 +61,18 @@ test.describe('S6Z-3 & S6Z-4: Online Read-Only Mode', () => {
     const miniPreview = page.locator('[data-look-mini-preview]')
     await expect(miniPreview).toBeVisible()
 
-    // Online read-only: savebar not present
-    await expect(page.locator('[data-look-save]')).toHaveCount(0)
+    // Online admin writable: savebar is rendered
+    await expect(page.locator('[data-savebar="look"]')).toBeVisible()
   })
 
-  test('online: Companion Tools is marked read-only unavailable', async ({ page }) => {
-    await session(page, ADMIN)
+  test('online: Companion Tools is restricted for non-admin authors and available for admin', async ({ page }) => {
+    await session(page, {
+      authenticated: true,
+      user: { id: 'author1', name: 'Author One', email: 'author@example.com' },
+      roles: ['reader', 'author'],
+      groups: ['authors'],
+      logoutUrl: null,
+    })
     await open(page, '#companion:tools')
     await expect(page.locator('[data-dashboard-unavailable="tools-online"]')).toBeVisible()
   })

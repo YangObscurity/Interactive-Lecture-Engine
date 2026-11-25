@@ -89,7 +89,7 @@ test.describe('WP-F10: Site texts and branding', () => {
     await expect(page.locator('.site-title-short')).toBeHidden()
   })
 
-  test('Dashboard texts tab shows dev-only note on prod', async ({ page }, testInfo) => {
+  test('Dashboard texts tab shows online-writable mode and savebar for admin on prod', async ({ page }, testInfo) => {
     test.skip(testInfo.project.name !== 'prod', 'prod-only check')
 
     await page.context().route('**/api/auth/session', (route) =>
@@ -105,6 +105,13 @@ test.describe('WP-F10: Site texts and branding', () => {
         }),
       }),
     )
+    await page.context().route('**/api/admin/texts', (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json; charset=utf-8',
+        body: JSON.stringify({ ok: true, texts: null }),
+      }),
+    )
 
     await page.goto('/dashboard', { waitUntil: 'domcontentloaded' })
     await page.waitForSelector('.lec-dashboard[data-dashboard-ready="1"]')
@@ -112,8 +119,8 @@ test.describe('WP-F10: Site texts and branding', () => {
     await page.locator('[data-dashboard-tab="texts"]').click()
     const pane = page.locator('[data-dashboard-pane="texts"]')
     await expect(pane).toBeVisible()
-    // v3.4 lock line: online is read only, edits happen on the local dev server
-    await expect(pane).toContainText('开发服务器')
+    await expect(pane).toContainText('线上可写模式')
+    await expect(page.locator('[data-savebar="texts"]')).toBeVisible()
   })
 
   test('Dashboard texts page: hints, empty-field rules and the required name (dev project)', async ({ page }, testInfo) => {
