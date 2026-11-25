@@ -58,6 +58,8 @@ interface MountedCanvasState {
   fitToStage: () => void
   onStageResize: () => void
   zoomBy: (factor: number, clientX?: number, clientY?: number) => void
+  panBy: (dx: number, dy: number) => void
+  isZoomed: () => boolean
   resetZoom: () => void
 }
 
@@ -201,6 +203,14 @@ function attachFreeCanvas(
     fitToStage()
   }
 
+  const panBy = (dx: number, dy: number) => {
+    tx += dx
+    ty += dy
+    applyTransform()
+  }
+
+  const isZoomed = () => scale > fitScale + 0.04
+
   const onStageResize = () => {
     if (Math.abs(scale - fitScale) < 0.02) {
       adapter.onReset?.()
@@ -216,24 +226,65 @@ function attachFreeCanvas(
     (e) => {
       e.preventDefault()
       e.stopPropagation()
-      zoomAt(e.deltaY < 0 ? 1.12 : 1 / 1.12, e.clientX, e.clientY)
+      if (e.deltaY !== 0) {
+        zoomAt(e.deltaY < 0 ? 1.12 : 1 / 1.12, e.clientX, e.clientY)
+      } else if (e.deltaX !== 0) {
+        panBy(-e.deltaX, 0)
+      }
     },
     { passive: false, signal },
   )
 
+  const pointers = new Map<number, { x: number; y: number }>()
   let panning = false
   let activePointerId = -1
+  let capturedPointerId = -1
   let downX = 0
   let downY = 0
   let startTx = 0
   let startTy = 0
   let moved = false
+  let lastDragEndAt = 0
+  let downOnBlank = false
+  let pinching = false
+  let pinchLastDist = 0
+  let pinchLastMidX = 0
+  let pinchLastMidY = 0
+
+  const releaseCapture = (pointerId: number) => {
+    if (capturedPointerId !== pointerId) return
+    capturedPointerId = -1
+    try {
+      if (stage.hasPointerCapture?.(pointerId)) stage.releasePointerCapture(pointerId)
+    } catch {
+      /* ignore */
+    }
+  }
 
   stage.addEventListener(
     'pointerdown',
     (e) => {
       if (e.pointerType === 'mouse' && e.button !== 0) return
       e.stopPropagation()
+      pointers.set(e.pointerId, { x: e.clientX, y: e.clientY })
+      if (pointers.size === 2) {
+        if (capturedPointerId !== -1) releaseCapture(capturedPointerId)
+        panning = false
+        activePointerId = -1
+        moved = true
+        downOnBlank = false
+        pinching = true
+        const pts = Array.from(pointers.values())
+        const p1 = pts[0]!
+        const p2 = pts[1]!
+        pinchLastDist = Math.hypot(p2.x - p1.x, p2.y - p1.y)
+        pinchLastMidX = (p1.x + p2.x) / 2
+        pinchLastMidY = (p1.y + p2.y) / 2
+        stage.classList.add('grabbing')
+        return
+      }
+      if (pointers.size > 2) return
+      pinching = false
       panning = true
       activePointerId = e.pointerId
       downX = e.clientX
@@ -241,12 +292,7 @@ function attachFreeCanvas(
       startTx = tx
       startTy = ty
       moved = false
-      stage.classList.add('grabbing')
-      try {
-        stage.setPointerCapture(e.pointerId)
-      } catch {
-        /* ignore synthetic events */
-      }
+      downOnBlank = e.target === stage
     },
     { signal },
   )
@@ -254,11 +300,41 @@ function attachFreeCanvas(
   stage.addEventListener(
     'pointermove',
     (e) => {
+      if (pointers.has(e.pointerId)) {
+        pointers.set(e.pointerId, { x: e.clientX, y: e.clientY })
+      }
+      if (pinching && pointers.size >= 2) {
+        e.stopPropagation()
+        const pts = Array.from(pointers.values())
+        const p1 = pts[0]!
+        const p2 = pts[1]!
+        const dist = Math.hypot(p2.x - p1.x, p2.y - p1.y)
+        const midX = (p1.x + p2.x) / 2
+        const midY = (p1.y + p2.y) / 2
+        if (pinchLastDist > 8 && dist > 8) {
+          tx += midX - pinchLastMidX
+          ty += midY - pinchLastMidY
+          zoomAt(dist / pinchLastDist, midX, midY)
+        }
+        pinchLastDist = dist
+        pinchLastMidX = midX
+        pinchLastMidY = midY
+        return
+      }
       if (!panning || e.pointerId !== activePointerId) return
       e.stopPropagation()
       const dx = e.clientX - downX
       const dy = e.clientY - downY
-      if (Math.hypot(dx, dy) > 5) moved = true
+      if (!moved && Math.hypot(dx, dy) > 5) {
+        moved = true
+        stage.classList.add('grabbing')
+        try {
+          stage.setPointerCapture(e.pointerId)
+          capturedPointerId = e.pointerId
+        } catch {
+          /* ignore synthetic events */
+        }
+      }
       tx = startTx + dx
       ty = startTy + dy
       applyTransform()
@@ -267,15 +343,24 @@ function attachFreeCanvas(
   )
 
   const endPan = (e: PointerEvent) => {
+    pointers.delete(e.pointerId)
+    releaseCapture(e.pointerId)
+    if (pinching) {
+      if (pointers.size < 2) {
+        pinching = false
+        pinchLastDist = 0
+        panning = false
+        activePointerId = -1
+        lastDragEndAt = Date.now()
+        stage.classList.remove('grabbing')
+      }
+      return
+    }
     if (!panning || (activePointerId !== -1 && e.pointerId !== activePointerId)) return
     panning = false
     activePointerId = -1
+    if (moved) lastDragEndAt = Date.now()
     stage.classList.remove('grabbing')
-    try {
-      if (stage.hasPointerCapture?.(e.pointerId)) stage.releasePointerCapture(e.pointerId)
-    } catch {
-      /* ignore */
-    }
   }
 
   stage.addEventListener('pointerup', endPan, { signal })
@@ -296,11 +381,15 @@ function attachFreeCanvas(
     'click',
     (e) => {
       e.stopPropagation()
-      if (moved) {
+      if (moved && Date.now() - lastDragEndAt < 200) {
         moved = false
+        downOnBlank = false
         return
       }
-      if (e.target === stage) closeModal()
+      moved = false
+      const shouldClose = downOnBlank && e.target === stage
+      downOnBlank = false
+      if (shouldClose) closeModal()
     },
     { signal },
   )
@@ -315,6 +404,8 @@ function attachFreeCanvas(
     fitToStage,
     onStageResize,
     zoomBy: zoomAt,
+    panBy,
+    isZoomed,
     resetZoom,
   }
   viewer.mountedChart = state
@@ -510,13 +601,14 @@ function mountVectorFigureIntoSlide(viewer: ActiveViewer, slideIndex: number, co
   const hHint = Math.max(1, item.height ?? 300)
 
   const mountFallbackImg = () => {
-    host.innerHTML = ''
+    const target: ParentNode = host.shadowRoot ?? host
+    while (target.firstChild) target.removeChild(target.firstChild)
     const img = document.createElement('img')
-    img.className = 'pswp__img chart-modal__svg-fallback'
+    img.className = 'chart-modal__svg-fallback'
     img.src = item.src || ''
     img.alt = item.caption || item.title
     img.draggable = false
-    host.appendChild(img)
+    target.appendChild(img)
     const natW = img.naturalWidth || wHint
     const natH = img.naturalHeight || hHint
     attachFreeCanvas(viewer, slideIndex, 'vector-figure', stage, host, makeImgAdapter(img, natW, natH))
@@ -533,6 +625,8 @@ function mountVectorFigureIntoSlide(viewer: ActiveViewer, slideIndex: number, co
     fitToStage: () => {},
     onStageResize: () => {},
     zoomBy: () => {},
+    panBy: () => {},
+    isZoomed: () => false,
     resetZoom: () => {},
   }
   viewer.mountedChart = placeholder
@@ -1016,6 +1110,28 @@ function startViewer(
         return
       }
       return
+    }
+    const mc = viewer.mountedChart?.slideIndex === pswp.currIndex ? viewer.mountedChart : null
+    if (mc) {
+      const step = ke.shiftKey ? 120 : 80
+      if (ke.key === 'ArrowUp') {
+        ke.preventDefault()
+        ev.preventDefault()
+        mc.panBy(0, step)
+        return
+      }
+      if (ke.key === 'ArrowDown') {
+        ke.preventDefault()
+        ev.preventDefault()
+        mc.panBy(0, -step)
+        return
+      }
+      if ((ke.key === 'ArrowLeft' || ke.key === 'ArrowRight') && (ke.shiftKey || mc.isZoomed() || slides.length <= 1)) {
+        ke.preventDefault()
+        ev.preventDefault()
+        mc.panBy(ke.key === 'ArrowLeft' ? step : -step, 0)
+        return
+      }
     }
     if (ke.key === '+' || ke.key === '=') {
       ke.preventDefault()

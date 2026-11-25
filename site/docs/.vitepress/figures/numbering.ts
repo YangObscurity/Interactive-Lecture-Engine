@@ -134,12 +134,16 @@ export type InlineMermaidMode = 'all' | 'chart-only' | 'none'
 
 export const INLINE_MERMAID_META_CLASS = 'lec-mermaid-num'
 
-/** Extract normalized fence language token from markdown fence `info` (`mermaid:chart {..}` -> `mermaid:chart`). */
+/** Extract normalized fence language token matching VitePress preWrapper rules (`mermaid:line-numbers` -> `mermaid`). */
 export function isInlineMermaidInfo(info: string, mode: InlineMermaidMode = 'all'): boolean {
   if (mode === 'none') return false
-  const lang = (info || '').trim().split(/[\s{=]/, 1)[0]?.toLowerCase() ?? ''
-  if (mode === 'chart-only') return lang === 'mermaid:chart'
-  return lang === 'mermaid' || lang === 'mermaid:chart'
+  const cleaned = (info || '')
+    .trim()
+    .replace(/=\d*/, '')
+    .replace(/:(no-)?line-numbers(?:[{ ]|$|=\d*).*/, '')
+    .replace(/(?:-vue|\{| ).*$/, '')
+  if (mode === 'chart-only') return cleaned === 'mermaid:chart'
+  return cleaned === 'mermaid' || cleaned === 'mermaid:chart'
 }
 
 /** Build-time hidden anchor placed immediately before an inline mermaid fence so runtime charts/page.ts preserves sequence numbers. */

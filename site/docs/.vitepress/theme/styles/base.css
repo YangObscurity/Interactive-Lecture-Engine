@@ -823,3 +823,7 @@ html.dark .pswp.chart-modal .chart-modal__vec-host {
   overflow: visible;
   cursor: inherit;
 }
+.pswp.chart-modal .chart-modal__svg-fallback {
+  display: block;
+  max-width: none;
+}

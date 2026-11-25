@@ -18,7 +18,14 @@ const PATCHED = Symbol('cjkEmphasisPatched')
 
 function isWhiteSpace(code: number): boolean {
   if (code === 0x20 || code === 0x09 || code === 0x0a || code === 0x0d || code === 0x0b || code === 0x0c) return true
-  return code === 0xa0 || (code >= 0x2000 && code <= 0x200a) || code === 0x202f || code === 0x205f || code === 0x3000
+  return (
+    code === 0xa0 ||
+    code === 0x1680 ||
+    (code >= 0x2000 && code <= 0x200a) ||
+    code === 0x202f ||
+    code === 0x205f ||
+    code === 0x3000
+  )
 }
 
 function isCjkChar(code: number): boolean {
@@ -27,7 +34,8 @@ function isCjkChar(code: number): boolean {
     (code >= 0x3400 && code <= 0x4dbf) || // CJK Extension A
     (code >= 0x4e00 && code <= 0x9fff) || // CJK Unified Ideographs
     (code >= 0xac00 && code <= 0xd7af) || // Hangul Syllables
-    (code >= 0xf900 && code <= 0xfaff) // CJK Compatibility Ideographs
+    (code >= 0xf900 && code <= 0xfaff) || // CJK Compatibility Ideographs
+    (code >= 0x20000 && code <= 0x323af) // Supplementary CJK Ideographs
   )
 }
 

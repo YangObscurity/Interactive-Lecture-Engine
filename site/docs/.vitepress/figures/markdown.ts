@@ -307,7 +307,7 @@ export function createFiguresMarkdownPlugin(opts: FiguresMarkdownOptions) {
       const inlineMermaidMode = opts.inlineMermaid ?? defaultInlineMermaidMode()
       const xrefTargets: Array<{ group: string; entry: FigureEntry; targetTier: string }> = []
       for (const tok of state.tokens) {
-        if (tok.type === 'fence' && isInlineMermaidInfo(tok.info ?? '', inlineMermaidMode)) {
+        if (tok.type === 'fence' && tok.content.trim() && isInlineMermaidInfo(tok.info ?? '', inlineMermaidMode)) {
           chartNumbers.push(numbering.next('figure'))
         } else if ((tok.type === 'html_block' || tok.type === 'html_inline') && hasFigureMarkup(tok.content)) {
           scanMounts(tok.content)
@@ -419,7 +419,7 @@ export function createFiguresMarkdownPlugin(opts: FiguresMarkdownOptions) {
       const nextTokens: MarkdownItTokenLike[] = []
       let touchedTokens = false
       for (const tok of state.tokens) {
-        if (tok.type === 'fence' && isInlineMermaidInfo(tok.info ?? '', inlineMermaidMode)) {
+        if (tok.type === 'fence' && tok.content.trim() && isInlineMermaidInfo(tok.info ?? '', inlineMermaidMode)) {
           const num = chartNumbers[chartCursor++] ?? 0
           if (num > 0) {
             const metaTok = new state.Token('html_block', '', 0)

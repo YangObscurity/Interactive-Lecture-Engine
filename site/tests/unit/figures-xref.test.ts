@@ -367,4 +367,37 @@ describe('figures/numbering (one sequence for charts and figures, tables apart)'
     const resolved = resolveFigureXrefsForSearch(src, { relPath: 'g01/L30.md', pageGroup: 'g01', localeKey: '', kindOf })
     expect(resolved).toContain('系统架构见 图 30-2 与下方图表')
   })
+
+  it('handles mermaid modifiers (:line-numbers / {lines}) and skips empty or uppercase MERMAID fences', () => {
+    const { md, figuresDir } = makeFixture()
+    const kindOf = createFigureKindLookup(figuresDir)
+    const src = [
+      '```mermaid:line-numbers',
+      'flowchart LR; A-->B',
+      '```',
+      '',
+      '```mermaid',
+      '   ',
+      '```',
+      '',
+      '```MERMAID',
+      'flowchart TD; X-->Y',
+      '```',
+      '',
+      '```mermaid {1-2}',
+      'flowchart TD; C-->D',
+      '```',
+      '',
+      '<LectureFigure id="alpha" />',
+      '',
+      '引用 [](fig:alpha)。',
+    ].join('\n')
+
+    const html = md.render(src, { relativePath: 'g01/L30.md' })
+    expect(html).toContain('class="lec-mermaid-num" data-fig-no="1" data-fig-lec="30" data-fig-label="图 30-1"')
+    expect(html).toContain('class="lec-mermaid-num" data-fig-no="2" data-fig-lec="30" data-fig-label="图 30-2"')
+    expect(html).not.toContain('data-fig-no="4"')
+    expect(html).toMatch(/data-xref-id="alpha"[^>]*>图 30-3<\/a>/)
+    expect(resolveFigureXrefsForSearch(src, { relPath: 'g01/L30.md', pageGroup: 'g01', localeKey: '', kindOf })).toContain('引用 图 30-3。')
+  })
 })

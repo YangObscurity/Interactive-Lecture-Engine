@@ -77,7 +77,7 @@ export function resolveFigureXrefsForSearch(md: string, opts: ResolveFigureXrefs
   visit(tree, (node) => {
     if (node.type === 'code') {
       const info = [node.lang, node.meta].filter(Boolean).join(' ')
-      if (isInlineMermaidInfo(info, inlineMode)) {
+      if ((node.value || '').trim() && isInlineMermaidInfo(info, inlineMode)) {
         numbering.next('figure')
       }
     } else if (node.type === 'html') {

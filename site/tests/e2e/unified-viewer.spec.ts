@@ -135,4 +135,54 @@ test.describe('WP-F8: unified PhotoSwipe viewer for figures, ECharts & Mermaid',
     await expect(page.locator(`figure.chart[data-lecture="${LECTURE_ID}"][data-id="c3"] .chart-body svg`)).toBeVisible()
     expect(pageErrors).toEqual([])
   })
+
+  test('keeps modal open when clicking/dblclicking SVG, supports keyboard arrows & horizontal wheel pan', async ({
+    page,
+    pageErrors,
+  }) => {
+    await useTheme(page, 'reader', 'light')
+    await page.setViewportSize({ width: 1280, height: 860 })
+    await gotoAndSettle(page, LECTURE)
+
+    const thumbMedia = page.locator('figure.lec-fig .lec-fig-media').first()
+    await thumbMedia.scrollIntoViewIfNeeded()
+    await thumbMedia.click()
+
+    const viewer = page.locator('.pswp.chart-modal')
+    await expect(viewer).toBeVisible()
+    const vecSvg = viewer.locator('.chart-modal__vec-host svg').first()
+    await expect(vecSvg).toBeVisible()
+
+    const fitBox = await vecSvg.boundingBox()
+    const cx = fitBox!.x + fitBox!.width / 2
+    const cy = fitBox!.y + fitBox!.height / 2
+
+    // Single click directly on SVG does NOT close the modal
+    await page.mouse.click(cx, cy)
+    await expect(viewer).toBeVisible()
+
+    // Double click directly on SVG zooms in cleanly without closing
+    await page.mouse.dblclick(cx, cy)
+    const zoomedBox = await vecSvg.boundingBox()
+    expect(zoomedBox!.width).toBeGreaterThan(fitBox!.width * 1.4)
+
+    // Horizontal wheel event pans horizontally without changing SVG width
+    await page.mouse.move(cx, cy)
+    await page.mouse.wheel(120, 0)
+    const afterWheelBox = await vecSvg.boundingBox()
+    expect(Math.abs(afterWheelBox!.width - zoomedBox!.width)).toBeLessThanOrEqual(2)
+    expect(afterWheelBox!.x).toBeLessThan(zoomedBox!.x - 20)
+
+    // Keyboard ArrowDown & ArrowRight pan the zoomed canvas instead of navigating away from slide 2
+    await page.keyboard.press('ArrowDown')
+    await page.keyboard.press('ArrowRight')
+    await expect(viewer.locator('.chart-modal__counter')).toHaveText(`2 / ${SLIDES}`)
+    const afterKeyBox = await vecSvg.boundingBox()
+    expect(afterKeyBox!.y).toBeLessThan(afterWheelBox!.y - 30)
+    expect(afterKeyBox!.x).toBeLessThan(afterWheelBox!.x - 30)
+
+    await page.keyboard.press('Escape')
+    await expect(viewer).toHaveCount(0)
+    expect(pageErrors).toEqual([])
+  })
 })
