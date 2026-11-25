@@ -20,6 +20,6 @@ jobs:
       - uses: actions/checkout@v7
 
       - name: 审查 PR 引入的依赖漏洞
-        uses: actions/dependency-review-action@v4
+        uses: actions/dependency-review-action@v5
         with:
           fail-on-severity: high
