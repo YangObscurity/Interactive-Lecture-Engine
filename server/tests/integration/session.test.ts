@@ -52,6 +52,15 @@ function makeTestConfig(overrides: Partial<AppConfig> = {}): AppConfig {
     aiToolMaxSteps: 5,
     aiMcpToken: null,
     aiMcpTicketSecret: null,
+    authCookieName: 'lec_session',
+    authCookieSecure: 'auto',
+    sessionTtlHours: 12,
+    rememberMeDays: 30,
+    authMethodsEnabled: 'password,passkey,gateway',
+    webauthnRpId: '',
+    webauthnRpName: 'Interactive Lecture Engine',
+    webauthnOrigin: '',
+    authBootstrapToken: null,
     ...overrides,
   }
 }
@@ -228,7 +237,7 @@ describe('Session & Route Tier Guards Integration Tests', () => {
       const config = makeTestConfig({ authAdapter: 'trusted-header' })
       const app = createApp(config, db)
 
-      const res = await app.request('/api/admin/users', {
+      const res = await app.request('/api/admin/nonexistent', {
         headers: {
           'Remote-User': 'alice',
           'Remote-Groups': 'admins',

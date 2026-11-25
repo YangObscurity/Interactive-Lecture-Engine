@@ -628,3 +628,23 @@ describe('labels wait for their web-font slices instead of painting fallback gly
     expect(waitProbeOf(r).gaveUp).toBe(true)
   })
 })
+
+describe('LabelLayer resetAncCache during deferUntilCollect', () => {
+  it('clears passCache ancestor alpha and style entries when collect() runs after deferUntilCollect()', () => {
+    const r = make()
+    const g = r.svg.querySelector('#grp')!
+    const t = r.add(g, { x: '0', y: '20', style: 'font-size: 20px' }, '01')
+    r.layer.collect()
+    r.layer.draw(view(1))
+    r.flush()
+    expect(r.drawn.find((d) => d.text === '01')?.alpha).toBeCloseTo(1)
+
+    r.layer.deferUntilCollect()
+    g.classList.add('dim')
+    t.textContent = '01'
+    r.layer.collect()
+    r.layer.draw(view(1))
+    r.flush()
+    expect(r.drawn.find((d) => d.text === '01')?.alpha).toBeCloseTo(0.5)
+  })
+})

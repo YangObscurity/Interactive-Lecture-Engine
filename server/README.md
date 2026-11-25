@@ -11,7 +11,7 @@
 4. [数据库初始化与迁移管理](#4-数据库初始化与迁移管理)
 5. [编译与启动运行](#5-编译与启动运行)
 6. [前置认证与反向代理安全前置条件](#6-前置认证与反向代理安全前置条件)
-7. [历史进度数据平移工具（db:reassign）](#7-历史进度数据平移工具dbreassign)
+7. [历史数据平移工具（db:reassign）](#7-历史数据平移工具dbreassign)
 8. [完整配置项参考表](#8-完整配置项参考表)
 9. [自动化测试与质量校验](#9-自动化测试与质量校验)
 10. [常见问题排查](#10-常见问题排查)
@@ -27,8 +27,8 @@
   - `/api/ai/chat`：流式 SSE 反向代理。抹除客户端传入的 Authorization 请求头，强制覆写 `user` 字段为经过认证的用户 ID；`inputs`/`files`/`conversation_id` 按白名单与归属校验；原生支持 Dify SSE 流直通以及 OpenAI SSE 流转换（映射为 `agent_message` 与 `message_end` 事件）；客户端断开时主动取消上游请求；流开始前的上游失败统一返回 `502`，流开始后的失败写一个 `event: error` 帧（见契约 §5.2）。
   - `/api/ai/upload`：课件与图片（PDF、Office、PNG/JPEG/GIF/WEBP、纯文本）按内容签名校验后转发至 Dify。受 `AI_UPLOAD_MAX_BYTES`（默认 20 MB）限制；**请求体在内存中整包缓冲**（`formData()`），不是流式转发，因为要先读文件头做魔数校验；缓冲的风险由 20 MB 上限与每用户 1 个并发上传限制。
   - **每用户限流**（进程内存，重启清零）：AI 每分钟、每日、并发流；写请求每分钟。`AUTH_ADAPTER=none` 时 AI 路由默认关闭（`AI_ALLOW_ANONYMOUS=true` 才开放）。每次 AI 调用一行结构化访问日志（哈希用户 ID，不含提示词与密钥）。
-- **管理端遥测与监控 API** (`/api/admin/overview`, `/api/admin/health`)：需具备 `admin` 角色访问。提供全站学习进度分布、AI 会话活跃度统计以及深入的系统运行时与数据库延迟健康检查，严格过滤任何 PII 与明文消息内容。
-- **身份会话 API** (`/api/auth/session`)：公开只读接口。在 `none` 适配器下返回匿名身份；在 `trusted-header` 适配器下从反向代理网关提取用户、角色与组信息。
+- **身份认证与账户自助 API** (`/api/auth/*`, `/api/me/*`)：支持 `none`、`trusted-header`、`local`（邮箱密码与原生 WebAuthn Passkey，HttpOnly Cookie 会话）与 `hybrid`（网关头优先、本地会话回落）四种适配器。公开只读 `/api/auth/session` 返回当前身份摘要；`/api/auth/status`、`/api/auth/methods`、`/api/auth/bootstrap`、`/api/auth/login`、`/api/auth/logout` 与 `/api/auth/methods/passkey/login/*` 负责认证生命周期；`/api/me/*` 提供个人学习概览、JSON 导出、改密、Passkey 凭据与多端会话管理。
+- **管理端与后台运维 API** (`/api/admin/*`)：按角色分层开放。`author` 与 `admin` 可访问内容概览、契约检查、图包清单、站点文案与 AI 伴读提示词（`/api/admin/overview`, `/checks`, `/figures`, `/texts`, `/companion`）；`admin` 独占系统健康检查、AI 工具开关与外部 MCP 发现、用户角色与状态管理、访问档与外观设置、运行状态与内存日志、备份快照创建与只读校验（`npm run db:backup` / `npm run db:restore`），以及在线数据库引擎探测、迁移、热切换、跨库迁移与 6 张白名单表 CRUD（`/api/admin/health`, `/ai-tools`, `/users`, `/access`, `/look`, `/runtime`, `/logs`, `/backups`, `/db`）。修改构建输入类设置后会写入 `site_settings`（挂载可写 `CONTENT_DIR` 时同步写盘），并返回非阻塞的 `rebuild_required` 提示。
 - **健康检查 API** (`/api/health`)：实时探测底层 PostgreSQL 连通性、迁移状态以及可选的 Notion 同步与 AI 代理服务状态（数据库响应超 1.5 秒自动标记为 `degraded`）。
 - **零额外依赖的本地开发**：除了生产级 PostgreSQL，内置支持 `@electric-sql/pglite` 内存数据库与嵌入式目录存储，开箱即用，无需安装本地 Docker 或外部数据库。
 
@@ -148,17 +148,17 @@ DATABASE_URL=pglite:./data/pglite-db DB_AUTO_MIGRATE=true npm run dev
 
 ## 6. 前置认证与反向代理安全前置条件
 
-当配置 `AUTH_ADAPTER=trusted-header` 时，后端完全信任传入请求中的 HTTP Header（如 `Remote-User`、`Remote-Groups`）。必须严格遵循以下**三大安全红线**：
+本服务支持 `none`（匿名）、`local`（内置密码 / WebAuthn Passkey 会话 Cookie，无需前置登录网关）、`trusted-header`（仅从网关请求头读取身份）与 `hybrid`（网关请求头优先，缺失时回落本地 Cookie 会话）四种认证模式。当配置 `AUTH_ADAPTER=trusted-header` 或在 `hybrid` 模式下前置部署认证网关时，后端信任传入请求中的网关 HTTP Header（如 `Remote-User`、`Remote-Groups`），必须严格遵循以下**三大安全红线**：
 
 1. **服务强制绑定回环地址**：
    - 生产环境中服务必须只监听 `127.0.0.1`（默认）或 `::1`，严禁将端口直接暴露给公网。
-   - **安全护栏**：若 `AUTH_ADAPTER=trusted-header` 且 `HOST` 配置为非回环地址（如 `0.0.0.0`），服务启动时将强制报错退出。只有在确信上游经过合规反向代理且显式配置 `ALLOW_NON_LOOPBACK=true` 时才允许启动。
+   - **安全护栏**：若 `AUTH_ADAPTER` 为 `trusted-header` 或 `hybrid` 且 `HOST` 配置为非回环地址（如 `0.0.0.0`），服务启动时将强制报错退出。只有在确信上游经过合规反向代理且显式配置 `ALLOW_NON_LOOPBACK=true` 时才允许启动。
 2. **反向代理覆盖身份头（防伪造核心）**：
    - Nginx 在所有转发到后端的 `location` 中，必须通过 `auth_request_set` 读取认证网关（如 Authelia / Authentik）验证后的真实身份，再用 `proxy_set_header` 写入后端。客户端直接携带的同名请求头会被强制冲刷覆盖。
-3. **公开接口清空身份头**：
-   - 对于不走认证网关的公开接口（如 `/api/health`），Nginx 必须显式将所有身份头设置为空串（如 `proxy_set_header Remote-User "";`），阻断非法身份注入。
+3. **公开与透传接口清空身份头**：
+   - 对于不走认证网关的公开接口（如 `/api/health`），或 `hybrid` 模式下直接透传给内置账号登录使用的接口，Nginx 必须显式将所有身份头设置为空串（如 `proxy_set_header Remote-User "";`），阻断非法身份注入。
 
-参考部署模板位于 `server/deploy/nginx-locations.conf`（覆盖 `/api/db`、`/api/admin`、`/api/auth/session`、`/api/health`、`/api/ai`、`/api/tools`、`/api/mcp`、`/api/progress`、`/api/notion`、`/api/tool`，由 `tests/unit/nginx-template.test.ts` 约束）与 `server/deploy/lecture-api.service`。完整拓扑、方案 B 切换步骤与回滚见 `docs-dev/GATEWAY.md`；上线后用 `node scripts/check_header_spoof.mjs <站点URL>` 验证身份头无法伪造。
+参考部署模板位于 `server/deploy/nginx-locations.conf`（覆盖 `/api/db`、`/api/admin`、`/api/auth/session`、`/api/auth/`、`/api/me/`、`/api/health`、`/api/ai`、`/api/tools`、`/api/mcp`、`/api/progress`、`/api/notion`、`/api/tool`，由 `tests/unit/nginx-template.test.ts` 约束）与 `server/deploy/lecture-api.service`。使用 `local` / `hybrid` 在线登录时，请同步转发 `/api/auth/` 与 `/api/me/` 并按网关策略覆盖或清空身份请求头。完整拓扑、方案 B 切换步骤与回滚见 `docs-dev/GATEWAY.md`；上线后用 `node scripts/check_header_spoof.mjs <站点URL>` 验证身份头无法伪造。
 
 ---
 
@@ -204,7 +204,7 @@ npm run db:reassign -- --from <源用户ID> --to <目标用户ID> [--yes]
 | `DATABASE_URL_DIRECT` | string | - | 否 | 是 | 迁移直连连接串（Neon 建议填非池化直连地址，未设时回落到 DATABASE_URL） |
 | `HOST` | host | `127.0.0.1` | 否 | 否 | HTTP 监听地址（trusted-header 模式下须为回环地址） |
 | `PORT` | int | `8100` | 否 | 否 | HTTP 监听端口（1–65535） |
-| `AUTH_ADAPTER` | enum | `none` | 否 | 否 | 认证适配器（`none` 或 `trusted-header`） |
+| `AUTH_ADAPTER` | enum | `none` | 否 | 否 | 认证适配器（`none`, `trusted-header`, `local`, `hybrid`） |
 | `AUTH_HEADER_PRESET`| enum | `authelia` | 否 | 否 | 网关头预设（`authelia`, `authentik`, `oauth2-proxy`, `custom`） |
 | `AUTH_HEADER_USER` | string | 依预设 | 否 | 否 | 用户 ID 请求头名（custom 预设下必填） |
 | `AUTH_HEADER_GROUPS`| string | 依预设 | 否 | 否 | 用户组请求头名 |
@@ -213,6 +213,15 @@ npm run db:reassign -- --from <源用户ID> --to <目标用户ID> [--yes]
 | `AUTH_GROUP_SEPARATOR`| string| 依预设 | 否 | 否 | 用户组分隔符（Authelia 默认为 `,`，Authentik 默认为 `\|`） |
 | `AUTH_ROLE_MAP` | string | `""` | 否 | 否 | 用户组到角色的映射规则（如 `admins:admin,staff:author`，`reader` 始终保留） |
 | `LOGOUT_URL` | url | - | 否 | 否 | 认证网关登出跳转 URL |
+| `AUTH_COOKIE_NAME` | string | `lec_session` | 否 | 否 | 身份凭证 Cookie 名称 |
+| `AUTH_COOKIE_SECURE` | enum | `auto` | 否 | 否 | Cookie `Secure` 属性策略（`auto`, `true`, `false`） |
+| `SESSION_TTL_HOURS` | int | `12` | 否 | 否 | 普通会话有效期（小时，1–8760） |
+| `REMEMBER_ME_DAYS` | int | `30` | 否 | 否 | 持久会话（记住我）有效期（天，1–365） |
+| `AUTH_METHODS_ENABLED` | string | `password,passkey,gateway` | 否 | 否 | 启用的认证方法列表（逗号分隔） |
+| `AUTH_BOOTSTRAP_TOKEN` | string | - | 否 | 是 | 首次初始化管理员所需的一次性令牌（留空时不要求） |
+| `WEBAUTHN_RP_ID` | string | `""` | 否 | 否 | WebAuthn Relying Party 域名（留空时从请求 Host 推断） |
+| `WEBAUTHN_RP_NAME` | string | `Interactive Lecture Engine` | 否 | 否 | WebAuthn Relying Party 显示名称 |
+| `WEBAUTHN_ORIGIN` | string | `""` | 否 | 否 | WebAuthn 期望 Origin（多个可用逗号分隔，留空时从请求推断） |
 | `DB_AUTO_MIGRATE` | boolean| `false` | 否 | 否 | 启动时是否自动执行待应用的迁移 |
 | `NOTION_HEALTH_URL` | url | - | 否 | 否 | Notion 伴随服务健康探测地址（如 `http://127.0.0.1:8099/health`） |
 | `ALLOW_NON_LOOPBACK`| boolean| `false` | 否 | 否 | 是否允许在 trusted-header 模式下绑定非回环地址 |
@@ -299,8 +308,8 @@ npm run config:check
 1. **服务启动报错：`Pending migrations exist... Please run: npm run db:migrate`**
    - 原因：数据库中有未应用的迁移，且未开启自动迁移。
    - 解决：执行 `npm run db:migrate`，或者在 `.env` 中设置 `DB_AUTO_MIGRATE=true`。
-2. **服务启动报错：`AUTH_ADAPTER=trusted-header 模式下禁止绑定非回环地址`**
-   - 原因：配置了 `AUTH_ADAPTER=trusted-header`，但 `HOST` 填写了公网 IP 或 `0.0.0.0`。
+2. **服务启动报错：`AUTH_ADAPTER=trusted-header 或 hybrid 模式下禁止绑定非回环地址`**
+   - 原因：配置了 `AUTH_ADAPTER=trusted-header` 或 `hybrid`，但 `HOST` 填写了公网 IP 或 `0.0.0.0`。
    - 解决：将 `HOST` 改为 `127.0.0.1`。如确在隔离容器中由网关反向代理，可设置 `ALLOW_NON_LOOPBACK=true`。
 3. **数据库迁移执行卡住或报错建议锁失败**
    - 原因：`DATABASE_URL_DIRECT` 未配置且 `DATABASE_URL` 走的是 PgBouncer 事务池。

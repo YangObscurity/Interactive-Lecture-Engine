@@ -66,6 +66,7 @@ export interface ParsedAuthExportArgs {
   format: AuthExportFormat
   domain: string | undefined
   adminGroups: string[] | undefined
+  authorGroups: string[] | undefined
   accessJson: string | undefined
   buildGroups: string | undefined
   outFile: string | undefined
@@ -77,6 +78,7 @@ export function parseAuthExportArgs(argv: readonly string[]): ParsedAuthExportAr
   let formatRaw = 'authelia'
   let domain: string | undefined
   let adminGroupsRaw: string | undefined
+  let authorGroupsRaw: string | undefined
   let accessJson: string | undefined
   let buildGroups: string | undefined
   let outFile: string | undefined
@@ -101,6 +103,10 @@ export function parseAuthExportArgs(argv: readonly string[]): ParsedAuthExportAr
       adminGroupsRaw = argv[++i]
     } else if (arg.startsWith('--admin-groups=')) {
       adminGroupsRaw = arg.slice('--admin-groups='.length)
+    } else if (arg === '--author-groups') {
+      authorGroupsRaw = argv[++i]
+    } else if (arg.startsWith('--author-groups=')) {
+      authorGroupsRaw = arg.slice('--author-groups='.length)
     } else if (arg === '--access-json') {
       accessJson = argv[++i]
     } else if (arg.startsWith('--access-json=')) {
@@ -135,6 +141,9 @@ export function parseAuthExportArgs(argv: readonly string[]): ParsedAuthExportAr
     adminGroups: adminGroupsRaw
       ? adminGroupsRaw.split(',').map((s) => s.trim()).filter(Boolean)
       : undefined,
+    authorGroups: authorGroupsRaw
+      ? authorGroupsRaw.split(',').map((s) => s.trim()).filter(Boolean)
+      : undefined,
     accessJson,
     buildGroups,
     outFile,
@@ -158,6 +167,7 @@ export interface AuthExportInput {
   groups: readonly GroupDir[]
   localeKeys: readonly string[]
   adminGroups?: readonly string[]
+  authorGroups?: readonly string[]
   domain?: string
   includeDefaultUserApiRule?: boolean
   /** Authentication level for every non-bypass rule (default `two_factor`, the stronger one). */
@@ -167,6 +177,7 @@ export interface AuthExportInput {
 export type AutheliaFactor = 'one_factor' | 'two_factor'
 
 const DEFAULT_ADMIN_GROUPS = ['admins', 'admin'] as const
+const DEFAULT_AUTHOR_GROUPS = ['authors', 'author'] as const
 
 function escapeRegex(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
@@ -222,15 +233,18 @@ function formatSubjectName(groupName: string): string {
 /**
  * Build ordered Authelia `access_control` rules from top priority to catch-all (every rule carries
  * `domain`, which is required; subjects list one group per inner list, i.e. groups are OR'ed):
- *   0. `/api/health`, `/api/tool/` -> `bypass`; `/api/auth/session` too, but only when the site has public content
+ *   0. `/api/health`, `/api/tool/`, `/api/mcp` -> `bypass`; `/api/auth/session` too, only when the site has public content
  *      (on a login-only site every reader is authenticated, and a bypass rule must not be what answers for them)
- *   1. Admin endpoints, `/dashboard` (+ localized), `/api/progress/`, `/api/notion/` -> factor + admin subject,
- *      then `deny` for the same resources
+ *   1a. Author+Admin content APIs (`/api/admin/overview|checks|figures|texts|companion`) -> factor + author/admin subjects,
+ *       then `deny` for the same resources
+ *   1b. Strict Admin endpoints (remaining `/api/admin/*`, `/api/progress/`, `/api/notion/`) -> factor + admin subject,
+ *       then `deny` for the same resources
+ *   1c. Authenticated Dashboard UI (`/dashboard`, localized `/dashboard`) & personal `/api/me/*`, `/api/auth/*` -> factor
  *   2. Restricted gateway-group tiers (`grp-*`, sorted deterministically by tier id) -> factor + `group:<name>`,
  *      then `deny` for the same resources
  *   3. Restricted `authenticated` tiers -> factor
  *   4. Explicit `public` groups (when `defaultTier === 'authenticated'`) -> `bypass`
- *   5. Authenticated reader API endpoints (`/api/db`, `/api/ai`) -> factor
+ *   5. Authenticated reader API endpoints (`/api/db`, `/api/ai`, `/api/tools`) -> factor
  *   6. Catch-all (`^/.*$`) matching `plan.defaultTier` (factor or `bypass`)
  *
  * Authelia applies the first rule whose criteria ALL match, and `subject` is a criterion: a user outside the subject
@@ -249,6 +263,12 @@ export function buildAutheliaRules(input: AuthExportInput): AutheliaRule[] {
   const adminSubjects = uniqueStrings(
     (input.adminGroups && input.adminGroups.length > 0 ? input.adminGroups : DEFAULT_ADMIN_GROUPS).map(formatSubjectName),
   )
+  const authorSubjects = uniqueStrings([
+    ...adminSubjects,
+    ...(input.authorGroups && input.authorGroups.length > 0 ? input.authorGroups : DEFAULT_AUTHOR_GROUPS).map(
+      formatSubjectName,
+    ),
+  ])
   const groupsById = new Map<string, GroupDir>(groups.map((g) => [g.id, g]))
   const withDomain = (rule: AutheliaRule): AutheliaRule => ({ ...rule, domain })
   const factor: AutheliaFactor = input.factor ?? 'two_factor'
@@ -282,21 +302,36 @@ export function buildAutheliaRules(input: AuthExportInput): AutheliaRule[] {
     }),
   )
 
-  // 1. Admin dashboard, /api/admin/*, and the legacy Notion service paths
+  // 1a. Author + Admin Dashboard content APIs (must precede the catch-all /api/admin/* rule below)
+  pushRestricted({
+    comment: 'Author/Admin tier: Dashboard content APIs (overview, checks, figures, texts, companion)',
+    resources: ['^/api/admin/overview/?$', '^/api/admin/(?:checks|figures|texts|companion)(?:/.*)?$'],
+    policy: factor,
+    subject: authorSubjects,
+  })
+
+  // 1b. Strict Admin system/site APIs (/api/admin/*) and legacy Notion service paths
+  pushRestricted({
+    comment: 'Admin tier: system /api/admin/* routes, /api/progress/* and /api/notion/* (legacy Notion service)',
+    resources: ['^/api/admin(?:/.*)?$', '^/api/(?:progress|notion)(?:/.*)?$'],
+    policy: factor,
+    subject: adminSubjects,
+  })
+
+  // 1c. Authenticated Dashboard pages (/dashboard, localized) and personal self-service APIs (/api/me/*, /api/auth/*)
   const dashboardResources = ['^/dashboard(?:/.*)?$']
   for (const key of localeKeys) {
     const cleanKey = key.replace(/^\/+|\/+$/g, '')
     if (cleanKey) dashboardResources.push(`^/${escapeRegex(cleanKey)}/dashboard(?:/.*)?$`)
   }
-  dashboardResources.push('^/api/admin(?:/.*)?$')
-  // The legacy Python service writes the owner's Notion: admins only.
-  dashboardResources.push('^/api/(?:progress|notion)(?:/.*)?$')
-  pushRestricted({
-    comment: 'Admin tier: Lecture Dashboard, /api/admin/*, /api/progress/* and /api/notion/* (legacy Notion service)',
-    resources: uniqueStrings(dashboardResources),
-    policy: factor,
-    subject: adminSubjects,
-  })
+  dashboardResources.push('^/api/me(?:/.*)?$', '^/api/auth(?:/.*)?$')
+  rules.push(
+    withDomain({
+      comment: 'Authenticated user tier: Lecture Dashboard (/dashboard) and personal /api/me/*, /api/auth/* APIs',
+      resources: uniqueStrings(dashboardResources),
+      policy: factor,
+    }),
+  )
 
   // 2 & 3. Restricted tiers: group-restricted tiers first, then authenticated tiers
   const orderedTiers = [...plan.tiers].sort((a, b) => {

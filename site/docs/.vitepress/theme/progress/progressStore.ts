@@ -17,7 +17,7 @@
 import { API_ENDPOINTS, STORAGE_KEYS } from '../../site.config.mts'
 import { createLocalBackend, createRestBackend } from '../api/progress'
 import type { ProgressBackend, SendError } from '../api/progress'
-import { configureSession, getSession } from '../auth/session'
+import { configureSession, getSession, subscribeSession } from '../auth/session'
 import type { SessionState } from '../auth/session'
 import { registerDebugPanel } from '../debug/registry'
 import { EMPTY_SEED, seedIndex } from './seed'
@@ -46,6 +46,8 @@ export interface ProgressStoreDeps {
   backend: ProgressBackend
   /** Who is reading. Default: no session (identity rules do not apply). */
   getSession?: () => Promise<SessionState>
+  /** Session change listener. Default: none. */
+  subscribeSession?: (listener: (session: SessionState) => void) => () => void
   /** The seed (build-time knowledge-graph statuses). Default: empty. */
   loadSeed?: () => Promise<SeedData>
   /** `undefined`: the browser's localStorage when there is one; `null`: keep everything in memory. */
@@ -274,9 +276,19 @@ export function createProgressStore(deps: ProgressStoreDeps): ProgressStore {
   /** Persisting failed once (quota, private mode): from then on the state lives in memory only. */
   let storageBroken = false
   let seed: Map<string, ProgressRecord> = new Map()
+  let baseSeedData: SeedData | null = null
   /** Records given to `extendSeed`; they survive a reload of the build seed and are re-applied after it. */
   const extraSeed = new Map<string, ProgressRecord>()
   let ready = false
+  let initialized = false
+  let bootAwaitingSession = false
+  let latestSubSeq = 0
+  let latestSubSession: SessionState | null = null
+  let establishedIdentity = 'none'
+  let epoch = 0
+  let loadSeq = 0
+  let flushToken = 0
+  const activeControllers = new Set<AbortController>()
   let sync: SyncState = 'idle'
   let unfilteredGet: boolean | null = null
   let loading: Promise<void> | null = null
@@ -289,6 +301,37 @@ export function createProgressStore(deps: ProgressStoreDeps): ProgressStore {
   const listeners = new Set<ProgressListener>()
   const syncListeners = new Set<() => void>()
   const log: string[] = []
+
+  function identityKeyOf(s: SessionState): string {
+    if (s.status === 'authenticated') return `user:${s.user.id}`
+    if (s.status === 'anonymous' && s.source === 'server') return 'anon'
+    return 'none'
+  }
+
+  function invalidatePendingWork(opts?: { clearLoading?: boolean }): void {
+    epoch++
+    flushToken++
+    for (const ac of activeControllers) {
+      try {
+        ac.abort()
+      } catch {
+        // ignore
+      }
+    }
+    activeControllers.clear()
+    if (timer !== null) {
+      scheduler.clear(timer)
+      timer = null
+    }
+    inflight.clear()
+    flushing = null
+    flushAgain = false
+    flushForce = false
+    sync = 'idle'
+    if (opts?.clearLoading) {
+      loading = null
+    }
+  }
 
   const note = (message: string): void => {
     log.push(`${new Date(now()).toISOString()} ${message}`)
@@ -318,7 +361,7 @@ export function createProgressStore(deps: ProgressStoreDeps): ProgressStore {
 
   function readPersisted(): PersistedState {
     const s = storage()
-    if (!s) return emptyState()
+    if (!s) return state
     let raw: string | null
     try {
       raw = s.getItem(key)
@@ -505,7 +548,8 @@ export function createProgressStore(deps: ProgressStoreDeps): ProgressStore {
     notifySync()
   }
 
-  async function sendDue(force: boolean): Promise<void> {
+  async function sendDue(force: boolean, myFlushToken: number, myEpoch: number): Promise<void> {
+    if (epoch !== myEpoch || flushToken !== myFlushToken) return
     if (refresh()) emit({ kind: 'reset' })
     // only the newest operation of a lecture matters; older unsent ones are superseded
     const newest = new Map<string, OutboxOp>()
@@ -526,15 +570,38 @@ export function createProgressStore(deps: ProgressStoreDeps): ProgressStore {
     for (const op of due) inflight.add(op.id)
     sync = 'sending'
     notifySync()
+    if (epoch !== myEpoch || flushToken !== myFlushToken) {
+      for (const op of due) inflight.delete(op.id)
+      scheduleRetry()
+      settleSyncState(null)
+      return
+    }
+
+    const sentOwner = state.owner
+    const ac = new AbortController()
+    activeControllers.add(ac)
     let result: Awaited<ReturnType<ProgressBackend['send']>>
     try {
-      result = await deps.backend.send(due.map((op) => ({ ...op })))
+      result = await deps.backend.send(due.map((op) => ({ ...op })), ac.signal)
     } catch (err) {
       result = { ok: false, error: { retryable: true } }
       note(`send threw: ${err instanceof Error ? err.message : String(err)}`)
+    } finally {
+      activeControllers.delete(ac)
     }
+
+    if (epoch !== myEpoch || flushToken !== myFlushToken) {
+      return
+    }
+
     for (const op of due) inflight.delete(op.id)
-    if (refresh()) emit({ kind: 'reset' })
+    if (refresh()) {
+      if (state.owner !== sentOwner) {
+        handleCrossTabOwnerChange()
+        return
+      }
+      emit({ kind: 'reset' })
+    }
 
     const sentIds = new Set(due.map((op) => op.id))
     if (result.ok) {
@@ -577,20 +644,27 @@ export function createProgressStore(deps: ProgressStoreDeps): ProgressStore {
     settleSyncState(null)
   }
 
-  async function runFlush(force: boolean): Promise<void> {
+  async function runFlush(force: boolean, myFlushToken: number): Promise<void> {
+    const myEpoch = epoch
     await Promise.resolve() // writes made in the same tick go out together
-    if (loading) await loading
+    if (epoch !== myEpoch || flushToken !== myFlushToken) return
+    if (loading) {
+      await loading
+      if (epoch !== myEpoch || flushToken !== myFlushToken) return
+    }
     let useForce = force
     do {
       flushAgain = false
       useForce ||= flushForce
       flushForce = false
       try {
-        await withLock(() => sendDue(useForce))
+        await withLock(() => sendDue(useForce, myFlushToken, myEpoch))
       } catch (err) {
+        if (epoch !== myEpoch || flushToken !== myFlushToken) return
         note(`flush failed: ${err instanceof Error ? err.message : String(err)}`)
         for (const id of [...inflight]) inflight.delete(id)
       }
+      if (epoch !== myEpoch || flushToken !== myFlushToken) return
       useForce = false
     } while (flushAgain)
   }
@@ -601,8 +675,9 @@ export function createProgressStore(deps: ProgressStoreDeps): ProgressStore {
       if (options?.force) flushForce = true
       return flushing
     }
-    flushing = runFlush(options?.force === true).finally(() => {
-      flushing = null
+    const myFlushToken = ++flushToken
+    flushing = runFlush(options?.force === true, myFlushToken).finally(() => {
+      if (flushToken === myFlushToken) flushing = null
     })
     return flushing
   }
@@ -657,40 +732,72 @@ export function createProgressStore(deps: ProgressStoreDeps): ProgressStore {
     state.outbox = kept
   }
 
-  async function doLoad(): Promise<void> {
+  async function doLoad(overrideSession?: SessionState): Promise<void> {
+    const myEpoch = epoch
+    const myLoadSeq = ++loadSeq
     try {
       state = readPersisted()
       attach()
-      const [session, seedData] = await Promise.all([
-        Promise.resolve()
-          .then(() => (deps.getSession ? deps.getSession() : ({ status: 'unknown' } as SessionState)))
-          .catch((): SessionState => ({ status: 'unknown' })),
-        Promise.resolve()
-          .then(() => (deps.loadSeed ? deps.loadSeed() : EMPTY_SEED))
-          .catch((): SeedData => {
-            note('seed could not be loaded')
-            return EMPTY_SEED
-          }),
-      ])
+      const subSeqBefore = latestSubSeq
+      if (!initialized) bootAwaitingSession = true
+      let sessionRes: SessionState
+      let seedDataRes: SeedData
+      try {
+        const [session, seedData] = await Promise.all([
+          Promise.resolve()
+            .then(() => (deps.getSession ? deps.getSession() : ({ status: 'unknown' } as SessionState)))
+            .catch((): SessionState => ({ status: 'unknown' })),
+          Promise.resolve()
+            .then(() => (deps.loadSeed ? deps.loadSeed() : EMPTY_SEED))
+            .catch((): SeedData => {
+              note('seed could not be loaded')
+              return EMPTY_SEED
+            }),
+        ])
+        sessionRes = session
+        seedDataRes = seedData
+      } finally {
+        if (!initialized) bootAwaitingSession = false
+      }
+
+      if (myEpoch !== epoch || myLoadSeq !== loadSeq) return
+
+      baseSeedData = seedDataRes
+      const effectiveSession =
+        latestSubSeq !== subSeqBefore && latestSubSession
+          ? latestSubSession
+          : (overrideSession ?? sessionRes)
+
       refresh()
-      applyIdentity(session)
-      seed = seedIndex(seedData)
+      applyIdentity(effectiveSession)
+      seed = seedIndex(seedDataRes)
       applyExtraSeed()
-      if (state.seedVersion !== null && state.seedVersion !== seedData.version) note(`seed version changed ${state.seedVersion} -> ${seedData.version}`)
-      state.seedVersion = seedData.version
+      if (state.seedVersion !== null && state.seedVersion !== seedDataRes.version) {
+        note(`seed version changed ${state.seedVersion} -> ${seedDataRes.version}`)
+      }
+      state.seedVersion = seedDataRes.version
       importV1()
       persist()
       ready = true
+      initialized = true
+      establishedIdentity = identityKeyOf(effectiveSession)
       emit({ kind: 'reset' })
       notifySync()
 
       // the screen already shows local data; now ask the server
       let fetched: Awaited<ReturnType<ProgressBackend['fetchAll']>>
+      const ac = new AbortController()
+      activeControllers.add(ac)
       try {
-        fetched = await deps.backend.fetchAll()
+        fetched = await deps.backend.fetchAll(ac.signal)
       } catch {
         fetched = { ok: false, error: { retryable: true } }
+      } finally {
+        activeControllers.delete(ac)
       }
+
+      if (myEpoch !== epoch || myLoadSeq !== loadSeq) return
+
       if (fetched.ok) {
         applySkew(fetched.serverDate)
         unfilteredGet = fetched.unfilteredGet
@@ -702,10 +809,12 @@ export function createProgressStore(deps: ProgressStoreDeps): ProgressStore {
       emit({ kind: 'reset' })
       notifySync()
     } catch (err) {
+      if (myEpoch !== epoch || myLoadSeq !== loadSeq) return
       note(`load failed: ${err instanceof Error ? err.message : String(err)}`)
       ready = true
       emit({ kind: 'reset' })
     }
+    if (myEpoch !== epoch || myLoadSeq !== loadSeq) return
     void flush()
   }
 
@@ -719,12 +828,96 @@ export function createProgressStore(deps: ProgressStoreDeps): ProgressStore {
     return loading
   }
 
+  function resetBoundary(opts: {
+    established: string
+    reason?: string
+    clearLoading?: boolean
+    markReady?: boolean
+    persistState?: boolean
+    clearData?: { owner: string | null } | 'all'
+  }): void {
+    invalidatePendingWork(opts.clearLoading ? { clearLoading: true } : undefined)
+    loadSeq++
+    extraSeed.clear()
+    seed = baseSeedData ? seedIndex(baseSeedData) : new Map()
+    unfilteredGet = null
+    if (opts.clearData === 'all') {
+      latestSubSession = null
+      state = emptyState()
+    } else if (opts.clearData) {
+      state.server = dict()
+      state.outbox = []
+      state.owner = opts.clearData.owner
+    }
+    establishedIdentity = opts.established
+    if (opts.reason) note(opts.reason)
+    if (opts.persistState) persist()
+    if (opts.markReady) ready = true
+    emit({ kind: 'reset' })
+    notifySync()
+  }
+
+  function handleCrossTabOwnerChange(): void {
+    const wasReady = ready
+    resetBoundary({ established: state.owner !== null ? `user:${state.owner}` : 'anon' })
+    if (!wasReady) {
+      loading = doLoad()
+    }
+    if (
+      latestSubSession?.status === 'authenticated' &&
+      latestSubSession.user.id === state.owner
+    ) {
+      scheduleRetry()
+    }
+  }
+
+  function onSessionChange(s: SessionState): void {
+    if (s.status !== 'authenticated' && !(s.status === 'anonymous' && s.source === 'server')) {
+      return
+    }
+    latestSubSeq++
+    latestSubSession = s
+    if (!initialized && bootAwaitingSession) {
+      return
+    }
+    const nextIdentity = s.status === 'authenticated' ? `user:${s.user.id}` : 'anon'
+    const currentIdentity = state.owner !== null ? `user:${state.owner}` : establishedIdentity
+    if (nextIdentity === currentIdentity) {
+      return
+    }
+
+    resetBoundary({
+      established: nextIdentity,
+      reason: `identity boundary switch (${currentIdentity} -> ${nextIdentity}): cleared records, outbox, and in-flight work`,
+      clearLoading: s.status !== 'authenticated',
+      markReady: true,
+      persistState: true,
+      clearData: { owner: s.status === 'authenticated' ? s.user.id : null },
+    })
+
+    if (s.status === 'authenticated') {
+      loading = doLoad(s)
+    }
+  }
+
   // ---- events from the page ---------------------------------------------------------------------
 
   function attach(): void {
     if (detach) return
+    let detachSession: (() => void) | null = null
+    if (deps.subscribeSession) {
+      detachSession = deps.subscribeSession(onSessionChange)
+    }
     const target = deps.target === undefined ? (typeof window !== 'undefined' ? window : null) : deps.target
-    if (!target) return
+    if (!target) {
+      if (detachSession) {
+        detach = () => {
+          detachSession?.()
+          detachSession = null
+        }
+      }
+      return
+    }
     const onOnline = (): void => {
       if (state.outbox.length) void flush({ force: true })
     }
@@ -734,15 +927,23 @@ export function createProgressStore(deps: ProgressStoreDeps): ProgressStore {
     const onStorage = (e: Event): void => {
       const k = (e as Partial<StorageEvent>).key
       if (k !== undefined && k !== null && k !== key) return
+      const prevOwner = state.owner
       if (refresh()) {
-        emit({ kind: 'reset' })
-        notifySync()
+        if (state.owner !== prevOwner) {
+          handleCrossTabOwnerChange()
+        } else {
+          emit({ kind: 'reset' })
+          notifySync()
+          scheduleRetry()
+        }
       }
     }
     target.addEventListener('online', onOnline)
     target.addEventListener('visibilitychange', onVisible)
     target.addEventListener('storage', onStorage)
     detach = () => {
+      detachSession?.()
+      detachSession = null
       target.removeEventListener('online', onOnline)
       target.removeEventListener('visibilitychange', onVisible)
       target.removeEventListener('storage', onStorage)
@@ -752,11 +953,13 @@ export function createProgressStore(deps: ProgressStoreDeps): ProgressStore {
   // ---- misc -------------------------------------------------------------------------------------
 
   function reset(): void {
-    state = emptyState()
-    persist()
-    note('state reset')
-    emit({ kind: 'reset' })
-    notifySync()
+    resetBoundary({
+      established: 'none',
+      reason: 'state reset',
+      clearLoading: true,
+      persistState: true,
+      clearData: 'all',
+    })
   }
 
   function snapshot(): ProgressSnapshot {
@@ -775,10 +978,9 @@ export function createProgressStore(deps: ProgressStoreDeps): ProgressStore {
   }
 
   function destroy(): void {
+    invalidatePendingWork({ clearLoading: true })
     detach?.()
     detach = null
-    if (timer !== null) scheduler.clear(timer)
-    timer = null
     listeners.clear()
     syncListeners.clear()
   }
@@ -901,6 +1103,7 @@ const delegatingBackend: ProgressBackend = {
 export const progressStore: ProgressStore = createProgressStore({
   backend: delegatingBackend,
   getSession: () => getSession(),
+  subscribeSession: (listener) => subscribeSession(listener),
   loadSeed: () => import('./seed.data.mts').then((m) => m.data),
 })
 

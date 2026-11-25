@@ -28,10 +28,16 @@ import {
   type PreviewConfirmResponse,
 } from '../components/ai/conceptAuthorClient'
 
-const props = defineProps<{
-  isDevMode: boolean
-  csrfToken: string
-}>()
+const props = withDefaults(
+  defineProps<{
+    isDevMode: boolean
+    csrfToken: string
+    canWrite?: boolean
+  }>(),
+  {
+    canWrite: false,
+  },
+)
 
 const { t } = useT()
 
@@ -284,8 +290,8 @@ async function handleExecuteDelete(): Promise<void> {
       </div>
     </div>
 
-    <p v-if="!isDevMode" class="db-muted" data-concepts-readonly-notice>
-      {{ t('dashboard.conceptsDevOnlyHint') }}
+    <p v-if="!isDevMode" class="db-muted" :data-concepts-readonly-notice="!canWrite ? '' : undefined" :data-concepts-online-notice="canWrite ? '' : undefined">
+      {{ canWrite ? t('dsh.fig.conceptsOnlineAuthorHint') : t('dashboard.conceptsDevOnlyHint') }}
     </p>
 
     <p v-if="loading && items.length === 0" class="db-muted">{{ t('dashboard.loading') }}</p>

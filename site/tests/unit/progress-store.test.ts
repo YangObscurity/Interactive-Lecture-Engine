@@ -3,6 +3,7 @@ import { BACKOFF_MS, OUTBOX_LOCK_NAME, backoffMs, createProgressStore, parsePers
 import type { ProgressStore, ProgressStoreDeps } from '../../docs/.vitepress/theme/progress/progressStore'
 import type { SessionState } from '../../docs/.vitepress/theme/auth/session'
 import type { SeedData } from '../../docs/.vitepress/theme/progress/seed'
+import type { FetchAllResult, SendResult } from '../../docs/.vitepress/theme/api/progress'
 import type { OutboxOp, ProgressEvent, ProgressRecord, ProgressStatus } from '../../docs/.vitepress/theme/progress/types'
 import { STORAGE_KEYS } from '../../docs/.vitepress/site.config.mts'
 import { groupOfDir } from '../../docs/.vitepress/theme/progress/types'
@@ -19,6 +20,8 @@ interface Rig {
   locks: FakeLocks
   target: EventTarget
   events: ProgressEvent[]
+  publishSession: (s: SessionState) => void
+  sessionListeners: Set<(s: SessionState) => void>
 }
 
 const created: ProgressStore[] = []
@@ -33,6 +36,18 @@ function rig(overrides: Omit<Partial<ProgressStoreDeps>, 'storage'> & { storage?
   const scheduler = new FakeScheduler()
   const locks = new FakeLocks()
   const target = new EventTarget()
+  const sessionListeners = new Set<(s: SessionState) => void>()
+  const subscribeSession =
+    overrides.subscribeSession ??
+    ((listener: (s: SessionState) => void) => {
+      sessionListeners.add(listener)
+      return () => {
+        sessionListeners.delete(listener)
+      }
+    })
+  const publishSession = (s: SessionState): void => {
+    for (const l of [...sessionListeners]) l(s)
+  }
   let n = 0
   const store = createProgressStore({
     backend,
@@ -41,6 +56,7 @@ function rig(overrides: Omit<Partial<ProgressStoreDeps>, 'storage'> & { storage?
     locks,
     scheduler,
     target,
+    subscribeSession,
     newId: () => `id-${++n}`,
     isVisible: () => true,
     ...overrides,
@@ -48,7 +64,7 @@ function rig(overrides: Omit<Partial<ProgressStoreDeps>, 'storage'> & { storage?
   created.push(store)
   const events: ProgressEvent[] = []
   store.subscribe((e) => events.push(e))
-  return { store, storage, clock, scheduler, backend, locks, target, events }
+  return { store, storage, clock, scheduler, backend, locks, target, events, publishSession, sessionListeners }
 }
 
 /** Write a persisted state; V1 migration is marked done unless a test says otherwise. */
@@ -570,6 +586,238 @@ describe('reader identity', () => {
     await r.store.load()
     expect(r.store.statusOf('g01-l01')).toBe('completed')
   })
+
+  it('SPA logout transition (alice -> anonymous/server) clears records, extra seed, outbox, aborts requests, cancels timers, and ignores delayed responses', async () => {
+    const r = rig({ backend: new ScriptedBackend('rest'), getSession: session(alice) })
+    await r.store.load()
+
+    // Alice has a server record and an extra seed
+    r.store.extendSeed({ version: 'v-tier', records: [rec('g09-l01', 'completed')] })
+    expect(r.store.statusOf('g09-l01')).toBe('completed')
+
+    // Set up in-flight send with a deferred promise
+    const delayedSend = deferred<SendResult>()
+    r.backend.sendResults.push(delayedSend.promise)
+    r.store.set('g01-l01', 'completed')
+    await settle(5)
+    expect(r.backend.lastSendSignal).toBeDefined()
+    expect(r.backend.lastSendSignal?.aborted).toBe(false)
+    expect(r.store.pending()).toBe(1)
+
+    // Arm a retry timer via a pending op in storage
+    r.storage.map.set(
+      KEY,
+      JSON.stringify({
+        schema: 1,
+        owner: 'alice',
+        server: serverOf(rec('g01-l02', 'completed')),
+        outbox: [op('g01-l03', 'in_progress', r.clock.t, { nextAt: r.clock.t + 60_000 })],
+        seedVersion: null,
+        migratedV1: true,
+        skewMs: 0,
+      }),
+    )
+    r.target.dispatchEvent(Object.assign(new Event('storage'), { key: KEY }))
+    expect(r.scheduler.timers.length).toBeGreaterThan(0)
+
+    // Alice logs out via subscribeSession
+    r.events.length = 0
+    r.publishSession({ status: 'anonymous', source: 'server' })
+
+    // State is immediately cleared
+    expect(r.store.snapshot().owner).toBeNull()
+    expect(r.store.statusOf('g01-l01')).toBe('not_started')
+    expect(r.store.statusOf('g01-l02')).toBe('not_started')
+    expect(r.store.statusOf('g01-l03')).toBe('not_started')
+    expect(r.store.statusOf('g09-l01')).toBe('not_started')
+    expect(r.store.pending()).toBe(0)
+    expect(r.scheduler.timers).toHaveLength(0)
+    expect(r.backend.lastSendSignal?.aborted).toBe(true)
+    expect((stored(r.storage) as { owner: unknown }).owner).toBeNull()
+
+    // Delayed send now resolves late
+    delayedSend.resolve({ ok: true, records: [rec('g01-l01', 'completed')], serverDate: null })
+    await settle(10)
+
+    // Late resolution must NOT update store, mutate state, or trigger rejected events
+    expect(r.store.statusOf('g01-l01')).toBe('not_started')
+    expect(r.store.pending()).toBe(0)
+    expect(r.events.filter((e) => e.kind === 'rejected')).toHaveLength(0)
+  })
+
+  it('direct user switch (alice -> bob without reload) aborts alice requests, clears outbox/records, sets bob owner, reloads bob records, and preserves bob optimistic writes', async () => {
+    const r = rig({ backend: new ScriptedBackend('rest'), getSession: session(alice) })
+    await r.store.load()
+
+    // Alice has in-flight send
+    const delayedSendAlice = deferred<SendResult>()
+    r.backend.sendResults.push(delayedSendAlice.promise)
+    r.store.set('g01-l01', 'completed')
+    await settle(5)
+    expect(r.backend.lastSendSignal?.aborted).toBe(false)
+    const sentBeforeBobCount = r.backend.sent.length
+
+    // Bob's server records will return g01-l02 completed
+    r.backend.fetchAllResult = {
+      ok: true,
+      records: [rec('g01-l02', 'completed')],
+      serverDate: null,
+      unfilteredGet: true,
+    }
+
+    // Switch to bob
+    r.publishSession(bob)
+
+    // Alice's send signal aborted
+    expect(r.backend.lastSendSignal?.aborted).toBe(true)
+    expect(r.store.snapshot().owner).toBe('bob')
+    expect(r.store.statusOf('g01-l01')).toBe('not_started')
+
+    // While bob's reload is in-flight, bob makes an optimistic write
+    r.store.set('g01-l03', 'completed')
+    expect(r.store.statusOf('g01-l03')).toBe('completed')
+
+    // Let bob's reload and flush finish
+    await settle(10)
+
+    // Alice's delayed send resolves late
+    delayedSendAlice.resolve({ ok: true, records: [rec('g01-l01', 'completed')], serverDate: null })
+    await settle(5)
+
+    // Bob sees his server record + his own optimistic write, never Alice's
+    expect(r.store.statusOf('g01-l01')).toBe('not_started')
+    expect(r.store.statusOf('g01-l02')).toBe('completed')
+    expect(r.store.statusOf('g01-l03')).toBe('completed')
+    expect(r.store.snapshot().owner).toBe('bob')
+
+    // Ensure Alice's write was never sent under Bob's session
+    for (const sentBatch of r.backend.sent.slice(sentBeforeBobCount)) {
+      for (const op of sentBatch) {
+        expect(op.lectureId).not.toBe('g01-l01')
+      }
+    }
+  })
+
+  it('non-decisive session notifications and duplicate notifications for the same signed-in user do not abort or clear writes', async () => {
+    const r = rig({ backend: new ScriptedBackend('rest'), getSession: session(alice) })
+    await r.store.load()
+
+    // Alice has a pending write and armed timer
+    r.backend.sendResults.push({ ok: false, error: { retryable: true } })
+    r.store.set('g01-l01', 'completed')
+    await r.store.flush()
+    expect(r.store.pending()).toBe(1)
+    expect(r.scheduler.timers.length).toBeGreaterThan(0)
+    const timerCount = r.scheduler.timers.length
+
+    // Non-decisive notifications: unknown, unavailable, anonymous/none
+    r.publishSession({ status: 'unknown' })
+    expect(r.store.pending()).toBe(1)
+    expect(r.store.statusOf('g01-l01')).toBe('completed')
+    expect(r.scheduler.timers.length).toBe(timerCount)
+
+    r.publishSession({ status: 'unavailable', reason: 'network' })
+    expect(r.store.pending()).toBe(1)
+    expect(r.store.statusOf('g01-l01')).toBe('completed')
+    expect(r.scheduler.timers.length).toBe(timerCount)
+
+    r.publishSession({ status: 'anonymous', source: 'none' })
+    expect(r.store.pending()).toBe(1)
+    expect(r.store.statusOf('g01-l01')).toBe('completed')
+    expect(r.scheduler.timers.length).toBe(timerCount)
+
+    // Duplicate notification for alice
+    r.publishSession(alice)
+    expect(r.store.pending()).toBe(1)
+    expect(r.store.statusOf('g01-l01')).toBe('completed')
+    expect(r.scheduler.timers.length).toBe(timerCount)
+  })
+
+  it('reset cancels pending retry timers and aborts in-flight requests so late network callbacks are ignored', async () => {
+    const r = rig({ backend: new ScriptedBackend('rest') })
+    await r.store.load()
+
+    // 1. Arm a retry timer via retryable send
+    r.backend.sendResults.push({ ok: false, error: { retryable: true } })
+    r.store.set('g01-l02', 'completed')
+    await r.store.flush()
+    expect(r.scheduler.timers.length).toBeGreaterThan(0)
+
+    // 2. Start an in-flight send for a new lecture that hangs
+    const delayedSend = deferred<SendResult>()
+    r.backend.sendResults.push(delayedSend.promise)
+    r.store.set('g01-l01', 'completed')
+    await settle(5)
+    expect(r.backend.lastSendSignal?.aborted).toBe(false)
+    expect(r.scheduler.timers.length).toBeGreaterThan(0)
+
+    // 3. Reset
+    r.store.reset()
+
+    expect(r.backend.lastSendSignal?.aborted).toBe(true)
+    expect(r.scheduler.timers).toHaveLength(0)
+    expect(r.store.pending()).toBe(0)
+
+    // 4. Delayed network callback finishes late
+    delayedSend.resolve({ ok: true, records: [rec('g01-l01', 'completed')], serverDate: null })
+    await settle(5)
+    expect(r.store.statusOf('g01-l01')).toBe('not_started')
+    expect(r.store.statusOf('g01-l02')).toBe('not_started')
+  })
+
+  it('aborts in-flight fetchAll on identity switch and ignores late server response from prior account', async () => {
+    let activeSession: SessionState = alice
+    const delayedAliceFetch = deferred<FetchAllResult>()
+    const r = rig({
+      backend: new ScriptedBackend('rest'),
+      getSession: async () => activeSession,
+    })
+    r.backend.fetchAllResults.push(delayedAliceFetch.promise)
+
+    const initialLoad = r.store.load()
+    await settle(5)
+    expect(r.backend.lastFetchSignal?.aborted).toBe(false)
+
+    // Before Alice's fetchAll resolves, switch to Bob (Bob has g01-l09 only)
+    activeSession = bob
+    r.backend.fetchAllResults.push({
+      ok: true,
+      records: [rec('g01-l09', 'completed')],
+      serverDate: null,
+      unfilteredGet: true,
+    })
+    r.publishSession(bob)
+
+    expect(r.backend.fetchSignals[0]?.aborted).toBe(true)
+    await settle(5)
+
+    // Alice's delayed fetchAll resolves late with g01-l01 completed
+    delayedAliceFetch.resolve({
+      ok: true,
+      records: [rec('g01-l01', 'completed')],
+      serverDate: null,
+      unfilteredGet: true,
+    })
+    await initialLoad
+    await settle(5)
+
+    expect(r.store.snapshot().owner).toBe('bob')
+    expect(r.store.statusOf('g01-l01')).toBe('not_started')
+    expect(r.store.statusOf('g01-l09')).toBe('completed')
+
+    // Manual reload() without subscribeSession respects getSession switching cleanly without sticky latestSubSession
+    activeSession = alice
+    r.backend.fetchAllResults.push({
+      ok: true,
+      records: [rec('g01-l01', 'completed')],
+      serverDate: null,
+      unfilteredGet: true,
+    })
+    await r.store.reload()
+    expect(r.store.snapshot().owner).toBe('alice')
+    expect(r.store.statusOf('g01-l01')).toBe('completed')
+    expect(r.store.statusOf('g01-l09')).toBe('not_started')
+  })
 })
 
 describe('persistence', () => {
@@ -817,5 +1065,98 @@ describe('completedAtOf', () => {
     expect(r.store.completedAtOf('g01-l07')).toBe(r.clock.iso())
     r.store.set('g01-l07', 'in_progress')
     expect(r.store.completedAtOf('g01-l07')).toBeNull()
+  })
+})
+
+describe('concurrency and cross-tab boundaries', () => {
+  it('aborts dispatch before calling backend.send if a sync listener resets inside notifySync', async () => {
+    const r = rig()
+    await r.store.load()
+    r.store.set('g01-l01', 'completed')
+    const off = r.store.subscribeSync(() => {
+      if (r.store.syncState() === 'sending') {
+        r.store.reset()
+      }
+    })
+    await r.store.flush()
+    off()
+    expect(r.backend.sent).toHaveLength(0)
+    expect(r.store.pending()).toBe(0)
+  })
+
+  it('drops in-flight send result when another tab switched storage owner before response arrived', async () => {
+    const dSend = deferred<SendResult>()
+    const r = rig({ backend: new ScriptedBackend('rest', undefined) })
+    r.backend.fetchAllResults.push({ ok: true, records: [], serverDate: null, unfilteredGet: true })
+    await r.store.load()
+    r.publishSession({
+      status: 'authenticated',
+      user: { id: 'alice', name: 'Alice', email: null },
+      roles: ['reader'],
+      groups: [],
+      logoutUrl: null,
+    })
+    await settle(5)
+
+    r.backend.sendResults.push(dSend.promise)
+    r.store.set('g01-l01', 'completed')
+    const fl = r.store.flush()
+    await settle(5)
+
+    // Tab B writes Bob's state to storage before Tab A receives storage event
+    persisted(r.storage, {
+      owner: 'bob',
+      server: serverOf(rec('g01-l09', 'completed')),
+      outbox: [op('g01-l02', 'in_progress', r.clock.t, { nextAt: r.clock.t + 60_000 })],
+    })
+
+    dSend.resolve({
+      ok: true,
+      records: [rec('g01-l01', 'completed', { completedAt: '2026-11-25T00:00:00.000Z' })],
+      serverDate: null,
+    })
+    await fl
+
+    expect(r.store.snapshot().owner).toBe('bob')
+    expect(r.store.statusOf('g01-l01')).toBe('not_started')
+    expect(r.store.statusOf('g01-l09')).toBe('completed')
+  })
+
+  it('onStorage owner change restarts unfinished initial load and schedules retry for matching authenticated session', async () => {
+    const sessionGate = deferred<SessionState>()
+    const bob: SessionState = {
+      status: 'authenticated',
+      user: { id: 'bob', name: 'Bob', email: null },
+      roles: ['reader'],
+      groups: [],
+      logoutUrl: null,
+    }
+    const r = rig({
+      getSession: () => sessionGate.promise,
+    })
+    persisted(r.storage, { owner: 'alice' })
+    r.backend.fetchAllResults.push({ ok: true, records: [rec('g01-l09', 'completed')], serverDate: null, unfilteredGet: true })
+    r.backend.fetchAllResults.push({ ok: true, records: [rec('g01-l09', 'completed')], serverDate: null, unfilteredGet: true })
+
+    const loadP = r.store.load()
+    r.publishSession(bob)
+    await settle(5)
+    expect(r.store.isReady()).toBe(false)
+
+    // Another tab updates storage to owner bob with a delayed outbox op before first load finishes
+    persisted(r.storage, {
+      owner: 'bob',
+      outbox: [op('g01-l02', 'completed', r.clock.t, { nextAt: r.clock.t + 60_000 })],
+    })
+    r.target.dispatchEvent(Object.assign(new Event('storage'), { key: KEY }))
+
+    expect(r.scheduler.timers.length).toBeGreaterThanOrEqual(1)
+    sessionGate.resolve(bob)
+    await settle(5)
+    await r.store.load()
+    await loadP
+
+    expect(r.store.isReady()).toBe(true)
+    expect(r.store.statusOf('g01-l09')).toBe('completed')
   })
 })

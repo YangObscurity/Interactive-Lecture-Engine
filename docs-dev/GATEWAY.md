@@ -8,7 +8,7 @@ How a request reaches the site in production, which nginx location handles which
 browser
   -> nginx (TLS, WAF, limit_req, limit_conn)
        -> Authelia forward auth  (127.0.0.1:9091/api/verify, subrequest per protected location)
-       -> lecture-api            (127.0.0.1:8100)  /api/db /api/admin /api/auth/session /api/health /api/ai
+       -> lecture-api            (127.0.0.1:8100)  /api/db /api/admin /api/auth/* /api/me/* /api/health /api/ai /api/tools /api/mcp
        -> legacy Python service  (127.0.0.1:8099)  /api/progress /api/notion /api/tool   (scripts/remote_server.py)
        -> static files           (webroot)         everything else
 ```
@@ -21,8 +21,10 @@ lecture-api listens on loopback only (`HOST=127.0.0.1`, enforced at startup when
 |---|---|---|---|
 | `/internal/authelia/authz` | Authelia | internal | forward-auth subrequest, HEAD, sends `X-Original-URL` so Authelia rules see the real path |
 | `/api/db/` | 8100 | `auth_request` | progress, sessions, messages, checklists; body 512k |
-| `/api/admin/` | 8100 | `auth_request` | admin overview and health; the app checks the admin role, Authelia rules also restrict the path to admin groups |
+| `/api/admin/` | 8100 | `auth_request` | admin/author Dashboard APIs; body 256k; `requireAdminOrAuthor` opens content endpoints (`overview`, `checks`, `figures`, `texts`, `companion`) to `author`/`admin` and `requireStrictAdmin` restricts system/site routes to `admin`; exported Authelia rules split those routes identically |
 | `= /api/auth/session` | 8100 | `auth_request` | session discovery. On a site with public content the Authelia rule is `bypass`, so anonymous visitors get 200 with no identity headers and the app answers the anonymous shape. On a login-only site (production) it stays behind login like every page: nobody reaches the front end without a session |
+| `/api/auth/` | 8100 | `auth_request` | auth lifecycle (`/status`, `/methods`, `/login`, `/logout`, `/bootstrap`, `/methods/passkey/*`), body 64k; exact `= /api/auth/session` matches first in nginx |
+| `/api/me/` | 8100 | `auth_request` | personal self-service APIs (`overview`, `export`, `credentials`, `passkeys`, `sessions`) for any signed-in `reader`/`author`/`admin`, body 64k |
 | `= /api/health` | 8100 | off | public; all identity headers blanked |
 | `/api/ai/` | 8100 | `auth_request` | chat (SSE): `proxy_buffering off`, `X-Accel-Buffering: no`, `proxy_read_timeout 330s`, body 64k, `limit_req` zone `lecture_ai` on top of the site zone `docslimit` |
 | `= /api/ai/upload` | 8100 | `auth_request` | same, body 20m (the app also caps at `AI_UPLOAD_MAX_BYTES`, default 20 MB) |
@@ -52,17 +54,19 @@ Generate them from the site's access config; do not hand-write:
 
 ```bash
 cd site
-npm run auth:export authelia -- --domain docs.example.com --admin-groups admins --factor two_factor > /tmp/rules.yml
+npm run auth:export authelia -- --domain docs.example.com --admin-groups admins --author-groups authors --factor two_factor > /tmp/rules.yml
 npm run auth:export -- --format nginx > /tmp/nginx-snippet.conf   # embeds the template sections
 ```
 
 `--domain` is required (Authelia rejects rules without `domain`). `--factor` sets the level of every non-public rule; the default is `two_factor`, which is what production uses (`one_factor` only if the site really wants password-only logins). Output order:
 
 1. `bypass`: `/api/health`, `/api/tool/`, `/api/mcp` (`^/api/mcp$`), plus `/api/auth/session` when the site has public content.
-2. admin only (one subject per line so groups are OR): `/dashboard` (and localized), `/api/admin/`, `/api/progress/`, `/api/notion/`, **followed by a `deny` rule for the same resources**.
-3. restricted group tiers (each followed by its own `deny`), restricted authenticated tiers, explicit public groups.
-4. `/api/db/`, `/api/ai/`, `/api/tools/`: any logged-in user.
-5. catch-all for the site default tier.
+2. author + admin content APIs (`/api/admin/overview`, `/api/admin/checks/*`, `/figures/*`, `/texts/*`, `/companion/*`, followed by a `deny` rule for the same resources).
+3. admin only (one subject per line so groups are OR): remaining `/api/admin/*`, `/api/progress/`, `/api/notion/`, **followed by a `deny` rule for the same resources**.
+4. any authenticated user (`reader`, `author`, `admin`): `/dashboard` (and localized `/dashboard`), `/api/me/*`, `/api/auth/*`.
+5. restricted group tiers (each followed by its own `deny`), restricted authenticated tiers, explicit public groups.
+6. `/api/db/`, `/api/ai/`, `/api/tools/`: any logged-in user.
+7. catch-all for the site default tier.
 
 Why the `deny` rules: Authelia applies the first rule whose criteria all match, and `subject` is one of the criteria. A user outside the subject does not match the admin rule and falls through to the next one; without the `deny` the catch-all would let every logged-in user into `/api/progress/` (the legacy service has no check of its own). Check a real account with `authelia access-control check-policy --config <file> --url https://<site>/api/progress/health --username <non-admin> --groups <their groups>`: the result must be `deny`.
 
@@ -106,3 +110,26 @@ Today nginx sends `/api/ai/chat` and `/api/ai/upload` straight to `api.dify.ai` 
 | lecture-api writes (per user) | 120/min on `/api/db/*`, `/api/progress/*` |
 
 The per-user counters are in memory (single process, reset on restart). With `AUTH_ADAPTER=none` all visitors share the user `anonymous`: AI routes answer 403 unless `AI_ALLOW_ANONYMOUS=true`, and the write limit is skipped.
+
+## 8. Hybrid Adapter, WebAuthn & Role-Scoped Routes (WP-2 & WP-4)
+
+When deploying with `AUTH_ADAPTER=hybrid`:
+
+### 8.1 Dual-Authentication Flow
+1. **Primary Gateway Pass-Through**: `lecture-api` inspects `Remote-User`, `Remote-Groups`, `Remote-Email`, and `Remote-Name` supplied by the reverse proxy (e.g. Authelia, Authentik). If present, the user is authenticated directly (`authSource: 'gateway'`) and roles are mapped via `AUTH_ROLE_MAP`.
+2. **Fallback Local Session**: When gateway headers are absent or empty (e.g. direct access or standalone deployment), `lecture-api` falls back to its local cookie session store (`authSource: 'cookie'`), allowing login via local password or WebAuthn Passkey.
+
+### 8.2 Session Lifetimes & Remember Me
+- `SESSION_TTL_HOURS`: Governs server session expiration (default: 12 hours).
+- **Persistent Cookie vs Session Cookie**:
+  - When `rememberMe: true` is passed to `/api/auth/login` or Passkey verification, `lecture-api` issues a persistent cookie with `Max-Age=2592000` (30 days).
+  - Otherwise, an ephemeral session cookie is issued without `Max-Age`, clearing when the browser terminates.
+
+### 8.3 WebAuthn Configuration
+- `WEBAUTHN_RP_ID`: Relying party domain identifier (e.g. `docs.example.com` or `localhost`).
+- `WEBAUTHN_RP_NAME`: Display name of the application (e.g. `Lecture Platform`).
+- `WEBAUTHN_ORIGIN`: Exact origin URL expected for WebAuthn ceremony validation (e.g. `https://docs.example.com`).
+
+### 8.4 Role-Scoped Route Separation
+- `/api/me/*`: Reader self-service endpoints (reading KPIs, lecture progress export, password changes, WebAuthn Passkey registration/deletion, session listing and revocation). Accessible to any authenticated user (`reader`, `author`, `admin`).
+- `/api/admin/*`: Guarded at the router boundary by `requireAdminOrAuthor`. Authoring endpoints (`/overview`, `/checks`, `/figures`, `/texts`, `/companion`) accept `author` or `admin`; system and site-level admin endpoints (`/health`, `/ai-tools`, `/users`, `/access`, `/look`, `/runtime`, `/logs`, `/backups`, `/db`, `/settings`) enforce `requireStrictAdmin` (`admin` role only).

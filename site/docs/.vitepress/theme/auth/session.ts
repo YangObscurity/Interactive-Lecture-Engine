@@ -98,6 +98,7 @@ export function createSessionClient(opts: SessionClientOptions): SessionClient {
 
 let siteClient: SessionClient = createSessionClient({ adapter: 'none' })
 let current: SessionState = { status: 'unknown' }
+let epoch = 0
 const listeners = new Set<(s: SessionState) => void>()
 
 /**
@@ -105,24 +106,36 @@ const listeners = new Set<(s: SessionState) => void>()
  * Call before the first `getSession()`; calling again with a different setup starts over.
  */
 export function configureSession(auth: { adapter: string; sessionEndpoint?: string }): void {
+  epoch += 1
   siteClient = createSessionClient({ adapter: auth.adapter, endpoint: auth.sessionEndpoint })
   current = { status: 'unknown' }
 }
 
 /** The session of this page load (one request, cached in memory). Never rejects. */
 export async function getSession(): Promise<SessionState> {
-  const state = await siteClient.getSession()
-  if (state !== current) {
-    current = state
-    for (const l of listeners) {
-      try {
-        l(state)
-      } catch {
-        // one broken listener must not stop the others
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const capturedEpoch = epoch
+    const capturedClient = siteClient
+    const state = await capturedClient.getSession()
+    if (epoch !== capturedEpoch || siteClient !== capturedClient) {
+      if (current.status !== 'unknown') {
+        return current
+      }
+      continue
+    }
+    if (state !== current) {
+      current = state
+      for (const l of listeners) {
+        try {
+          l(state)
+        } catch {
+          // one broken listener must not stop the others
+        }
       }
     }
+    return state
   }
-  return state
+  return current
 }
 
 /** The last session `getSession()` produced, or `{ status: 'unknown' }`. Synchronous. */
@@ -139,6 +152,26 @@ export function subscribeSession(listener: (s: SessionState) => void): () => voi
 
 /** Forget the cached answer (tests). */
 export function resetSession(): void {
+  epoch += 1
   siteClient.reset()
   current = { status: 'unknown' }
+}
+
+/** Synchronize session state pushed from another surface (e.g. Dashboard login/logout) to all listeners. */
+export function publishSession(state: SessionState): void {
+  epoch += 1
+  siteClient.reset()
+  const changed =
+    current.status !== state.status ||
+    JSON.stringify(current) !== JSON.stringify(state)
+  current = state
+  if (changed) {
+    for (const l of listeners) {
+      try {
+        l(state)
+      } catch {
+        // one broken listener must not stop the others
+      }
+    }
+  }
 }

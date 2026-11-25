@@ -130,7 +130,7 @@ export class ConcurrencyGate {
   }
 }
 
-export type LimitKind = 'rate' | 'daily' | 'concurrency' | 'upload_concurrency' | 'write_rate'
+export type LimitKind = 'rate' | 'daily' | 'concurrency' | 'upload_concurrency' | 'write_rate' | 'auth_rate'
 
 export interface LimitDecision {
   ok: boolean
@@ -215,5 +215,84 @@ export class OwnedIdTracker {
 
   has(userId: string, id: string): boolean {
     return this.byUser.get(userId)?.has(id) ?? false
+  }
+}
+
+interface FailedLoginEntry {
+  failures: number
+  blockedUntil: number
+  lastFailAt: number
+}
+
+/**
+ * Account-keyed failed login exponential backoff.
+ *
+ * Tracks failed authentication attempts by normalized username, independent of client IP.
+ * Once failures reach freeAttempts, blocks subsequent attempts with exponential cooldown
+ * (baseMs * 2^(failures - freeAttempts), capped at maxMs).
+ * Successful logins reset the counter immediately.
+ */
+export class FailedLoginBackoff {
+  private readonly entries = new Map<string, FailedLoginEntry>()
+  private readonly baseMs: number
+  private readonly maxMs: number
+  private readonly resetAfterMs: number
+  private readonly maxEntries: number
+
+  constructor(
+    private readonly freeAttempts: number,
+    private readonly now: Clock = Date.now,
+    options?: { baseMs?: number; maxMs?: number; resetAfterMs?: number; maxEntries?: number },
+  ) {
+    this.baseMs = options?.baseMs ?? 1000
+    this.maxMs = options?.maxMs ?? 30_000
+    this.resetAfterMs = options?.resetAfterMs ?? 15 * 60_000
+    this.maxEntries = options?.maxEntries ?? 5000
+  }
+
+  check(key: string): LimitDecision {
+    const t = this.now()
+    const entry = this.entries.get(key)
+    if (!entry) return { ok: true, retryAfterSec: 0 }
+    if (t - entry.lastFailAt >= this.resetAfterMs) {
+      this.entries.delete(key)
+      return { ok: true, retryAfterSec: 0 }
+    }
+    if (t < entry.blockedUntil) {
+      return {
+        ok: false,
+        kind: 'auth_rate',
+        retryAfterSec: Math.max(1, Math.ceil((entry.blockedUntil - t) / 1000)),
+      }
+    }
+    return { ok: true, retryAfterSec: 0 }
+  }
+
+  recordFailure(key: string): void {
+    const t = this.now()
+    let entry = this.entries.get(key)
+    if (entry && t - entry.lastFailAt >= this.resetAfterMs) {
+      this.entries.delete(key)
+      entry = undefined
+    }
+    if (!entry) {
+      if (this.entries.size >= this.maxEntries) {
+        const oldest = this.entries.keys().next().value
+        if (oldest !== undefined) this.entries.delete(oldest)
+      }
+      entry = { failures: 0, blockedUntil: 0, lastFailAt: t }
+      this.entries.set(key, entry)
+    }
+    entry.failures += 1
+    entry.lastFailAt = t
+    if (entry.failures >= this.freeAttempts) {
+      const exponent = Math.min(10, entry.failures - this.freeAttempts)
+      const delay = Math.min(this.maxMs, this.baseMs * 2 ** exponent)
+      entry.blockedUntil = t + delay
+    }
+  }
+
+  reset(key: string): void {
+    this.entries.delete(key)
   }
 }

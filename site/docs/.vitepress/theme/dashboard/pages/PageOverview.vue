@@ -1,19 +1,18 @@
 <script setup lang="ts">
 /**
- * PageOverview.vue — 概览: key figures, the to-do list (each item with its next step), build and deployment (last build,
- * content commit, deployment: prototype v3.4), every course group expandable to the check state of each lecture (tiles in
- * the reader skin, a table with group / lectures / checks / access / reader progress in the datasheet skin), and the
- * recent changes of the content folder.
+ * PageOverview.vue — Overview: key figures, to-do list, build and deployment (or online runtime),
+ * course groups expandable to per-lecture checks, and recent content changes (local dev only).
  */
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useData } from 'vitepress'
 import { useT } from '../../../i18n/useT.ts'
-import type { AdminHealthResponse, AdminOverviewResponse } from '../../api/admin'
+import type { AdminHealthResponse, AdminOverviewResponse, OnlineRuntimePayload } from '../../api/admin'
 import { fetchRuntime, fetchChanges, type ChangeCommit, type DevAccessSummary, type RuntimePayload } from '../../api/devDashboard'
+import { dashboardClient } from '../dashboardClient'
 import DbHead from '../DbHead.vue'
 import DbUnavailable from '../DbUnavailable.vue'
 import OverviewGroupDetail from './OverviewGroupDetail.vue'
-import { checkState, dashboardState, ensureCheckRun, isReadOnly, runChecks, type DashboardPageId } from '../useDashboard'
+import { canAccessPage, checkState, dashboardState, ensureCheckRun, runChecks, type DashboardPageId } from '../useDashboard'
 import { groupIssueCounts, shortDateTime, todoFromChecks, type DashGroup } from '../dashboardData'
 
 const props = defineProps<{ overview: AdminOverviewResponse | null; health: AdminHealthResponse | null; access?: DevAccessSummary | null; healthError?: string }>()
@@ -26,18 +25,21 @@ const lectures = computed(() => theme.value?.totals?.lectures ?? groups.value.re
 const charts = computed(() => theme.value?.totals?.charts ?? groups.value.reduce((s, g) => s + (g.chartCount ?? 0), 0))
 const open = ref<string | null>(null)
 const runtime = ref<RuntimePayload | null>(null)
+const onlineRuntime = ref<OnlineRuntimePayload | null>(null)
 const changes = ref<ChangeCommit[] | null>(null)
 const openChange = ref<string | null>(null)
 
-// the datasheet skin shows the groups as a table (prototype v3.4); follow the skin while the page is open
 const skin = ref('')
 let skinObserver: MutationObserver | null = null
 const asTable = computed(() => skin.value === 'datasheet')
 
+const isDev = computed(() => dashboardState.mode === 'dev')
+const canCheckOnline = computed(() => dashboardState.mode === 'online' && canAccessPage('checks'))
+const canRerunChecks = computed(() => isDev.value || canCheckOnline.value)
+
 const report = computed(() => checkState.run?.report ?? null)
 const lastBuild = computed(() => runtime.value?.processes.lastBuild ?? null)
 const latestChange = computed(() => changes.value?.[0] ?? null)
-/** Content commits newer than the last build ("8+" when every listed commit is newer); null when either is unknown. */
 const sinceBuild = computed<string | null>(() => {
   if (!changes.value || !lastBuild.value) return null
   const built = Date.parse(lastBuild.value)
@@ -55,11 +57,9 @@ const todo = computed(() => {
   if (sinceBuild.value) items.push({ k: 'half', title: t('dsh.ov.todoStale'), detail: t('dsh.ov.todoStaleDetail', { n: sinceBuild.value }), go: ['runtime', 'logs'] })
   return items
 })
-/** Online: the admin API could not be read; that is a failure item, never "everything is fine" (audit #3). */
-const adminFailed = computed(() => isReadOnly.value && !!props.healthError)
+const adminFailed = computed(() => !isDev.value && !!props.healthError)
 const todoCount = computed(() => todo.value.length + (adminFailed.value ? 1 : 0))
-/** Local: no report yet; while the first run is going the to-do list is unknown, not empty (audit #8). */
-const checksPending = computed(() => !isReadOnly.value && !report.value)
+const checksPending = computed(() => canRerunChecks.value && !report.value)
 
 function progressOf(g: DashGroup): number | null {
   const row = props.overview?.byGroup.find((r) => r.group_id === g.id)
@@ -68,22 +68,19 @@ function progressOf(g: DashGroup): number | null {
 }
 
 function badgeOf(g: DashGroup): { k: 'bad' | 'warn' | 'ok' | 'off'; text: string } {
-  if (!report.value) return { k: 'off', text: isReadOnly.value ? t('dsh.ov.checkOnlyLocal') : t('dsh.ov.checkNotRun') }
+  if (!report.value) return { k: 'off', text: !canRerunChecks.value ? t('dsh.ov.checkOnlyLocal') : t('dsh.ov.checkNotRun') }
   const c = groupIssueCounts(report.value, g.dir)
   if (c.fail) return { k: 'bad', text: t('dsh.ov.badgeFail', { n: c.fail }) }
   if (c.warn) return { k: 'warn', text: t('dsh.ov.badgeWarn', { n: c.warn }) }
   return { k: 'ok', text: t('dsh.ov.badgeOk') }
 }
 
-/** Who can read a group (local only: the access block of site.config.ts). */
 function tierOf(g: DashGroup): string | null {
   const row = props.access?.groups.find((x) => x.id === g.id)
   if (!row) return null
   return row.read === 'public' ? t('dsh.ac.public') : row.read === 'authenticated' ? t('dsh.ac.login') : t('dsh.ac.acl')
 }
-/** `11-21 16:02` (the prototype's short time; one formatter for the whole Dashboard). */
 const shortTime = (iso: string): string => shortDateTime(iso)
-/** The common folder of a commit's files (`graph/`), or the file itself when there is one. */
 function whereOf(files: readonly string[]): string {
   if (!files.length) return '—'
   if (files.length === 1) return files[0] as string
@@ -112,6 +109,12 @@ onMounted(async () => {
     void ensureCheckRun()
     runtime.value = await fetchRuntime()
     changes.value = await fetchChanges()
+  } else if (dashboardState.mode === 'online') {
+    if (canAccessPage('checks')) void ensureCheckRun()
+    if (dashboardState.canAccessAdmin) {
+      const rt = await dashboardClient.fetchRuntime()
+      if (rt.ok && rt.onlineRuntime) onlineRuntime.value = rt.onlineRuntime
+    }
   }
 })
 onBeforeUnmount(() => skinObserver?.disconnect())
@@ -156,14 +159,14 @@ onBeforeUnmount(() => skinObserver?.disconnect())
             </div>
           </div>
         </div>
-        <div v-if="checksPending" class="db-empty" :data-overview-todo-running="checkState.running ? '1' : undefined" data-overview-todo-pending>
+        <div v-if="checksPending && !adminFailed" class="db-empty" :data-overview-todo-running="checkState.running ? '1' : undefined" data-overview-todo-pending>
           <span><span class="dm" data-k="off" aria-hidden="true"></span>{{ checkState.running ? t('dsh.ov.todoRunning') : checkState.error ? t('dsh.chk.runFailed') : t('dsh.chk.notRun') }}</span>
         </div>
         <div v-else-if="!todoCount" class="db-empty">
           <b>{{ t('dsh.ov.todoNone') }}</b>
-          <span>{{ isReadOnly ? t('dsh.ov.todoNoneOnline') : t('dsh.ov.todoNoneLocal') }}</span>
+          <span>{{ !isDev ? t('dsh.ov.todoNoneOnline') : t('dsh.ov.todoNoneLocal') }}</span>
         </div>
-        <div v-if="!isReadOnly" class="db-pbody db-sep">
+        <div v-if="canRerunChecks" class="db-pbody db-sep">
           <button type="button" class="db-btn sm" :disabled="checkState.running" data-overview-rerun @click="runChecks()">{{ t('dsh.chk.rerunAll') }}</button>
         </div>
       </section>
@@ -173,24 +176,30 @@ onBeforeUnmount(() => skinObserver?.disconnect())
         <div class="db-pbody">
           <dl class="db-kv">
             <dt>{{ t('dsh.ov.lastBuild') }}</dt>
-            <dd data-overview-build-row="build">{{ lastBuild ? shortTime(lastBuild) : isReadOnly ? t('dsh.ov.onlyLocal') : t('dsh.ov.noBuild') }}</dd>
+            <dd data-overview-build-row="build">{{ lastBuild ? shortTime(lastBuild) : !isDev ? t('dsh.ov.onlyLocal') : t('dsh.ov.noBuild') }}</dd>
             <dt>{{ t('dsh.ov.contentCommit') }}</dt>
             <dd data-overview-build-row="commit">
               <template v-if="latestChange">
                 <code>{{ latestChange.short }}</code>{{ t('dsh.ov.commitAt', { time: shortTime(latestChange.date) }) }}<span v-if="sinceBuild" class="db-stat"><span class="dm" data-k="half" aria-hidden="true"></span>{{ t('dsh.ov.commitBehind', { n: sinceBuild }) }}</span><template v-else-if="sinceBuild === ''">{{ t('dsh.ov.commitInBuild') }}</template>
               </template>
-              <template v-else>{{ isReadOnly ? t('dsh.ov.onlyLocal') : changes === null ? t('dsh.common.loading') : t('dsh.ov.noCommit') }}</template>
+              <template v-else>{{ !isDev ? t('dsh.ov.onlyLocal') : changes === null ? t('dsh.common.loading') : t('dsh.ov.noCommit') }}</template>
             </dd>
             <dt>{{ t('dsh.ov.deploy') }}</dt>
-            <dd data-overview-build-row="deploy"><span class="db-stat"><span class="dm" data-k="off" aria-hidden="true"></span>{{ t('dsh.ov.deployUnknown') }}</span></dd>
+            <dd data-overview-build-row="deploy">
+              <span v-if="onlineRuntime" class="db-stat">
+                <span class="dm" data-k="ok" aria-hidden="true"></span>
+                Node {{ onlineRuntime.nodeVersion }} · {{ onlineRuntime.authAdapter }} · {{ t('dsh.rt.uptime', { h: Math.floor(onlineRuntime.uptimeSeconds / 3600) }) }}
+              </span>
+              <span v-else class="db-stat"><span class="dm" data-k="off" aria-hidden="true"></span>{{ t('dsh.ov.deployUnknown') }}</span>
+            </dd>
           </dl>
         </div>
         <div class="db-pbody db-sep">
           <div class="db-btns">
             <button type="button" class="db-btn sm" data-overview-buildlog @click="emit('go', 'runtime', 'logs')">{{ t('dsh.ov.buildLog') }}</button>
           </div>
-          <p v-if="!isReadOnly" class="db-muted">{{ t('dsh.ov.rebuildHint') }} <code>npm run build</code></p>
-          <DbUnavailable id="deploy" :what="t('dsh.ov.deployWhat')" :why="t('dsh.ov.deployWhy')" />
+          <p v-if="isDev" class="db-muted">{{ t('dsh.ov.rebuildHint') }} <code>npm run build</code></p>
+          <DbUnavailable v-if="!onlineRuntime" id="deploy" :what="t('dsh.ov.deployWhat')" :why="t('dsh.ov.deployWhy')" />
         </div>
       </section>
     </div>
@@ -234,14 +243,14 @@ onBeforeUnmount(() => skinObserver?.disconnect())
           <OverviewGroupDetail v-if="open === g.id" :group="g" :report="report" @go="(p, tab) => emit('go', p, tab)" />
         </li>
       </ul>
-      <div v-if="isReadOnly" class="db-pbody db-sep">
+      <div v-if="!isDev && !report" class="db-pbody db-sep">
         <DbUnavailable id="group-check" :what="t('dsh.ov.groupCheckWhat')" :why="t('dsh.ov.groupCheckWhy')" />
       </div>
     </section>
 
     <section class="db-panel" data-overview-changes>
       <header><h3>{{ t('dsh.ov.changesTitle') }}</h3><span class="db-hm">{{ t('dsh.ov.changesHint') }}</span></header>
-      <DbUnavailable v-if="isReadOnly" id="changes" :what="t('dsh.ov.changesTitle')" :why="t('dsh.ov.changesOnlineWhy')" />
+      <DbUnavailable v-if="!isDev" id="changes" :what="t('dsh.ov.changesTitle')" :why="t('dsh.ov.changesOnlineWhy')" />
       <div v-else-if="changes && changes.length" class="db-tw">
         <table class="db-t">
           <thead><tr><th>{{ t('dsh.common.time') }}</th><th>{{ t('dsh.ov.changeWhat') }}</th><th>{{ t('dsh.ov.changeWhere') }}</th><th></th></tr></thead>

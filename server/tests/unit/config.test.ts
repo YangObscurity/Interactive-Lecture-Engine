@@ -42,13 +42,13 @@ afterEach(() => {
 })
 
 describe('CONFIG_SCHEMA invariants', () => {
-  it('defines all 42 settings with unique names, Chinese descriptions, and safe secret defaults', () => {
-    expect(CONFIG_SCHEMA).toHaveLength(42)
+  it('defines all 51 settings with unique names, Chinese descriptions, and safe secret defaults', () => {
+    expect(CONFIG_SCHEMA).toHaveLength(51)
 
     const names = new Set(CONFIG_SCHEMA.map((s) => s.name))
     const configKeys = new Set(CONFIG_SCHEMA.map((s) => s.configKey))
-    expect(names.size).toBe(42)
-    expect(configKeys.size).toBe(42)
+    expect(names.size).toBe(51)
+    expect(configKeys.size).toBe(51)
 
     for (const spec of CONFIG_SCHEMA) {
       expect(spec.description.length).toBeGreaterThan(0)
@@ -265,6 +265,15 @@ describe('loadConfig defaults, precedence, and validation', () => {
       authGroupSeparator: ',',
       authRoleMap: {},
       logoutUrl: null,
+      authCookieName: 'lec_session',
+      authCookieSecure: 'auto',
+      sessionTtlHours: 12,
+      rememberMeDays: 30,
+      authMethodsEnabled: 'password,passkey,gateway',
+      webauthnRpId: '',
+      webauthnRpName: 'Interactive Lecture Engine',
+      webauthnOrigin: '',
+      authBootstrapToken: null,
       dbAutoMigrate: false,
       notionHealthUrl: null,
       allowNonLoopback: false,
@@ -881,5 +890,23 @@ describe('20. config:gen, config:check, and index entrypoint stub', () => {
         process.env.DATABASE_URL = prevDb
       }
     }
+  })
+
+  it('rejects contradictory AUTH_ADAPTER=trusted-header without gateway in AUTH_METHODS_ENABLED', () => {
+    expect(() =>
+      loadConfig({
+        DATABASE_URL: 'pglite:memory',
+        AUTH_ADAPTER: 'trusted-header',
+        AUTH_METHODS_ENABLED: 'password,passkey',
+      }),
+    ).toThrow(/AUTH_METHODS_ENABLED/)
+
+    expect(() =>
+      loadConfig({
+        DATABASE_URL: 'pglite:memory',
+        AUTH_ADAPTER: 'hybrid',
+        AUTH_METHODS_ENABLED: 'password,passkey',
+      }),
+    ).not.toThrow()
   })
 })

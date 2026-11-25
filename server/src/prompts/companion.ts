@@ -524,6 +524,9 @@ export interface ServerPromptStore {
   get(): CompanionPromptsFile | null
   require(): CompanionPromptsFile
   filePath(): string | null
+  reload(prompts?: CompanionPromptsFile | null): Promise<void> | void
+  setDbLoader(loader: (() => Promise<CompanionPromptsFile | null>) | null): void
+  load(): Promise<CompanionPromptsFile | null>
 }
 
 export function createServerPromptStore(
@@ -533,8 +536,25 @@ export function createServerPromptStore(
   const resolvedPath = resolveServerPromptsPath(config.aiPromptsFile, options)
   let cachedMtimeMs = -1
   let cachedPrompts: CompanionPromptsFile | null = null
+  let overridePrompts: CompanionPromptsFile | null = null
+  let dbLoader: (() => Promise<CompanionPromptsFile | null>) | null = null
+  let cacheGeneration = 0
 
   const refreshIfNeeded = (): CompanionPromptsFile | null => {
+    if (overridePrompts !== null) {
+      if (resolvedPath && existsSync(resolvedPath) && cachedMtimeMs >= 0) {
+        const stat = statSync(resolvedPath)
+        if (stat.mtimeMs > cachedMtimeMs) {
+          const loaded = loadPromptsFileFromDisk(resolvedPath)
+          overridePrompts = null
+          cachedPrompts = loaded
+          cachedMtimeMs = stat.mtimeMs
+          return loaded
+        }
+      }
+      return overridePrompts
+    }
+
     if (!resolvedPath) return null
     if (!existsSync(resolvedPath)) {
       if (config.aiPromptsFile || config.aiProvider !== 'off') {
@@ -552,16 +572,38 @@ export function createServerPromptStore(
     return loaded
   }
 
-  if (config.aiProvider !== 'off' || Boolean(config.aiPromptsFile)) {
-    refreshIfNeeded()
+  const load = async (): Promise<CompanionPromptsFile | null> => {
+    if (overridePrompts !== null) {
+      return overridePrompts
+    }
+    if (dbLoader) {
+      const generation = cacheGeneration
+      let loadedFromDb: CompanionPromptsFile | null = null
+      try {
+        loadedFromDb = await dbLoader()
+      } catch {
+        // ignore and fall back
+      }
+      if (generation !== cacheGeneration) {
+        return load()
+      }
+      if (loadedFromDb) {
+        overridePrompts = loadedFromDb
+        cachedPrompts = loadedFromDb
+        return loadedFromDb
+      }
+    }
+    return refreshIfNeeded()
   }
+
+  // Defer loading until setDbLoader() or load()/require() runs so DB-only deployments do not fail before DB hydration attaches.
 
   return {
     get() {
       return refreshIfNeeded()
     },
     require() {
-      const p = refreshIfNeeded()
+      const p = overridePrompts ?? refreshIfNeeded()
       if (!p) {
         throw new Error('AI prompts file could not be resolved; set AI_PROMPTS_FILE or place prompts/companion.json alongside the server or built site.')
       }
@@ -569,6 +611,25 @@ export function createServerPromptStore(
     },
     filePath() {
       return resolvedPath
+    },
+    setDbLoader(loader) {
+      dbLoader = loader
+    },
+    load,
+    async reload(prompts?: CompanionPromptsFile | null) {
+      cacheGeneration += 1
+      if (prompts !== undefined && prompts !== null) {
+        overridePrompts = prompts
+        cachedPrompts = prompts
+        cachedMtimeMs = resolvedPath && existsSync(resolvedPath) ? statSync(resolvedPath).mtimeMs : -1
+      } else {
+        overridePrompts = null
+        cachedMtimeMs = -1
+        cachedPrompts = null
+        if (prompts === undefined) {
+          await load()
+        }
+      }
     },
   }
 }

@@ -1,22 +1,19 @@
 <script setup lang="ts">
 /**
- * PageAccess.vue — Course groups and access tiers (prototype v3.4, spec board §14.2).
- * Shows who can read each group (content/access.json or site.config.ts), impact preview,
- * JSON diff, gateway rules diff/preview, and bulk tier editing.
- *
- * Online / demo: read-only banner with disabled/read-only controls.
- * Local author mode (writable && !demo): interactive editing with atomic save to access.json.
+ * PageAccess.vue — Course groups and access tiers.
+ * Supports local author mode (`/__lecture/api/access`) and online admin mode (`/api/admin/access`).
+ * Online saves trigger a non-blocking `rebuild_required` banner via `dashboardClient`.
  */
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useData } from 'vitepress'
 import { useT } from '../../../i18n/useT.ts'
 import type { DevDashboardStatus } from '../../api/admin'
 import type { DevAccessSummary } from '../../api/devDashboard'
-import { previewDevAccess, saveDevAccess } from '../../api/devDashboard'
+import { dashboardClient } from '../dashboardClient'
 import DbDiff from '../DbDiff.vue'
 import DbHead from '../DbHead.vue'
 import DbUnavailable from '../DbUnavailable.vue'
-import { dashboardState, isReadOnly, registerModel, say, touchModels } from '../useDashboard'
+import { canAccessPage, canWritePage, dashboardState, registerModel, say, touchModels } from '../useDashboard'
 import type { DashGroup } from '../dashboardData'
 import type { AccessConfig } from '../../../access/tiers.ts'
 
@@ -41,7 +38,10 @@ const { t } = useT()
 const { theme } = useData<{ groups?: DashGroup[] }>()
 
 const groups = computed<DashGroup[]>(() => (Array.isArray(theme.value?.groups) ? theme.value.groups : []))
-const writable = computed(() => !isReadOnly.value && !props.demo)
+const onlineAccess = ref<DevAccessSummary | null>(null)
+const onlineLoadError = ref('')
+const effectiveAccess = computed<DevAccessSummary | null>(() => onlineAccess.value ?? props.access)
+const writable = computed(() => canWritePage('access') && !props.demo && !onlineLoadError.value)
 const selectAllEl = ref<HTMLInputElement | null>(null)
 
 const TIER_CHOICES: readonly TierChoice[] = ['public', 'login', 'groups', 'admin']
@@ -112,11 +112,11 @@ const savedAutheliaRules = ref<string>(props.autheliaPreview)
 const draftAutheliaRules = ref<string>(props.autheliaPreview)
 const draftRulesNote = ref<{ code: string; detail?: string } | null>(props.rulesNote ?? null)
 
-function initFromProps(): void {
+function initFromAccess(acc: DevAccessSummary | null): void {
   const map: Record<string, ReadRule> = {}
   for (const g of groups.value) {
-    const existing = props.access?.groups.find((item) => item.id === g.id)
-    map[g.id] = existing ? existing.read : (props.access?.default ?? 'public')
+    const existing = acc?.groups.find((item) => item.id === g.id)
+    map[g.id] = existing ? existing.read : (acc?.default ?? 'public')
   }
   saved.value = JSON.parse(JSON.stringify(map)) as Record<string, ReadRule>
   draft.value = JSON.parse(JSON.stringify(map)) as Record<string, ReadRule>
@@ -125,11 +125,32 @@ function initFromProps(): void {
   draftRulesNote.value = props.rulesNote ?? null
 }
 
+function normalizeOnlineAccess(raw: Record<string, unknown>): DevAccessSummary {
+  const def = raw.default === 'authenticated' ? 'authenticated' : 'public'
+  const enf = raw.enforcement === 'gateway' ? 'gateway' : 'none'
+  const rawGroups = raw.groups && typeof raw.groups === 'object' && !Array.isArray(raw.groups)
+    ? (raw.groups as Record<string, { read?: ReadRule }>)
+    : {}
+  const list = groups.value.map((g) => {
+    const entry = rawGroups[g.id]
+    const read = entry?.read ?? def
+    return { id: g.id, read, own: Boolean(entry) }
+  })
+  return {
+    default: def,
+    enforcement: enf,
+    groups: list,
+    configFile: 'site_settings:access',
+    accessFile: { path: 'access.json', exists: true, savedAt: null },
+    rawAccess: raw,
+  }
+}
+
 watch(
-  () => [props.access, groups.value],
+  () => [effectiveAccess.value, groups.value],
   () => {
     if (Object.keys(saved.value).length === 0) {
-      initFromProps()
+      initFromAccess(effectiveAccess.value)
     }
   },
   { immediate: true },
@@ -143,21 +164,43 @@ watch(
   },
 )
 
+function preservedHiddenGroupRules(): Record<string, { read: ReadRule }> {
+  const visibleIds = new Set(groups.value.map((g) => g.id))
+  const out: Record<string, { read: ReadRule }> = {}
+  const rawGroups = (effectiveAccess.value?.rawAccess as { groups?: unknown } | undefined)?.groups
+  if (rawGroups && typeof rawGroups === 'object' && !Array.isArray(rawGroups)) {
+    for (const [id, entry] of Object.entries(rawGroups as Record<string, { read?: ReadRule }>)) {
+      if (!visibleIds.has(id) && entry && entry.read !== undefined) {
+        out[id] = { read: JSON.parse(JSON.stringify(entry.read)) as ReadRule }
+      }
+    }
+  }
+  for (const item of effectiveAccess.value?.groups ?? []) {
+    if (!visibleIds.has(item.id) && !(item.id in out)) {
+      out[item.id] = { read: JSON.parse(JSON.stringify(item.read)) as ReadRule }
+    }
+  }
+  return out
+}
+
 const hasRestricted = computed(() => {
-  return Object.values(draft.value).some((r) => r !== 'public')
+  const def = effectiveAccess.value?.default ?? 'public'
+  if (def !== 'public') return true
+  if (Object.values(draft.value).some((r) => r !== 'public')) return true
+  return Object.values(preservedHiddenGroupRules()).some((rule) => rule.read !== 'public')
 })
 
 function buildConfigFrom(source: Record<string, ReadRule>): AccessConfig {
-  const def = props.access?.default ?? 'public'
-  const restricted = Object.values(source).some((r) => r !== 'public')
-  const enf = restricted ? 'gateway' : (props.access?.enforcement ?? 'none')
-  const groupRules: Record<string, { read: ReadRule }> = {}
+  const def = effectiveAccess.value?.default ?? 'public'
+  const groupRules: Record<string, { read: ReadRule }> = preservedHiddenGroupRules()
   for (const g of groups.value) {
     const r = source[g.id]
     if (r !== undefined) {
       groupRules[g.id] = { read: r }
     }
   }
+  const restricted = def !== 'public' || Object.values(groupRules).some((rule) => rule.read !== 'public')
+  const enf = restricted ? 'gateway' : (effectiveAccess.value?.enforcement ?? 'none')
   return {
     default: def,
     enforcement: enf,
@@ -184,13 +227,12 @@ const changedLecturesCount = computed(() => {
 const counts = computed(() => {
   const c = { public: 0, login: 0, acl: 0 }
   for (const g of groups.value) {
-    const r = writable.value ? draft.value[g.id] : props.access?.groups.find((x) => x.id === g.id)?.read
+    const r = writable.value ? draft.value[g.id] : effectiveAccess.value?.groups.find((x) => x.id === g.id)?.read
     c[tierKind(r)]++
   }
   return c
 })
 
-// ── Selection and Bulk Bar ──
 const selectedGroups = ref<Set<string>>(new Set())
 const selectedCount = computed(() => selectedGroups.value.size)
 const bulkTier = ref<TierChoice>('public')
@@ -232,7 +274,6 @@ function syncSelectAllBox(): void {
 
 watch(selectedCount, () => syncSelectAllBox())
 
-// ── Dropdown / Tier Picker (fixed viewport placement prevents clipping inside overflow containers) ──
 const tpOpen = ref<string | null>(null)
 const tpMenuStyle = ref<{ top?: string; bottom?: string; left: string }>({ top: '0px', left: '0px' })
 
@@ -292,7 +333,6 @@ function updateUserGroups(id: string, raw: string): void {
   touch()
 }
 
-// ── Rule preview updating ──
 let previewDebounce: ReturnType<typeof setTimeout> | null = null
 let previewSeq = 0
 function cancelPendingPreview(): void {
@@ -304,11 +344,11 @@ function cancelPendingPreview(): void {
 }
 
 function updateRulesPreview(): void {
-  if (!writable.value || !dashboardState.token) return
+  if (!writable.value || dashboardState.mode !== 'dev' || !dashboardState.token) return
   cancelPendingPreview()
   const seq = previewSeq
   previewDebounce = setTimeout(async () => {
-    const res = await previewDevAccess(dashboardState.token, buildConfigFrom(draft.value))
+    const res = await dashboardClient.previewAccess(buildConfigFrom(draft.value))
     if (seq !== previewSeq || !dirty.value) return
     if (res.ok) {
       if (res.autheliaPreview !== undefined) draftAutheliaRules.value = res.autheliaPreview
@@ -323,19 +363,19 @@ function touch(): void {
   updateRulesPreview()
 }
 
-// ── Save and Discard ──
 const saving = ref(false)
 const feedback = ref('')
 const feedbackError = ref(false)
 const showDiff = ref(false)
 
 async function save(): Promise<boolean> {
-  if (!dirty.value || !dashboardState.token) return false
+  if (!dirty.value || !writable.value) return false
+  if (dashboardState.mode === 'dev' && !dashboardState.token) return false
   saving.value = true
   cancelPendingPreview()
   try {
     const payload = buildConfigFrom(draft.value)
-    const res = await saveDevAccess(dashboardState.token, payload)
+    const res = await dashboardClient.saveAccess(payload as unknown as Record<string, unknown>)
     if (res.ok) {
       const n = changedGroups.value.length
       saved.value = JSON.parse(JSON.stringify(draft.value)) as Record<string, ReadRule>
@@ -348,16 +388,20 @@ async function save(): Promise<boolean> {
       if (res.autheliaPreviewNote !== undefined) {
         draftRulesNote.value = res.autheliaPreviewNote
       }
-      feedback.value = t('dsh.ac.savedFeedback', { n })
+      if (dashboardState.mode === 'online') {
+        onlineAccess.value = normalizeOnlineAccess(payload as unknown as Record<string, unknown>)
+      }
+      const msg = dashboardState.mode === 'online' ? t('dsh.ac.savedOnline', { n }) : t('dsh.ac.savedFeedback', { n })
+      feedback.value = msg
       feedbackError.value = false
       showDiff.value = false
-      say(t('dsh.ac.savedFeedback', { n }))
+      say(msg)
       if (res.status) emit('status', res.status)
       emit('saved', payload)
       touchModels()
       return true
     }
-    feedback.value = res.error || 'Failed to save access tiers'
+    feedback.value = res.error || t('dsh.ac.saveFailed')
     feedbackError.value = true
     return false
   } finally {
@@ -378,7 +422,7 @@ function discard(): void {
 }
 
 let unregister: (() => void) | null = null
-onMounted(() => {
+onMounted(async () => {
   unregister = registerModel('access', { page: 'access', dirty: () => dirty.value, save, discard })
 
   const onDocClick = (e: MouseEvent) => {
@@ -406,6 +450,42 @@ onMounted(() => {
     window.removeEventListener('resize', onViewportChange)
     unregister?.()
   })
+
+  if (dashboardState.mode === 'online' && canAccessPage('access')) {
+    onlineLoadError.value = ''
+    const res = await dashboardClient.fetchAccess()
+    if (res.ok && res.access) {
+      const normalized = normalizeOnlineAccess(res.access)
+      onlineAccess.value = normalized
+      initFromAccess(normalized)
+      touchModels()
+    } else if (res.ok && !res.access) {
+      const la = (theme.value as { lectureAccess?: { default?: string; enforcement?: string; tiers?: unknown[]; inlineTier?: string } } | undefined)?.lectureAccess
+      const isRestrictedInTheme = Boolean(
+        la && (
+          (la.default && la.default !== 'public') ||
+          (la.enforcement && la.enforcement !== 'none') ||
+          (Array.isArray(la.tiers) && la.tiers.length > 0) ||
+          (la.inlineTier && la.inlineTier !== 'public')
+        )
+      )
+      if (res.source === 'uninitialized_restricted' || isRestrictedInTheme) {
+        onlineLoadError.value = t('dsh.ac.uninitializedRestrictedErr')
+        feedback.value = onlineLoadError.value
+        feedbackError.value = true
+      } else {
+        const cleanDefaults = { default: 'public', enforcement: 'none', groups: {} }
+        const normalized = normalizeOnlineAccess(cleanDefaults)
+        onlineAccess.value = normalized
+        initFromAccess(normalized)
+        touchModels()
+      }
+    } else {
+      onlineLoadError.value = res.error || t('dsh.ac.loadOnlineErr')
+      feedback.value = t('dsh.ac.loadOnlineErr')
+      feedbackError.value = true
+    }
+  }
 })
 
 const copied = ref(false)
@@ -430,7 +510,7 @@ async function copyRules(): Promise<void> {
   }
 }
 
-const accessFileRelPath = computed(() => props.access?.accessFile?.path ?? props.access?.configFile ?? 'content/access.json')
+const accessFileRelPath = computed(() => effectiveAccess.value?.accessFile?.path ?? effectiveAccess.value?.configFile ?? 'content/access.json')
 </script>
 
 <template>
@@ -438,11 +518,14 @@ const accessFileRelPath = computed(() => props.access?.accessFile?.path ?? props
     <DbHead
       :title="t('dsh.nav.access')"
       :lead="t('dsh.ac.lead')"
-      :meta="access ? [[t('dsh.common.file'), access.accessFile?.exists ? access.accessFile.path : access.configFile]] : []"
+      :meta="effectiveAccess ? [[t('dsh.common.file'), effectiveAccess.accessFile?.exists ? effectiveAccess.accessFile.path : effectiveAccess.configFile]] : []"
+      :read-only="!writable"
     />
 
-    <!-- Read-only / demo banners -->
-    <div v-if="isReadOnly" class="db-banner" data-access-ro-banner>
+    <div v-if="onlineLoadError" class="db-errbox" role="alert" data-access-load-error>
+      {{ onlineLoadError }}
+    </div>
+    <div v-if="!canWritePage('access') && dashboardState.mode === 'online'" class="db-banner" data-access-ro-banner>
       <span class="db-info" aria-hidden="true"></span>
       <span>{{ t('dsh.ac.roBanner') }}</span>
     </div>
@@ -450,20 +533,22 @@ const accessFileRelPath = computed(() => props.access?.accessFile?.path ?? props
       <span class="db-info" aria-hidden="true"></span>
       <span>{{ t('dsh.ac.demoBanner') }}</span>
     </div>
+    <div v-else-if="dashboardState.mode === 'online'" class="db-banner" data-access-online-banner>
+      <span class="db-info" aria-hidden="true"></span>
+      <span>{{ t('dsh.ac.onlineWritableBanner') }}</span>
+    </div>
 
-    <!-- Figures -->
-    <div v-if="access" class="db-figs">
+    <div v-if="effectiveAccess" class="db-figs">
       <div><b>{{ counts.public }}</b><span>{{ t('dsh.ac.public') }}</span><small>{{ t('dsh.ac.publicHint') }}</small></div>
       <div><b>{{ counts.login }}</b><span>{{ t('dsh.ac.login') }}</span></div>
       <div><b>{{ counts.acl }}</b><span>{{ t('dsh.ac.acl') }}</span></div>
       <div>
-        <b>{{ hasRestricted || access.enforcement === 'gateway' ? t('dsh.ac.gatewayYes') : t('dsh.ac.gatewayNo') }}</b>
+        <b>{{ hasRestricted || effectiveAccess.enforcement === 'gateway' ? t('dsh.ac.gatewayYes') : t('dsh.ac.gatewayNo') }}</b>
         <span>{{ t('dsh.ac.enforcement') }}</span>
-        <small>{{ t('dsh.ac.defaultIs', { tier: tierText(access.default) }) }}</small>
+        <small>{{ t('dsh.ac.defaultIs', { tier: tierText(effectiveAccess.default) }) }}</small>
       </div>
     </div>
 
-    <!-- Main Table Panel -->
     <section class="db-panel" data-access-groups>
       <header>
         <h3>{{ t('dsh.ac.groupsTitle') }}</h3>
@@ -472,7 +557,6 @@ const accessFileRelPath = computed(() => props.access?.accessFile?.path ?? props
         </span>
       </header>
 
-      <!-- Bulk Action Bar -->
       <div
         v-if="writable"
         class="db-bulk"
@@ -551,7 +635,6 @@ const accessFileRelPath = computed(() => props.access?.accessFile?.path ?? props
         </div>
       </div>
 
-      <!-- Groups Table -->
       <div class="db-tw">
         <table class="db-t">
           <thead>
@@ -586,11 +669,11 @@ const accessFileRelPath = computed(() => props.access?.accessFile?.path ?? props
               <td :data-l="t('dsh.ac.colLectures')" class="n">{{ g.lectureCount ?? 0 }}</td>
               <td :data-l="t('dsh.ac.colCharts')" class="n">{{ g.chartCount ?? 0 }}</td>
               <td :data-l="t('dsh.ac.colTier')">
-                <span v-if="!props.access" class="db-muted">—</span>
+                <span v-if="!effectiveAccess" class="db-muted">—</span>
                 <span v-else-if="!writable" class="db-rov">
                   <span class="db-lock" aria-hidden="true"></span>
                   {{ tierText(draft[g.id]) }}
-                  <span v-if="!props.access.groups.find((x) => x.id === g.id)?.own" class="db-muted"> · {{ t('dsh.ac.byDefault') }}</span>
+                  <span v-if="!effectiveAccess.groups.find((x) => x.id === g.id)?.own" class="db-muted"> · {{ t('dsh.ac.byDefault') }}</span>
                 </span>
                 <div v-else class="db-tp" :data-tier-picker="g.id">
                   <button
@@ -636,7 +719,6 @@ const accessFileRelPath = computed(() => props.access?.accessFile?.path ?? props
                       <small>{{ tierDesc(k) }}</small>
                     </li>
                   </ul>
-                  <!-- If groups tier, show user groups editor input -->
                   <div v-if="tierChoiceOf(draft[g.id]) === 'groups'" class="db-ug-edit" data-ug-edit>
                     <input
                       type="text"
@@ -658,12 +740,10 @@ const accessFileRelPath = computed(() => props.access?.accessFile?.path ?? props
         </table>
       </div>
 
-      <!-- Online / Demo unavailable notice in place of edit -->
       <div v-if="!writable" class="db-pbody db-sep">
-        <DbUnavailable id="access-edit" :what="t('dsh.ac.editWhat')" :why="isReadOnly ? t('dsh.ac.editOnlineWhy') : t('dsh.ac.editWhy')" />
+        <DbUnavailable id="access-edit" :what="t('dsh.ac.editWhat')" :why="dashboardState.mode === 'online' ? t('dsh.ac.editOnlineWhy') : t('dsh.ac.editWhy')" />
       </div>
 
-      <!-- JSON Diff Section -->
       <div v-if="writable && showDiff" class="db-pbody db-sep" data-access-diff-panel>
         <DbDiff
           :before="savedJson"
@@ -673,7 +753,6 @@ const accessFileRelPath = computed(() => props.access?.accessFile?.path ?? props
         />
       </div>
 
-      <!-- Savebar -->
       <div v-if="writable" class="db-savebar" data-savebar="access">
         <span class="db-st" :class="{ 'db-err': feedbackError }" data-access-feedback>
           {{ feedback || (dirty ? t('dsh.ac.pendingChanges', { n: changedGroups.length }) : t('dsh.common.allSaved')) }}
@@ -690,7 +769,6 @@ const accessFileRelPath = computed(() => props.access?.accessFile?.path ?? props
       </div>
     </section>
 
-    <!-- Live Impact Summary Panel -->
     <section v-if="writable" class="db-panel" data-access-impact>
       <header>
         <h3>{{ t('dsh.ac.impactTitle') }}</h3>
@@ -714,7 +792,6 @@ const accessFileRelPath = computed(() => props.access?.accessFile?.path ?? props
       </div>
     </section>
 
-    <!-- Gateway Rules Section -->
     <section class="db-panel" data-access-rules>
       <header>
         <h3>{{ t('dsh.ac.rulesTitle') }}</h3>

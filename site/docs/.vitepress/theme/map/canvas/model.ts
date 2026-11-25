@@ -696,6 +696,14 @@ export function buildCanvasBoardView(input: {
   const width = skin === 'datasheet' ? DsBoard.W : R.W
   const height = skin === 'datasheet' ? DsBoard.H : R.H
 
+  const traceRoleOf = (id: string): 'locked' | 'pre' | 'post' | 'pair' | null => {
+    if (focus.lockedId === id) return 'locked'
+    if (focus.preEdges.some(([s]) => s === id)) return 'pre'
+    if (focus.postEdges.some(([, t]) => t === id)) return 'post'
+    if (focus.activeNodes.has(id)) return 'pair'
+    return null
+  }
+
   const catName = (slot: number): string => index.catNameBySlot.get(slot) || labels.uncategorised
 
   const zones: CanvasZoneBox[] =
@@ -751,6 +759,7 @@ export function buildCanvasBoardView(input: {
           locked: focus.lockedId === n.id,
           active: focus.activeNodes.has(n.id),
           match: matches.has(n.id),
+          traceRole: traceRoleOf(n.id),
           x: pos.x,
           y: pos.y,
           w: CANVAS_READER_DIM.NW,
@@ -838,6 +847,7 @@ export function buildCanvasBoardView(input: {
             locked: focus.lockedId === p.lecId,
             active: focus.activeNodes.has(p.lecId),
             match: matches.has(p.lecId),
+            traceRole: traceRoleOf(p.lecId),
             x: p.tip[0] - CANVAS_READER_DIM.NW / 2,
             y: p.tip[1] - CANVAS_READER_DIM.NH / 2,
             w: CANVAS_READER_DIM.NW,

@@ -1,10 +1,19 @@
 import type { LanguageModel } from 'ai'
 import { Hono, type MiddlewareHandler } from 'hono'
 import { bodyLimit } from 'hono/body-limit'
-import { createAuthMiddleware, type AuthResult, type WireSession, type WireSessionUser } from './auth/index.js'
+import {
+  createAuthMiddleware,
+  resetGatewayAuthSeen,
+  type AuthResult,
+  type WireSession,
+  type WireSessionUser,
+} from './auth/index.js'
+import { defaultAuthRegistry } from './auth/providers/registry.js'
 import type { AppConfig } from './config/schema.js'
+import { createDbManager, type DbManager } from './db/manager.js'
 import type { Db } from './db/types.js'
 import { handleAppError, rateLimited } from './http/errors.js'
+import { serverLogBuffer } from './http/logBuffer.js'
 import { type Clock, WriteRateLimiter } from './http/rateLimit.js'
 import { createAdminRouter } from './routes/admin/index.js'
 import { createAiRouter } from './routes/ai/index.js'
@@ -17,7 +26,11 @@ import { createReviewChecklistsRouter } from './routes/reviewChecklists.js'
 import { createSessionRouter } from './routes/session.js'
 import { createSessionsRouter } from './routes/sessions.js'
 import { createToolsRouter } from './routes/tools.js'
-import type { McpClientFactory } from './tools/index.js'
+import { createAuthRouter } from './routes/auth.js'
+import { createMeRouter } from './routes/me.js'
+import { getSetting } from './repo/siteSettings.js'
+import { normalizeAiToolsConfig, type AiToolsFileConfig, type McpClientFactory } from './tools/index.js'
+import { validateCompanionPrompts } from './prompts/companion.js'
 
 export interface AppVariables {
   auth: AuthResult
@@ -26,6 +39,12 @@ export interface AppVariables {
   userId: string | null
   user: WireSessionUser | null
   aiCall: AiCallRecord | null
+  authSource: 'none' | 'gateway' | 'cookie'
+  authMethod: string
+  sessionId: string | null
+  rememberMe: boolean
+  canAccessAdmin: boolean
+  canAccessAuthor: boolean
 }
 
 export type AppEnv = {
@@ -39,6 +58,8 @@ export interface AppOptions {
   modelFactory?: (config: AppConfig) => LanguageModel
   /** Test hook to supply an MCP client factory (e.g. InMemoryTransport) for external MCP tests. */
   mcpClientFactory?: McpClientFactory
+  /** Live hot-swappable database manager (defaults to wrapping the passed Db). */
+  dbManager?: DbManager
 }
 
 const appCloseHandlers = new WeakMap<object, () => Promise<void>>()
@@ -52,21 +73,110 @@ export async function closeAppResources(app: Hono<AppEnv>): Promise<void> {
 
 export function createApp(config: AppConfig, db: Db, options: AppOptions = {}): Hono<AppEnv> {
   const app = new Hono<AppEnv>()
+  const dbManager =
+    options.dbManager ??
+    createDbManager(db, {
+      databaseUrl: config.databaseUrl,
+      databaseUrlDirect: config.databaseUrlDirect,
+    })
+  const effectiveDb = dbManager.asDb()
   const now = options.now ?? Date.now
   const aiRuntime = createAiRuntime(config, {
     now,
     ...(options.modelFactory ? { modelFactory: options.modelFactory } : {}),
     ...(options.mcpClientFactory ? { mcpClientFactory: options.mcpClientFactory } : {}),
   })
+  aiRuntime.prompts.setDbLoader(async () => {
+    const raw = await getSetting<unknown>(effectiveDb, 'companion_prompts')
+    const v = validateCompanionPrompts(raw)
+    return v.ok ? v.value : null
+  })
+  aiRuntime.mcpManager.setDbConfigLoader(async () => {
+    const raw = await getSetting<unknown>(effectiveDb, 'ai_tools')
+    if (!raw || typeof raw !== 'object') return null
+    try {
+      const dbConfig = normalizeAiToolsConfig(raw)
+      const diskConfig = await aiRuntime.mcpManager.configStore.load()
+
+      const mergedEngineTools: AiToolsFileConfig['engineTools'] = {}
+      for (const [toolName, toolConf] of Object.entries(diskConfig.engineTools)) {
+        mergedEngineTools[toolName] = {
+          enabled: dbConfig.engineTools[toolName]?.enabled ?? toolConf.enabled,
+        }
+      }
+
+      const mergedServers = diskConfig.mcpServers.map((diskServer) => {
+        const dbServer = dbConfig.mcpServers.find((s) => s.id === diskServer.id)
+        if (!dbServer) return diskServer
+
+        const mergedTools: Record<string, { enabled: boolean }> = {}
+        for (const [toolName, toolConf] of Object.entries(diskServer.tools ?? {})) {
+          mergedTools[toolName] = {
+            enabled: dbServer.tools?.[toolName]?.enabled ?? toolConf.enabled,
+          }
+        }
+        for (const [toolName, dbTool] of Object.entries(dbServer.tools ?? {})) {
+          if (typeof dbTool?.enabled === 'boolean' && !(toolName in mergedTools)) {
+            mergedTools[toolName] = { enabled: dbTool.enabled }
+          }
+        }
+
+        return {
+          ...diskServer,
+          enabled: dbServer.enabled ?? diskServer.enabled,
+          tools: mergedTools,
+        }
+      })
+
+      return {
+        version: 1,
+        engineTools: mergedEngineTools,
+        mcpServers: mergedServers,
+      }
+    } catch {
+      return null
+    }
+  })
+  const invalidateDbDerivedCaches = async (): Promise<void> => {
+    await aiRuntime.prompts.reload(null)
+    await aiRuntime.mcpManager.applyConfigOverride(null)
+    resetGatewayAuthSeen(effectiveDb)
+  }
+  dbManager.onSwap?.(invalidateDbDerivedCaches)
   appCloseHandlers.set(app, () => aiRuntime.mcpManager.closeAll())
   const writeLimiter = new WriteRateLimiter(config.writeRatePerMinute, now)
+  const authLimiter = new WriteRateLimiter(config.writeRatePerMinute, now)
 
-  // 1. Global Date Header & Read Cache-Control (Outermost middleware)
+  // 1. Global Date Header, Read Cache-Control & Structured Audit Ring Logging (Outermost middleware)
   app.use('*', async (c, next) => {
+    const startMs = now()
     await next()
     c.header('Date', new Date().toUTCString())
     if (c.req.method === 'GET' || c.req.method === 'HEAD') {
       c.header('Cache-Control', 'no-store')
+    }
+    const status = c.res.status
+    const path = c.req.path
+    if (path.startsWith('/api/auth') || path.startsWith('/api/admin') || status >= 400) {
+      const level = status >= 500 ? 'error' : status >= 400 ? 'warn' : 'info'
+      const category = status >= 500
+        ? 'error'
+        : path.startsWith('/api/auth')
+          ? 'auth'
+          : path.startsWith('/api/admin')
+            ? 'admin'
+            : 'http'
+      serverLogBuffer.add({
+        level,
+        category,
+        message: `${c.req.method} ${path} -> ${status} (${Math.max(0, now() - startMs)}ms)`,
+        details: {
+          method: c.req.method,
+          path,
+          status,
+          userId: c.get('effectiveUserId') ?? 'anonymous',
+        },
+      })
     }
   })
 
@@ -109,8 +219,13 @@ export function createApp(config: AppConfig, db: Db, options: AppOptions = {}): 
     return standardLimitMiddleware(c, next)
   })
 
-  // 3. Auth context extraction
-  app.use('*', createAuthMiddleware(config))
+  // 3. Pin a single active database backend across auth and route handlers for each HTTP request
+  if (dbManager.runWithRequestDb) {
+    app.use('*', (_c, next) => dbManager.runWithRequestDb!(() => next()))
+  }
+
+  // 4. Auth context extraction
+  app.use('*', createAuthMiddleware(config, effectiveDb))
 
   // 4. Route Tier Access Guards
   const requireUser: MiddlewareHandler<AppEnv> = async (c, next) => {
@@ -121,13 +236,14 @@ export function createApp(config: AppConfig, db: Db, options: AppOptions = {}): 
     await next()
   }
 
-  const requireAdmin: MiddlewareHandler<AppEnv> = async (c, next) => {
+  const requireAdminOrAuthor: MiddlewareHandler<AppEnv> = async (c, next) => {
     const effectiveUserId = c.get('effectiveUserId')
     if (!effectiveUserId) {
       return c.json({ error: 'unauthenticated' }, 401)
     }
     const session = c.get('session')
-    if (!session || !session.roles.includes('admin')) {
+    const roles = session?.roles ?? []
+    if (!roles.includes('admin') && !roles.includes('author')) {
       return c.json({ error: 'forbidden' }, 403)
     }
     await next()
@@ -150,6 +266,52 @@ export function createApp(config: AppConfig, db: Db, options: AppOptions = {}): 
   }
 
   // Tier guards
+  const requireAuthenticatedMe: MiddlewareHandler<AppEnv> = async (c, next) => {
+    const effectiveUserId = c.get('effectiveUserId')
+    const authSource = c.get('authSource')
+    if (!effectiveUserId || effectiveUserId === 'anonymous' || authSource === 'none') {
+      return c.json({ error: 'unauthenticated' }, 401)
+    }
+    await next()
+  }
+
+  function isLoopbackAddress(addr: string): boolean {
+    return addr === '127.0.0.1' || addr === '::1' || addr === '::ffff:127.0.0.1'
+  }
+
+  const limitAuthWrites: MiddlewareHandler<AppEnv> = async (c, next) => {
+    const socketIp = (
+      c.env as { incoming?: { socket?: { remoteAddress?: string } } } | undefined
+    )?.incoming?.socket?.remoteAddress?.trim()
+
+    let clientIp: string | undefined
+    if (socketIp && !isLoopbackAddress(socketIp)) {
+      clientIp = socketIp
+    } else {
+      const realIp = c.req.header('x-real-ip')?.trim()
+      if (realIp) {
+        clientIp = realIp
+      } else {
+        const xff = c.req.header('x-forwarded-for')?.split(',').map((s) => s.trim()).filter(Boolean)
+        if (xff && xff.length > 0) {
+          clientIp = xff[xff.length - 1]
+        } else {
+          clientIp = socketIp
+        }
+      }
+    }
+    const ipKey = clientIp ? `auth:ip:${clientIp}` : 'auth:ip:direct'
+    const ipDecision = authLimiter.check(ipKey)
+    if (!ipDecision.ok) {
+      throw rateLimited(ipDecision.kind ?? 'auth_rate', ipDecision.retryAfterSec)
+    }
+
+    await next()
+  }
+
+  app.use('/api/auth/login', limitAuthWrites)
+  app.use('/api/auth/bootstrap', limitAuthWrites)
+  app.use('/api/auth/methods/passkey/*', limitAuthWrites)
   app.use('/api/db', requireUser)
   app.use('/api/db/*', requireUser)
   app.use('/api/progress', requireUser)
@@ -164,26 +326,34 @@ export function createApp(config: AppConfig, db: Db, options: AppOptions = {}): 
   app.use('/api/db/*', limitWrites)
   app.use('/api/progress', limitWrites)
   app.use('/api/progress/*', limitWrites)
-  app.use('/api/admin', requireAdmin)
-  app.use('/api/admin/*', requireAdmin)
+  app.use('/api/me', requireAuthenticatedMe)
+  app.use('/api/me/*', requireAuthenticatedMe)
+  app.use('/api/me', limitWrites)
+  app.use('/api/me/*', limitWrites)
+  app.use('/api/admin', requireAdminOrAuthor)
+  app.use('/api/admin/*', requireAdminOrAuthor)
 
   // 5. Mount Route Handlers
   // Tier 1: Public Routes
-  app.get('/api/health', createHealthHandler(config, db, { ai: aiRuntime.recorder, now }))
+  app.get('/api/health', createHealthHandler(config, effectiveDb, { ai: aiRuntime.recorder, now }))
   app.route('/api/auth/session', createSessionRouter())
+  app.route('/api/auth', createAuthRouter(config, effectiveDb, defaultAuthRegistry, now))
 
   // Tier 2: User Routes
-  const progressRouter = createProgressRouter(db)
+  const meRouter = createMeRouter(config, effectiveDb)
+  app.route('/api/me', meRouter)
+
+  const progressRouter = createProgressRouter(effectiveDb)
   app.route('/api/db/progress', progressRouter)
   app.route('/api/progress', progressRouter)
 
-  const sessionsRouter = createSessionsRouter(db)
+  const sessionsRouter = createSessionsRouter(effectiveDb)
   app.route('/api/db/sessions', sessionsRouter)
 
-  const messagesRouter = createMessagesRouter(db)
+  const messagesRouter = createMessagesRouter(effectiveDb)
   app.route('/api/db/messages', messagesRouter)
 
-  const reviewChecklistsRouter = createReviewChecklistsRouter(db)
+  const reviewChecklistsRouter = createReviewChecklistsRouter(effectiveDb)
   app.route('/api/db/review-checklists', reviewChecklistsRouter)
   app.route('/api/db/checklist', reviewChecklistsRouter)
 
@@ -203,7 +373,9 @@ export function createApp(config: AppConfig, db: Db, options: AppOptions = {}): 
   app.route('/api/mcp', mcpRouter)
 
   // Tier 3: Admin Routes
-  const adminRouter = createAdminRouter(config, db, aiRuntime)
+  const adminRouter = createAdminRouter(config, effectiveDb, aiRuntime, dbManager, {
+    onActiveDataMutated: invalidateDbDerivedCaches,
+  })
   app.route('/api/admin', adminRouter)
 
   // Unimplemented routes fall through

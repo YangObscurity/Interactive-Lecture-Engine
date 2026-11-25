@@ -14,6 +14,7 @@ export interface ManagedMcpServerStatus {
   enabled: boolean
   connectionState: McpConnectionState
   tools: Array<{ name: string; enabled: boolean }>
+  configuredTools?: Record<string, boolean>
 }
 
 export interface McpClientFactory {
@@ -84,7 +85,10 @@ export class ExternalMcpManager {
   private readonly createClient: McpClientFactory
   private readonly now: () => number
   private readonly entries = new Map<string, ClientEntry>()
-  private readonly inFlight = new Map<string, Promise<ClientEntry>>()
+  private readonly inFlight = new Map<string, { signature: string; promise: Promise<ClientEntry> }>()
+  private configOverride: AiToolsFileConfig | null = null
+  private dbConfigLoader: (() => Promise<AiToolsFileConfig | null>) | null = null
+  private configGeneration = 0
 
   constructor(
     config: Pick<AppConfig, 'aiToolsFile' | 'aiToolTimeoutMs'>,
@@ -108,7 +112,55 @@ export class ExternalMcpManager {
     })
   }
 
+  setDbConfigLoader(loader: (() => Promise<AiToolsFileConfig | null>) | null): void {
+    this.dbConfigLoader = loader
+  }
+
+  async applyConfigOverride(cfg: AiToolsFileConfig | null): Promise<void> {
+    this.configGeneration += 1
+    this.configOverride = cfg
+    if (!cfg) {
+      await this.closeAll()
+      return
+    }
+    const keepIds = new Set(cfg.mcpServers.map((s) => s.id))
+    for (const [id, entry] of [...this.entries.entries()]) {
+      const serverCfg = cfg.mcpServers.find((s) => s.id === id)
+      if (!keepIds.has(id) || !serverCfg?.enabled) {
+        if (entry.client) await this.closeEntry(entry)
+        if (!keepIds.has(id)) this.entries.delete(id)
+      }
+    }
+  }
+
+  async reload(): Promise<AiToolsFileConfig> {
+    await this.applyConfigOverride(null)
+    const genAfterReset = this.configGeneration
+    const nextCfg = await this.loadConfig()
+    if (this.configGeneration !== genAfterReset) {
+      return this.loadConfig()
+    }
+    await this.applyConfigOverride(nextCfg)
+    return nextCfg
+  }
+
   async loadConfig(): Promise<AiToolsFileConfig> {
+    if (this.configOverride) return this.configOverride
+    if (this.dbConfigLoader) {
+      const generation = this.configGeneration
+      try {
+        const fromDb = await this.dbConfigLoader()
+        if (generation !== this.configGeneration) {
+          return this.loadConfig()
+        }
+        if (fromDb) {
+          this.configOverride = fromDb
+          return fromDb
+        }
+      } catch {
+        // fallback to disk config if DB setting cannot be read yet
+      }
+    }
     return this.configStore.load()
   }
 
@@ -125,6 +177,8 @@ export class ExternalMcpManager {
 
   private async ensureServerEntry(server: McpServerConfig): Promise<ClientEntry> {
     if (!server.enabled) {
+      const active = this.inFlight.get(server.id)
+      if (active) await active.promise.catch(() => {})
       const existing = this.entries.get(server.id)
       if (existing?.client) await this.closeEntry(existing)
       const disabledEntry: ClientEntry = {
@@ -140,22 +194,45 @@ export class ExternalMcpManager {
 
     const headers = resolveHeadersFromEnv(server.headerEnv, this.env)
     const sig = configSignature(server, headers)
-    const existing = this.entries.get(server.id)
 
+    while (true) {
+      const active = this.inFlight.get(server.id)
+      if (!active) break
+      if (active.signature === sig) return active.promise
+      // Existing in-flight connection belongs to an older config signature; wait for it to settle before reconnecting.
+      await active.promise.catch(() => {})
+    }
+
+    const existing = this.entries.get(server.id)
     if (existing && existing.signature === sig && existing.state === 'connected' && existing.client) {
       return existing
     }
 
-    const active = this.inFlight.get(server.id)
-    if (active) return active
+    const startGen = this.configGeneration
+    const entryHolder: { signature: string; promise: Promise<ClientEntry> } = {
+      signature: sig,
+      promise: null as unknown as Promise<ClientEntry>,
+    }
 
     const task = (async (): Promise<ClientEntry> => {
       if (existing?.client) {
         await this.closeEntry(existing)
       }
+      let client: MCPClient | null = null
       try {
-        const client = await this.createClient(server, headers)
+        client = await this.createClient(server, headers)
         const rawTools = await client.tools()
+        if (startGen !== this.configGeneration || this.inFlight.get(server.id) !== entryHolder) {
+          await client.close().catch(() => {})
+          client = null
+          return {
+            signature: sig,
+            client: null,
+            state: 'disabled',
+            discoveredTools: [],
+            rawTools: {},
+          }
+        }
         const discoveredTools = Object.keys(rawTools).sort()
         const connected: ClientEntry = {
           signature: sig,
@@ -167,6 +244,9 @@ export class ExternalMcpManager {
         this.entries.set(server.id, connected)
         return connected
       } catch (err) {
+        if (client) {
+          await client.close().catch(() => {})
+        }
         const message = err instanceof Error ? err.message : 'connect_failed'
         console.warn(
           JSON.stringify({
@@ -185,14 +265,19 @@ export class ExternalMcpManager {
           rawTools: {},
           lastError: message,
         }
-        this.entries.set(server.id, failed)
+        if (startGen === this.configGeneration && this.inFlight.get(server.id) === entryHolder) {
+          this.entries.set(server.id, failed)
+        }
         return failed
       } finally {
-        this.inFlight.delete(server.id)
+        if (this.inFlight.get(server.id) === entryHolder) {
+          this.inFlight.delete(server.id)
+        }
       }
     })()
 
-    this.inFlight.set(server.id, task)
+    entryHolder.promise = task
+    this.inFlight.set(server.id, entryHolder)
     return task
   }
 
@@ -298,6 +383,7 @@ export class ExternalMcpManager {
       for (const configuredTool of Object.keys(server.tools)) {
         discoveredSet.add(configuredTool)
       }
+      const sortedToolNames = [...discoveredSet].sort()
 
       servers.push({
         id: server.id,
@@ -305,10 +391,13 @@ export class ExternalMcpManager {
         host: serverHostOf(server.url),
         enabled: server.enabled,
         connectionState: !server.enabled ? 'disabled' : (entry?.state ?? 'disconnected'),
-        tools: [...discoveredSet].sort().map((toolName) => ({
+        tools: sortedToolNames.map((toolName) => ({
           name: toolName,
           enabled: server.enabled && server.tools[toolName]?.enabled === true,
         })),
+        configuredTools: Object.fromEntries(
+          sortedToolNames.map((toolName) => [toolName, server.tools[toolName]?.enabled === true]),
+        ),
       })
     }
 

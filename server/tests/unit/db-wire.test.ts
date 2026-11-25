@@ -59,17 +59,23 @@ describe('PgDb over real Postgres TCP wire protocol (@electric-sql/pglite-socket
     expect(statusBefore.pending.map((m) => m.filename)).toEqual([
       '0001_init.sql',
       '0002_ai_checklists.sql',
+      '0003_auth_and_admin_settings.sql',
     ])
 
     // Apply migrations over real TCP wire protocol using withSession + pg_advisory_lock
     const logs: string[] = []
     const migRes = await runMigrations(db, { log: (m) => logs.push(m) })
-    expect(migRes.applied).toEqual(['0001_init.sql', '0002_ai_checklists.sql'])
+    expect(migRes.applied).toEqual([
+      '0001_init.sql',
+      '0002_ai_checklists.sql',
+      '0003_auth_and_admin_settings.sql',
+    ])
     expect(logs.some((l) => l.includes('0001_init.sql'))).toBe(true)
     expect(logs.some((l) => l.includes('0002_ai_checklists.sql'))).toBe(true)
+    expect(logs.some((l) => l.includes('0003_auth_and_admin_settings.sql'))).toBe(true)
 
     const statusAfter = await getMigrationStatus(db)
-    expect(statusAfter.applied).toHaveLength(2)
+    expect(statusAfter.applied).toHaveLength(3)
     expect(statusAfter.pending).toEqual([])
 
     // Error sanitization: preserve PG code while never leaking credentials

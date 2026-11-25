@@ -63,6 +63,15 @@ function makeConfig(overrides: Partial<AppConfig> = {}): AppConfig {
     aiToolMaxSteps: 5,
     aiMcpToken: MCP_TOKEN,
     aiMcpTicketSecret: TICKET_SECRET,
+    authCookieName: 'lec_session',
+    authCookieSecure: 'auto',
+    sessionTtlHours: 12,
+    rememberMeDays: 30,
+    authMethodsEnabled: 'password,passkey,gateway',
+    webauthnRpId: '',
+    webauthnRpName: 'Interactive Lecture Engine',
+    webauthnOrigin: '',
+    authBootstrapToken: null,
     ...overrides,
   }
 }

@@ -56,6 +56,15 @@ function makeTestConfig(overrides: Partial<AppConfig> = {}): AppConfig {
     aiToolMaxSteps: 5,
     aiMcpToken: null,
     aiMcpTicketSecret: null,
+    authCookieName: 'lec_session',
+    authCookieSecure: 'auto',
+    sessionTtlHours: 12,
+    rememberMeDays: 30,
+    authMethodsEnabled: 'password,passkey,gateway',
+    webauthnRpId: '',
+    webauthnRpName: 'Interactive Lecture Engine',
+    webauthnOrigin: '',
+    authBootstrapToken: null,
     ...overrides,
   }
 }
@@ -222,9 +231,9 @@ describe('Admin Telemetry & Health Integration Tests (M4c)', () => {
 
       // Checks
       expect(data.checks.db.status).toBe('ok')
-      expect(data.checks.db.migrations.appliedCount).toBe(2)
+      expect(data.checks.db.migrations.appliedCount).toBe(3)
       expect(data.checks.db.migrations.pendingCount).toBe(0)
-      expect(data.checks.db.migrations.latestApplied).toBe('0002_ai_checklists')
+      expect(data.checks.db.migrations.latestApplied).toBe('0003_auth_and_admin_settings')
       expect(data.checks.ai.provider).toBe('off')
       expect(data.checks.ai.configured).toBe(false)
       expect(data.checks.ai.status).toBe('off')

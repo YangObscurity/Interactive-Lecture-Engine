@@ -52,17 +52,32 @@ describe('P6.5 WP-D1 auth:export', () => {
     expect(rules[0]?.policy).toBe('bypass')
     expect(rules[0]?.resources).toEqual(['^/api/auth/session/?$', '^/api/health/?$', '^/api/tool(?:/.*)?$', '^/api/mcp$'])
 
-    // Rule 1: admin-only /dashboard, /api/admin/**, and the legacy Notion service paths
-    expect(rules[1]?.resources).toContain('^/dashboard(?:/.*)?$')
-    expect(rules[1]?.resources).toContain('^/en/dashboard(?:/.*)?$')
-    expect(rules[1]?.resources).toContain('^/api/admin(?:/.*)?$')
-    expect(rules[1]?.resources).toContain('^/api/(?:progress|notion)(?:/.*)?$')
-    expect(rules[1]?.subject).toEqual(['group:admins', 'group:admin'])
+    // Rule 1a: author+admin content APIs (must precede strict /api/admin/* rule)
+    expect(rules[1]?.resources).toEqual([
+      '^/api/admin/overview/?$',
+      '^/api/admin/(?:checks|figures|texts|companion)(?:/.*)?$',
+    ])
+    expect(rules[1]?.subject).toEqual(['group:admins', 'group:admin', 'group:authors', 'group:author'])
     expect(rules[1]?.policy).toBe('two_factor')
-    // Authelia skips a rule whose subject does not match, so the same resources must be denied right after
     expect(rules[2]?.policy).toBe('deny')
     expect(rules[2]?.resources).toEqual(rules[1]?.resources)
-    expect(rules[2]?.subject).toBeUndefined()
+
+    // Rule 1b: strict admin-only /api/admin/* and legacy Notion service paths
+    expect(rules[3]?.resources).toEqual(['^/api/admin(?:/.*)?$', '^/api/(?:progress|notion)(?:/.*)?$'])
+    expect(rules[3]?.subject).toEqual(['group:admins', 'group:admin'])
+    expect(rules[3]?.policy).toBe('two_factor')
+    // Authelia skips a rule whose subject does not match, so the same resources must be denied right after
+    expect(rules[4]?.policy).toBe('deny')
+    expect(rules[4]?.resources).toEqual(rules[3]?.resources)
+    expect(rules[4]?.subject).toBeUndefined()
+
+    // Rule 1c: any authenticated user (reader/author/admin) can open /dashboard and personal /api/me/*, /api/auth/*
+    expect(rules[5]?.resources).toContain('^/dashboard(?:/.*)?$')
+    expect(rules[5]?.resources).toContain('^/en/dashboard(?:/.*)?$')
+    expect(rules[5]?.resources).toContain('^/api/me(?:/.*)?$')
+    expect(rules[5]?.resources).toContain('^/api/auth(?:/.*)?$')
+    expect(rules[5]?.policy).toBe('two_factor')
+    expect(rules[5]?.subject).toBeUndefined()
 
     // every rule carries the domain
     expect(rules.every((r) => r.domain === 'lectures.example.com')).toBe(true)
@@ -106,6 +121,7 @@ describe('P6.5 WP-D1 auth:export', () => {
     // One subject per line: Authelia treats an inner list as AND and the outer list as OR.
     expect(yaml).toContain('        - - "group:mentors"\n        - - "group:staff"')
     expect(yaml).toContain('        - - "group:admins"\n        - - "group:admin"')
+    expect(yaml).toContain('        - - "group:authors"\n        - - "group:author"')
     expect(yaml).not.toMatch(/- \[\s*"group:/)
   })
 
@@ -174,11 +190,17 @@ describe('P6.5 WP-D1 auth:export', () => {
     expect(catchAll.slice(0, catchAll.indexOf('}'))).not.toContain('auth_request')
     expect(pub).toContain('auth_request /internal/authelia/authz;')
 
-    const parsed = parseAuthExportArgs(['authelia', '--domain=docs.example.com', '--admin-groups=owners,admins'])
+    const parsed = parseAuthExportArgs([
+      'authelia',
+      '--domain=docs.example.com',
+      '--admin-groups=owners,admins',
+      '--author-groups=editors,authors',
+    ])
     expect(parsed).toMatchObject({
       format: 'authelia',
       domain: 'docs.example.com',
       adminGroups: ['owners', 'admins'],
+      authorGroups: ['editors', 'authors'],
     })
     expect(() => parseAuthExportArgs(['--format=bogus'])).toThrow(/Unsupported format/)
   })

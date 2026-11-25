@@ -70,6 +70,15 @@ function makeConfig(overrides: Partial<AppConfig> = {}): AppConfig {
     aiToolMaxSteps: 5,
     aiMcpToken: null,
     aiMcpTicketSecret: null,
+    authCookieName: 'lec_session',
+    authCookieSecure: 'auto',
+    sessionTtlHours: 12,
+    rememberMeDays: 30,
+    authMethodsEnabled: 'password,passkey,gateway',
+    webauthnRpId: '',
+    webauthnRpName: 'Interactive Lecture Engine',
+    webauthnOrigin: '',
+    authBootstrapToken: null,
     ...overrides,
   }
 }
@@ -421,12 +430,23 @@ describe('Native AI SDK v7 channel & External MCP integration (WP-K2 Items 2 & 5
         connectionState: string
         tools: Array<{ name: string; enabled: boolean; calls7d: number; errors7d: number }>
       }>
+      settings?: {
+        provider: string
+        maxSteps: number
+        timeoutMs: number
+        maxResultBytes: number
+        mcpTokenSet: boolean
+        ticketSecretSet: boolean
+        source: string
+      }
       statsSource: string
       toolCallCounts7d: Record<string, { calls: number; errors: number; totalMs: number }>
     }
 
     expect(adminBody.statsSource).toBe('memory')
     expect(adminBody.mcpEndpoint).toEqual({ enabled: false, path: '/api/mcp' })
+    expect(adminBody.settings?.maxSteps).toBe(5)
+    expect(adminBody.settings?.timeoutMs).toBe(120)
     expect(adminBody.engineTools.map((t) => t.name)).toContain('search_concepts')
 
     const docsStatus = adminBody.mcpServers.find((s) => s.id === 'ext-docs')!
@@ -441,5 +461,62 @@ describe('Native AI SDK v7 channel & External MCP integration (WP-K2 Items 2 & 5
 
     const deadStatus = adminBody.mcpServers.find((s) => s.id === 'dead-mcp')!
     expect(deadStatus.connectionState).toBe('error')
+
+    // 4. PUT /api/admin/ai-tools validates & persists switches without exposing or clobbering secret URLs
+    const putBad = await app.request('/api/admin/ai-tools', {
+      method: 'PUT',
+      headers: { 'Remote-User': 'rootadmin', 'Remote-Groups': 'admins', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ engine: { nonexistent_tool: true } }),
+    })
+    expect(putBad.status).toBe(400)
+
+    const putOk = await app.request('/api/admin/ai-tools', {
+      method: 'PUT',
+      headers: { 'Remote-User': 'rootadmin', 'Remote-Groups': 'admins', 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        engine: { search_concepts: false },
+        servers: [{ id: 'ext-docs', enabled: true, tools: { ext_disabled_tool: true } }],
+      }),
+    })
+    expect(putOk.status).toBe(200)
+    const putBody = (await putOk.json()) as {
+      ok: boolean
+      engineTools: Array<{ name: string; enabled: boolean }>
+      mcpServers: Array<{ id: string; tools: Array<{ name: string; enabled: boolean }> }>
+    }
+    expect(putBody.ok).toBe(true)
+    expect(putBody.engineTools.find((t) => t.name === 'search_concepts')?.enabled).toBe(false)
+    expect(
+      putBody.mcpServers
+        .find((s) => s.id === 'ext-docs')
+        ?.tools.find((tl) => tl.name === 'ext_disabled_tool')?.enabled,
+    ).toBe(true)
+    // Verify hidden URL/path was NOT overwritten when toggling switch
+    expect(JSON.stringify(putBody.mcpServers)).not.toContain('/mcp')
+
+    // 5. Disabling the server reports effective tools[].enabled=false while preserving configuredTools flags
+    const disableSrvRes = await app.request('/api/admin/ai-tools', {
+      method: 'PUT',
+      headers: { 'Remote-User': 'rootadmin', 'Remote-Groups': 'admins', 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        servers: [{ id: 'ext-docs', enabled: false }],
+      }),
+    })
+    expect(disableSrvRes.status).toBe(200)
+    const disabledBody = (await disableSrvRes.json()) as {
+      mcpServers: Array<{
+        id: string
+        enabled: boolean
+        configuredTools?: Record<string, boolean>
+        tools: Array<{ name: string; enabled: boolean }>
+      }>
+    }
+    const disabledDocs = disabledBody.mcpServers.find((s) => s.id === 'ext-docs')!
+    expect(disabledDocs.enabled).toBe(false)
+    expect(disabledDocs.tools.every((tl) => tl.enabled === false)).toBe(true)
+    expect(disabledDocs.configuredTools).toEqual({
+      ext_disabled_tool: true,
+      ext_lookup: true,
+    })
   })
 })

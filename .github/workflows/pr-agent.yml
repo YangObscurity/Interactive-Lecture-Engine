@@ -86,5 +86,11 @@ jobs:
           GITHUB_ACTION_CONFIG__FAIL_ON_COMMAND_ERRORS: 'true'
           PR_REVIEWER__REQUIRE_RISK_ASSESSMENT: 'true'
           PR_REVIEWER__REQUIRE_MERGE_RECOMMENDATION: 'true'
+          PR_REVIEWER__EXTRA_INSTRUCTIONS: >-
+            When the PR changes README*.md, server/README.md, server/.env.example, server/src/config/schema.ts,
+            server/src/app.ts, server/src/routes/**, site/docs/.vitepress/theme/dashboard/**, or site/package.json,
+            verify README sync and style lock rules in docs-dev/README_SYNC.md: factual register only (no hype slogans),
+            keep existing brand SVG <picture> blocks, #2155c4 badges, screenshot tables and <details> structure intact,
+            keep README.md and README.en.md in parity, and keep server/README.md table aligned with server/.env.example.
           PR_CODE_SUGGESTIONS__COMMITTABLE_CODE_SUGGESTIONS: 'false'
           PR_CODE_SUGGESTIONS__DUAL_PUBLISHING_SCORE_THRESHOLD: '7'

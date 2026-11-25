@@ -1,0 +1,1609 @@
+// @vitest-environment happy-dom
+/**
+ * site/tests/unit/dashboard-rbac-online.test.ts — WP-5 RBAC Online Integration Tests:
+ *   a) reader role: shows personal tabs only, 0 /api/admin/* calls, hash block redirects, readonly="0"
+ *   b) author role: shows personal + content tabs, system tabs blocked
+ *   c) admin role: all 13 tabs, overview/health load, non-blocking rebuild banner, PageBackup full workflow
+ *   d) hybrid gateway bypass: Authelia header pass lands directly in dashboard
+ *   e) unauthenticated login lifecycle: login -> authenticated -> logout -> login
+ */
+import { ref } from 'vue'
+import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+
+enableAutoUnmount(afterEach)
+
+const mockLang = ref('zh-CN')
+const mockIsDark = ref(false)
+const mockTheme = ref({
+  groups: [
+    { id: 'G01', dir: 'G01', title: 'Group 1', lectureCount: 2, chartCount: 1 },
+  ],
+  totals: { lectures: 2, charts: 1 },
+  siteMeta: {
+    name: 'Site ZH',
+    shortName: 'Site',
+    text: 'Nav ZH',
+    tagline: 'Tag ZH',
+    description: 'Desc {lectures}',
+    i18n: { en: { name: 'Site EN', shortName: 'Site', text: 'Nav EN', tagline: 'Tag EN', description: 'Desc {lectures}' } },
+  },
+  lectureModules: {
+    auth: {
+      adapter: 'hybrid',
+      loginUrl: '/auth/login',
+    },
+  },
+})
+
+vi.mock('vitepress', () => ({
+  useData: () => ({
+    lang: mockLang,
+    isDark: mockIsDark,
+    theme: mockTheme,
+    site: ref({ base: '/' }),
+  }),
+  withBase: (p: string) => p,
+}))
+
+vi.mock('virtual:lecture-theme', () => ({
+  THEME_RUNTIME: {
+    defaultTheme: 'reader',
+    themes: [{ id: 'reader', label: 'Reader', tints: ['paper', 'sepia', 'dark'] }],
+  },
+}))
+
+import { dashboardZhCN } from '../../docs/.vitepress/i18n/dashboard.zh-CN'
+import {
+  fetchAdminHealth,
+  fetchAdminOverview,
+  setApiOrigin,
+  transferDb,
+  TRANSFER_ADMIN_TIMEOUT_MS,
+} from '../../docs/.vitepress/theme/api/admin'
+import type { AuthMethodInfo, AuthStatus } from '../../docs/.vitepress/theme/api/auth'
+import { currentSession, getSession, resetSession, subscribeSession } from '../../docs/.vitepress/theme/auth/session'
+import { STORAGE_KEYS } from '../../docs/.vitepress/site.config.mts'
+import { createProgressStore } from '../../docs/.vitepress/theme/progress/progressStore'
+import { FakeClock, FakeLocks, FakeScheduler, MemoryStorage, ScriptedBackend, op, rec } from './progress-helpers'
+import DashboardLogin from '../../docs/.vitepress/theme/dashboard/DashboardLogin.vue'
+import DashboardPage from '../../docs/.vitepress/theme/dashboard/DashboardPage.vue'
+import CompanionTools from '../../docs/.vitepress/theme/dashboard/pages/CompanionTools.vue'
+import PageAccess from '../../docs/.vitepress/theme/dashboard/pages/PageAccess.vue'
+import PageBackup from '../../docs/.vitepress/theme/dashboard/pages/PageBackup.vue'
+import PageLook from '../../docs/.vitepress/theme/dashboard/pages/PageLook.vue'
+import PageTexts from '../../docs/.vitepress/theme/dashboard/pages/PageTexts.vue'
+import {
+  clearRebuildRequired,
+  dashboardState,
+  registerModel,
+  resetAuthState,
+} from '../../docs/.vitepress/theme/dashboard/useDashboard'
+
+function jsonResponse(data: unknown, status = 200): Response {
+  return new Response(JSON.stringify(data), {
+    status,
+    headers: { 'content-type': 'application/json' },
+  })
+}
+
+describe('WP-5 RBAC Online Dashboard Suite', () => {
+  const fetchCalls: Array<{ url: string; method: string; body?: unknown }> = []
+  let currentAuthStatus: AuthStatus
+  let currentAuthMethods: AuthMethodInfo[]
+
+  beforeAll(() => {
+    if (!HTMLDialogElement.prototype.showModal) {
+      HTMLDialogElement.prototype.showModal = function () {
+        this.open = true
+      }
+    }
+    if (!HTMLDialogElement.prototype.close) {
+      HTMLDialogElement.prototype.close = function () {
+        this.open = false
+      }
+    }
+    if (!window.scrollTo) {
+      window.scrollTo = vi.fn()
+    }
+  })
+
+  beforeEach(() => {
+    fetchCalls.length = 0
+    mockLang.value = 'zh-CN'
+    window.location.hash = ''
+    setApiOrigin('')
+    resetSession()
+    resetAuthState()
+    clearRebuildRequired()
+    dashboardState.mode = 'loading'
+    dashboardState.page = 'overview'
+    dashboardState.toast = ''
+
+    currentAuthStatus = {
+      authAdapter: 'hybrid',
+      authenticated: true,
+      needsBootstrap: false,
+      authSource: 'session',
+      authMethod: 'password',
+      rememberMe: true,
+      user: { id: 'u-admin', name: 'Site Admin', email: 'admin@example.com' },
+      roles: ['admin'],
+      groups: ['staff'],
+      canAccessAdmin: true,
+      canAccessAuthor: true,
+      visibleSections: [],
+    }
+
+    currentAuthMethods = [
+      { id: 'password', name: 'Password', description: 'Local password', enabled: true, implemented: true, extensible: false },
+      { id: 'passkey', name: 'Passkey', description: 'WebAuthn passkey', enabled: true, implemented: true, extensible: false },
+    ]
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = typeof input === 'string' ? input : input.toString()
+        const method = init?.method?.toUpperCase() ?? 'GET'
+        let body: unknown
+        if (init?.body && typeof init.body === 'string') {
+          try {
+            body = JSON.parse(init.body)
+          } catch {
+            body = init.body
+          }
+        }
+        fetchCalls.push({ url, method, body })
+
+        // Dev loopback status check -> return 404 so DashboardPage treats environment as online
+        if (url.includes('/__lecture/api/status')) {
+          return new Response(null, { status: 404 })
+        }
+
+        // Auth status & methods
+        if (url.endsWith('/api/auth/status')) {
+          return jsonResponse(currentAuthStatus)
+        }
+        if (url.endsWith('/api/auth/session')) {
+          if (!currentAuthStatus.authenticated || !currentAuthStatus.user) {
+            return jsonResponse({ authenticated: false, user: null, roles: [], groups: [], logoutUrl: null })
+          }
+          return jsonResponse({
+            authenticated: true,
+            user: currentAuthStatus.user,
+            roles: currentAuthStatus.roles,
+            groups: currentAuthStatus.groups,
+            logoutUrl: null,
+          })
+        }
+        if (url.endsWith('/api/auth/methods')) {
+          return jsonResponse({ ok: true, methods: currentAuthMethods })
+        }
+        if (url.endsWith('/api/auth/logout')) {
+          currentAuthStatus = {
+            authAdapter: 'hybrid',
+            authenticated: false,
+            needsBootstrap: false,
+            authSource: 'none',
+            authMethod: 'none',
+            rememberMe: false,
+            user: null,
+            roles: [],
+            groups: [],
+            canAccessAdmin: false,
+            canAccessAuthor: false,
+            visibleSections: [],
+          }
+          return jsonResponse({ ok: true, logoutUrl: null })
+        }
+
+        // Me endpoints
+        if (url.includes('/api/me/overview')) {
+          return jsonResponse({
+            ok: true,
+            user: {
+              id: currentAuthStatus.user?.id || 'u-1',
+              username: currentAuthStatus.user?.name || 'user',
+              displayName: currentAuthStatus.user?.name || 'User',
+              email: currentAuthStatus.user?.email || null,
+            },
+            progress: {
+              total: 10,
+              completed: 3,
+              in_progress: 2,
+            },
+            recentSessions: [],
+            checklists: {
+              total: 5,
+              completed: 2,
+            },
+            passkeyCount: 0,
+            currentSessionId: 'sess-1',
+            authMethod: currentAuthStatus.authMethod,
+            rememberMe: currentAuthStatus.rememberMe,
+          })
+        }
+        if (url.includes('/api/me/sessions')) {
+          return jsonResponse([])
+        }
+        if (url.includes('/api/me/credentials')) {
+          return jsonResponse([])
+        }
+
+        // Admin endpoints
+        if (url.includes('/api/admin/overview')) {
+          return jsonResponse({
+            generatedAt: new Date().toISOString(),
+            totals: {
+              users: 4,
+              progressRows: 12,
+              completedLectures: 5,
+              sessions: 3,
+              messages: 10,
+              checklistItems: 6,
+              completedChecklistItems: 2,
+            },
+            byStatus: { 未开始: 3, 学习中: 4, 已完成: 5 },
+            byGroup: [{ group_id: 'G01', total_rows: 2, completed: 1, in_progress: 1, not_started: 0 }],
+            recentActivity: {
+              progressUpdatedLast24h: 2,
+              sessionsCreatedLast24h: 1,
+              messagesLast24h: 4,
+            },
+          })
+        }
+        if (url.includes('/api/admin/health')) {
+          return jsonResponse({
+            ok: true,
+            service: 'lecture-api',
+            version: '2026.11.21',
+            time: new Date().toISOString(),
+            uptimeSeconds: 3600,
+            runtime: {
+              nodeVersion: 'v22.0.0',
+              authAdapter: 'hybrid',
+              headerPreset: 'authelia',
+              dbKind: 'pglite',
+            },
+            checks: {
+              db: { status: 'ok', latencyMs: 1, migrations: { appliedCount: 3, pendingCount: 0, latestApplied: '0003' } },
+              ai: { provider: 'openai', configured: true, status: 'ok' },
+              notion: { configured: false, status: 'off' },
+            },
+          })
+        }
+        if (url.includes('/api/admin/ai-tools')) {
+          if (method === 'PUT') {
+            return jsonResponse({
+              ok: true,
+              persistence: { mode: 'db+disk', effect: 'live' },
+              mcpEndpoint: { enabled: false, path: '/api/mcp' },
+              engineTools: [
+                { name: 'search_concepts', enabled: false, calls7d: 3, errors7d: 0 },
+                { name: 'get_concept', enabled: true, calls7d: 1, errors7d: 0 },
+              ],
+              mcpServers: [],
+              settings: {
+                provider: 'openai',
+                maxSteps: 4,
+                timeoutMs: 9000,
+                maxResultBytes: 18000,
+                mcpTokenSet: true,
+                ticketSecretSet: true,
+                source: 'server/.env',
+              },
+              statsSource: 'memory',
+              toolCallCounts7d: { search_concepts: { calls: 3, errors: 0 } },
+            })
+          }
+          return jsonResponse({
+            mcpEndpoint: { enabled: false, path: '/api/mcp' },
+            engineTools: [
+              { name: 'search_concepts', enabled: true, calls7d: 3, errors7d: 0 },
+              { name: 'get_concept', enabled: true, calls7d: 1, errors7d: 0 },
+            ],
+            mcpServers: [
+              {
+                id: 'docs',
+                name: 'Docs MCP',
+                host: 'mcp.example.com',
+                enabled: true,
+                connectionState: 'connected',
+                tools: [{ name: 'lookup', enabled: true, calls7d: 2, errors7d: 0 }],
+              },
+            ],
+            settings: {
+              provider: 'openai',
+              maxSteps: 4,
+              timeoutMs: 9000,
+              maxResultBytes: 18000,
+              mcpTokenSet: true,
+              ticketSecretSet: true,
+              source: 'server/.env',
+            },
+            statsSource: 'memory',
+            toolCallCounts7d: { search_concepts: { calls: 3, errors: 0 } },
+          })
+        }
+        if (url.includes('/api/admin/texts')) {
+          if (method === 'PUT') {
+            return jsonResponse({
+              ok: true,
+              texts: (body as { texts?: unknown })?.texts ?? {},
+              persistence: {
+                mode: 'db+disk',
+                effect: 'rebuild_required',
+                rebuildReason: 'Site text changes require a site rebuild to take effect in static pages',
+              },
+            })
+          }
+          return jsonResponse({
+            ok: true,
+            texts: {
+              zh: { name: 'Site ZH', shortName: 'Site', navText: 'Nav ZH', tagline: 'Tag ZH', description: 'Desc {lectures}' },
+              en: { name: 'Site EN', shortName: 'Site', navText: 'Nav EN', tagline: 'Tag EN', description: 'Desc {lectures}' },
+            },
+          })
+        }
+        if (url.includes('/api/admin/access')) {
+          if (method === 'PUT') {
+            return jsonResponse({
+              ok: true,
+              access: (body as { access?: unknown })?.access ?? {},
+              persistence: {
+                mode: 'db+disk',
+                effect: 'rebuild_required',
+                rebuildReason: 'Changes to access tiers require a site rebuild to take effect in static pages',
+              },
+            })
+          }
+          return jsonResponse({
+            ok: true,
+            access: { default: 'public', enforcement: 'gateway', groups: { G01: { read: 'authenticated' } } },
+          })
+        }
+        if (url.includes('/api/admin/db/config')) {
+          return jsonResponse({
+            ok: true,
+            kind: 'pglite',
+            databaseUrl: 'pglite:./data/pglite',
+            databaseUrlDirect: null,
+            migrations: { applied: 3, total: 3, pending: 0 },
+          })
+        }
+        if (url.includes('/api/admin/db/tables') && url.includes('/rows')) {
+          return jsonResponse({
+            ok: true,
+            table: 'site_settings',
+            rows: [],
+            total: 0,
+            limit: 25,
+            offset: 0,
+            sort: 'key',
+            order: 'asc',
+          })
+        }
+        if (url.includes('/api/admin/db/tables')) {
+          return jsonResponse({ ok: true, tables: [] })
+        }
+        if (url.includes('/api/admin/look')) {
+          if (method === 'PUT') {
+            return jsonResponse({
+              ok: true,
+              look: (body as { look?: unknown })?.look ?? { skin: 'datasheet', base: 'sepia', custom: '#EAF2E3' },
+              persistence: {
+                mode: 'db+disk',
+                effect: 'rebuild_required',
+                rebuildReason: 'Theme and style changes require a site rebuild to take effect in static pages',
+              },
+            })
+          }
+          return jsonResponse({
+            ok: true,
+            look: { skin: 'reader', base: 'paper', custom: '#EAF2E3' },
+          })
+        }
+        if (url.includes('/api/admin/backups/restore')) {
+          const reqBody = (body as { filename?: string; dryRun?: boolean }) || {}
+          return jsonResponse({
+            ok: true,
+            dryRun: reqBody.dryRun !== false,
+            filename: reqBody.filename || 'mock-backup.json.gz',
+            verifiedChecksum: true,
+            tableCounts: {
+              site_settings: 5,
+              progress: 12,
+              auth_users_public: 3,
+            },
+            message: 'Backup archive verified successfully',
+          })
+        }
+        if (url.includes('/api/admin/backups')) {
+          if (method === 'POST') {
+            return jsonResponse(
+              {
+                ok: true,
+                snapshot: {
+                  filename: 'lecture-api-backup-20261124-new123.json.gz',
+                  checksumFilename: 'lecture-api-backup-20261124-new123.json.gz.sha256',
+                  sha256: 'a1b2c3d4e5f60718293a4b5c6d7e8f90123456789abcdef0123456789abcdef0',
+                  sizeBytes: 4096,
+                  tableCounts: { site_settings: 5, progress: 12 },
+                  createdAt: new Date().toISOString(),
+                },
+              },
+              201,
+            )
+          }
+          return jsonResponse({
+            ok: true,
+            backupDir: '/var/data/backups',
+            backups: [
+              {
+                filename: 'lecture-api-backup-20261124-0001.json.gz',
+                sizeBytes: 2048,
+                sha256: '9876543210abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
+                createdAt: new Date(Date.now() - 3600000).toISOString(),
+              },
+            ],
+          })
+        }
+
+        return jsonResponse({ ok: true })
+      }),
+    )
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    vi.restoreAllMocks()
+  })
+
+  // ── a) reader role ──────────────────────────────────────────────────────────
+  it('a) reader role: shows personal tabs only, 0 /api/admin/* calls, hash block redirects, readonly="0"', async () => {
+    currentAuthStatus = {
+      authAdapter: 'hybrid',
+      authenticated: true,
+      needsBootstrap: false,
+      authSource: 'session',
+      authMethod: 'password',
+      rememberMe: false,
+      user: { id: 'reader-1', name: 'Reader Alice', email: 'alice@example.com' },
+      roles: ['reader'],
+      groups: [],
+      canAccessAdmin: false,
+      canAccessAuthor: false,
+      visibleSections: [],
+    }
+
+    const wrapper = mount(DashboardPage)
+    await flushPromises()
+
+    // 1. Visible tabs: ONLY 'my-learning' and 'account'
+    const navTabs = wrapper.findAll('[data-dashboard-tab]').map((w) => w.attributes('data-dashboard-tab'))
+    expect(navTabs).toEqual(['my-learning', 'account'])
+    expect(dashboardState.page).toBe('my-learning')
+
+    // 2. Makes 0 calls to /api/admin/*
+    const adminCalls = fetchCalls.filter((c) => c.url.includes('/api/admin/'))
+    expect(adminCalls).toHaveLength(0)
+
+    // 3. data-dashboard-readonly="0" on personal pages
+    const root = wrapper.find('.lec-dashboard')
+    expect(root.attributes('data-dashboard-readonly')).toBe('0')
+
+    // 4. Direct hash #database / #users / #access / #overview redirects back to my-learning with forbidden toast
+    const forbiddenHashes = ['#database', '#users', '#access', '#overview']
+    for (const h of forbiddenHashes) {
+      window.location.hash = h
+      window.dispatchEvent(new Event('hashchange'))
+      await flushPromises()
+
+      expect(dashboardState.page).toBe('my-learning')
+      expect(dashboardState.toast).toBeTruthy()
+      expect(wrapper.find('[data-dashboard-toast]').text()).toBeTruthy()
+    }
+  })
+
+  // ── b) author role ──────────────────────────────────────────────────────────
+  it('b) author role: shows personal + content tabs, system tabs blocked', async () => {
+    currentAuthStatus = {
+      authAdapter: 'hybrid',
+      authenticated: true,
+      needsBootstrap: false,
+      authSource: 'session',
+      authMethod: 'password',
+      rememberMe: false,
+      user: { id: 'author-1', name: 'Author Bob', email: 'bob@example.com' },
+      roles: ['reader', 'author'],
+      groups: ['authors'],
+      canAccessAdmin: false,
+      canAccessAuthor: true,
+      visibleSections: [],
+    }
+
+    const wrapper = mount(DashboardPage)
+    await flushPromises()
+
+    // Shows my-learning, account, overview, checks, figures, texts, companion
+    const navTabs = wrapper.findAll('[data-dashboard-tab]').map((w) => w.attributes('data-dashboard-tab'))
+    expect(navTabs).toEqual(['my-learning', 'account', 'overview', 'checks', 'figures', 'texts', 'companion'])
+    expect(fetchCalls.some((c) => c.url.includes('/api/admin/overview'))).toBe(true)
+    expect(fetchCalls.some((c) => c.url.includes('/api/admin/health'))).toBe(false)
+
+    // #database, #users, #access, #look, #backup blocked
+    for (const blocked of ['#database', '#users', '#access', '#look', '#backup']) {
+      window.location.hash = blocked
+      window.dispatchEvent(new Event('hashchange'))
+      await flushPromises()
+
+      expect(dashboardState.page).toBe('my-learning')
+      expect(dashboardState.toast).toBeTruthy()
+    }
+
+    // Per-page write guard: mounting PageTexts while global dashboardState.page is still 'my-learning'
+    // still allows online author editing & triggers PUT /api/admin/texts -> rebuild_required notice
+    const textsWrapper = mount(PageTexts, { props: { texts: null } })
+    await flushPromises()
+    const zhNameInput = textsWrapper.find<HTMLInputElement>('[data-texts-input="zh.name"]')
+    expect(zhNameInput.exists()).toBe(true)
+    await zhNameInput.setValue('Author Updated ZH')
+    await textsWrapper.find('[data-texts-save-btn]').trigger('click')
+    await flushPromises()
+    expect(fetchCalls.some((c) => c.url.endsWith('/api/admin/texts') && c.method === 'PUT')).toBe(true)
+    expect(dashboardState.rebuildRequired).toBe(true)
+
+    // Mounting PageLook & PageBackup as online author stays strictly read-only without admin API fetches
+    const lookWrapper = mount(PageLook, { props: { status: null } })
+    await flushPromises()
+    expect(lookWrapper.find('[data-savebar="look"]').exists()).toBe(false)
+
+    const beforeBackupCalls = fetchCalls.length
+    const bkAuthorWrapper = mount(PageBackup)
+    await flushPromises()
+    expect(bkAuthorWrapper.find('[data-backup-create]').exists()).toBe(false)
+    expect(fetchCalls.slice(beforeBackupCalls).some((c) => c.url.includes('/api/admin/backups'))).toBe(false)
+  })
+
+  // ── c) admin role online ────────────────────────────────────────────────────
+  it('c) admin role online: data-dashboard-readonly="0", 13 tabs, rebuild badge non-blocking & dismiss, PageBackup verify', async () => {
+    currentAuthStatus = {
+      authAdapter: 'hybrid',
+      authenticated: true,
+      needsBootstrap: false,
+      authSource: 'session',
+      authMethod: 'password',
+      rememberMe: true,
+      user: { id: 'admin-1', name: 'Admin Carol', email: 'carol@example.com' },
+      roles: ['admin'],
+      groups: ['superusers'],
+      canAccessAdmin: true,
+      canAccessAuthor: true,
+      visibleSections: [],
+    }
+
+    const wrapper = mount(DashboardPage)
+    await flushPromises()
+
+    // 1. data-dashboard-readonly="0"
+    expect(wrapper.find('.lec-dashboard').attributes('data-dashboard-readonly')).toBe('0')
+
+    // 2. All 13 tabs visible
+    const navTabs = wrapper.findAll('[data-dashboard-tab]').map((w) => w.attributes('data-dashboard-tab'))
+    expect(navTabs).toHaveLength(13)
+    expect(navTabs).toEqual([
+      'my-learning',
+      'account',
+      'overview',
+      'checks',
+      'figures',
+      'texts',
+      'companion',
+      'access',
+      'look',
+      'database',
+      'users',
+      'runtime',
+      'backup',
+    ])
+
+    // 3. Loads overview and health with valid response shapes
+    const ovCall = fetchCalls.find((c) => c.url.includes('/api/admin/overview'))
+    const hlCall = fetchCalls.find((c) => c.url.includes('/api/admin/health'))
+    expect(ovCall).toBeDefined()
+    expect(hlCall).toBeDefined()
+    expect(wrapper.find('[data-admin-overview]').exists()).toBe(true)
+    expect(wrapper.find('[data-todo="admin-error"]').exists()).toBe(false)
+
+    // 4. Persistence rebuild badge triggered end-to-end by PageLook PUT /api/admin/look
+    expect(wrapper.find('[data-dashboard-rebuild-badge]').exists()).toBe(false)
+    const lookAdminWrapper = mount(PageLook, { props: { status: null } })
+    await flushPromises()
+    await lookAdminWrapper.find('[data-skin="datasheet"]').trigger('click')
+    await lookAdminWrapper.find('[data-base="sepia"]').trigger('click')
+    await lookAdminWrapper.find('[data-look-save]').trigger('click')
+    await flushPromises()
+    expect(
+      fetchCalls.some(
+        (c) =>
+          c.url.endsWith('/api/admin/look') &&
+          c.method === 'PUT' &&
+          (c.body as { look?: { skin?: string; base?: string } })?.look?.skin === 'datasheet',
+      ),
+    ).toBe(true)
+    await wrapper.vm.$nextTick()
+    expect(wrapper.find('[data-dashboard-rebuild-badge]').exists()).toBe(true)
+
+    // Non-blocking dismiss works
+    const dismissBtn = wrapper.find('[data-dashboard-rebuild-dismiss]')
+    expect(dismissBtn.exists()).toBe(true)
+    await dismissBtn.trigger('click')
+    await wrapper.vm.$nextTick()
+    expect(wrapper.find('[data-dashboard-rebuild-badge]').exists()).toBe(false)
+
+    // 4b. CompanionTools uses live /api/admin/ai-tools settings & PUT toggle (no add/delete/fake URLs)
+    const toolsWrapper = mount(CompanionTools)
+    await flushPromises()
+    expect(toolsWrapper.find('[data-tools-online-note]').exists()).toBe(true)
+    expect(toolsWrapper.find('[data-add-server-btn]').exists()).toBe(false)
+    expect(toolsWrapper.find('[data-server-delete]').exists()).toBe(false)
+    expect(toolsWrapper.text()).toContain('mcp.example.com')
+    expect(toolsWrapper.text()).not.toContain('https://mcp.example.com')
+    await toolsWrapper.find('[data-tool-switch="search_concepts"]').trigger('click')
+    await toolsWrapper.find('[data-tools-save]').trigger('click')
+    await flushPromises()
+    expect(fetchCalls.some((c) => c.url.endsWith('/api/admin/ai-tools') && c.method === 'PUT')).toBe(true)
+
+    // 4c. PageAccess saves access config and triggers rebuild_required badge
+    const accessWrapper = mount(PageAccess, { props: { access: null, autheliaPreview: '' } })
+    await flushPromises()
+    await accessWrapper.find('[data-tpopen="G01"]').trigger('click')
+    await accessWrapper.find('[data-tpv="public"]').trigger('click')
+    await accessWrapper.find('[data-access-save-btn]').trigger('click')
+    await flushPromises()
+    expect(fetchCalls.some((c) => c.url.endsWith('/api/admin/access') && c.method === 'PUT')).toBe(true)
+    expect(dashboardState.rebuildRequired).toBe(true)
+
+    // 5. PageBackup component workflow
+    const backupWrapper = mount(PageBackup)
+    await flushPromises()
+
+    // Auto-loaded backup archives
+    expect(backupWrapper.find('[data-backup-facts]').exists()).toBe(true)
+    expect(backupWrapper.find('[data-backup-row="lecture-api-backup-20261124-0001.json.gz"]').exists()).toBe(true)
+
+    // Create backup
+    const createBtn = backupWrapper.find('[data-backup-create]')
+    expect(createBtn.exists()).toBe(true)
+    await createBtn.trigger('click')
+    await flushPromises()
+
+    const postBackup = fetchCalls.find((c) => c.url.endsWith('/api/admin/backups') && c.method === 'POST')
+    expect(postBackup).toBeDefined()
+    expect(backupWrapper.find('[data-backup-status]').exists()).toBe(true)
+
+    // Dry-run verify
+    const dryRunBtn = backupWrapper.find('[data-backup-dryrun="lecture-api-backup-20261124-0001.json.gz"]')
+    expect(dryRunBtn.exists()).toBe(true)
+    await dryRunBtn.trigger('click')
+    await flushPromises()
+
+    const dryRunResult = backupWrapper.find('[data-backup-result]')
+    expect(dryRunResult.exists()).toBe(true)
+    expect(dryRunResult.text()).toContain('lecture-api-backup-20261124-0001.json.gz')
+    expect(dryRunResult.text()).toContain('site_settings: 5')
+
+    // 2-step confirm restore
+    const restoreBtn = backupWrapper.find('[data-backup-restore="lecture-api-backup-20261124-0001.json.gz"]')
+    expect(restoreBtn.exists()).toBe(true)
+    await restoreBtn.trigger('click')
+    await flushPromises()
+
+    const confirmContainer = backupWrapper.find('[data-backup-restore-confirm]')
+    expect(confirmContainer.exists()).toBe(true)
+
+    const confirmBtn = backupWrapper.find('[data-backup-confirm-restore="lecture-api-backup-20261124-0001.json.gz"]')
+    expect(confirmBtn.exists()).toBe(true)
+    await confirmBtn.trigger('click')
+    await flushPromises()
+
+    const liveRestoreCall = fetchCalls.find(
+      (c) =>
+        c.url.endsWith('/api/admin/backups/restore') &&
+        c.method === 'POST' &&
+        (c.body as { dryRun?: boolean })?.dryRun === false,
+    )
+    expect(liveRestoreCall).toBeDefined()
+  })
+
+  // ── d) AUTH_ADAPTER=hybrid Authelia header bypass ───────────────────────────
+  it('d) AUTH_ADAPTER=hybrid gateway bypass lands directly in Dashboard without DashboardLogin', async () => {
+    currentAuthStatus = {
+      authAdapter: 'hybrid',
+      authenticated: true,
+      needsBootstrap: false,
+      authSource: 'gateway',
+      authMethod: 'gateway',
+      rememberMe: false,
+      user: { id: 'authelia-user', name: 'Authelia User', email: 'authelia@example.com' },
+      roles: ['author', 'reader'],
+      groups: ['engineers'],
+      canAccessAdmin: false,
+      canAccessAuthor: true,
+      visibleSections: [],
+    }
+
+    const wrapper = mount(DashboardPage)
+    await flushPromises()
+
+    expect(wrapper.findComponent(DashboardLogin).exists()).toBe(false)
+    expect(wrapper.find('.db-shell').exists()).toBe(true)
+    expect(wrapper.find('.db-brand').exists()).toBe(true)
+  })
+
+  // ── e) Unauthenticated login and logout lifecycle ───────────────────────────
+  it('e) unauthenticated renders DashboardLogin, @authenticated transitions, logout returns', async () => {
+    currentAuthStatus = {
+      authAdapter: 'hybrid',
+      authenticated: false,
+      needsBootstrap: true,
+      authSource: 'none',
+      authMethod: 'none',
+      rememberMe: false,
+      user: null,
+      roles: [],
+      groups: [],
+      canAccessAdmin: false,
+      canAccessAuthor: false,
+      visibleSections: [],
+    }
+
+    const wrapper = mount(DashboardPage)
+    await flushPromises()
+
+    // 1. Renders DashboardLogin
+    expect(wrapper.findComponent(DashboardLogin).exists()).toBe(true)
+    expect(wrapper.find('.db-shell').exists()).toBe(false)
+
+    // 2. Submitting @authenticated transitions to allowed Dashboard
+    currentAuthStatus = {
+      authAdapter: 'hybrid',
+      authenticated: true,
+      needsBootstrap: false,
+      authSource: 'local',
+      authMethod: 'password',
+      rememberMe: true,
+      user: { id: 'logged-in-admin', name: 'Logged Admin', email: 'admin@local' },
+      roles: ['admin'],
+      groups: [],
+      canAccessAdmin: true,
+      canAccessAuthor: true,
+      visibleSections: [],
+    }
+
+    const loginCmp = wrapper.findComponent(DashboardLogin)
+    loginCmp.vm.$emit('authenticated')
+    await flushPromises()
+
+    expect(wrapper.find('.db-shell').exists()).toBe(true)
+    expect(wrapper.findComponent(DashboardLogin).exists()).toBe(false)
+
+    // Navigate admin to #database, then click [data-dashboard-logout] -> hash is cleared and DashboardLogin renders
+    window.location.hash = '#database'
+    window.dispatchEvent(new Event('hashchange'))
+    await flushPromises()
+    expect(dashboardState.page).toBe('database')
+
+    const logoutBtn = wrapper.find('[data-dashboard-logout]')
+    expect(logoutBtn.exists()).toBe(true)
+    await logoutBtn.trigger('click')
+    await flushPromises()
+
+    expect(wrapper.findComponent(DashboardLogin).exists()).toBe(true)
+    expect(wrapper.find('.db-shell').exists()).toBe(false)
+    expect(window.location.hash).toBe('')
+  })
+
+  // ── f) Blind-audit regressions: session sync, hybrid gateway logout, split-origin overview/health ──
+  it('f) syncs session.ts listeners on login/logout, keeps hybrid gateway user signed in, and honors setApiOrigin on overview/health', async () => {
+    const seenStatuses: string[] = []
+    const unsub = subscribeSession((s) => {
+      seenStatuses.push(s.status === 'authenticated' ? `auth:${s.user.id}` : s.status)
+    })
+    try {
+      currentAuthStatus = {
+        authAdapter: 'hybrid',
+        authenticated: false,
+        needsBootstrap: false,
+        authSource: 'none',
+        authMethod: 'none',
+        rememberMe: false,
+        user: null,
+        roles: [],
+        groups: [],
+        canAccessAdmin: false,
+        canAccessAuthor: false,
+        visibleSections: [],
+      }
+
+      const wrapper = mount(DashboardPage)
+      await flushPromises()
+      expect(seenStatuses).toContain('anonymous')
+      expect(currentSession().status).toBe('anonymous')
+
+      currentAuthStatus = {
+        authAdapter: 'hybrid',
+        authenticated: true,
+        needsBootstrap: false,
+        authSource: 'gateway',
+        authMethod: 'gateway',
+        rememberMe: false,
+        user: { id: 'gw-admin', name: 'Gateway Admin', email: 'gw@example.com' },
+        roles: ['reader', 'admin'],
+        groups: ['admins'],
+        canAccessAdmin: true,
+        canAccessAuthor: true,
+        visibleSections: ['my-learning', 'account', 'overview'],
+      }
+      wrapper.findComponent(DashboardLogin).vm.$emit('authenticated')
+      await flushPromises()
+      expect(currentSession()).toMatchObject({ status: 'authenticated', user: { id: 'gw-admin' } })
+      expect(seenStatuses).toContain('auth:gw-admin')
+
+      // Gateway user clicking logout when Remote-User headers remain active stays in Dashboard (not trapped in signin)
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async (input: RequestInfo | URL) => {
+          const url = typeof input === 'string' ? input : input.toString()
+          if (url.endsWith('/api/auth/logout')) return jsonResponse({ ok: true, logoutUrl: null })
+          if (url.endsWith('/api/auth/status')) return jsonResponse(currentAuthStatus)
+          if (url.includes('/api/admin/overview')) {
+            return jsonResponse({
+              generatedAt: '2026-11-24T00:00:00.000Z',
+              totals: { users: 1, progressRows: 0, completedLectures: 0, sessions: 0, messages: 0, checklistItems: 0, completedChecklistItems: 0 },
+              byStatus: {},
+              byGroup: [],
+              recentActivity: {},
+            })
+          }
+          if (url.includes('/api/admin/health')) {
+            return jsonResponse({
+              ok: true,
+              service: 'lecture-api',
+              checks: { db: { status: 'ok' }, ai: { status: 'off', provider: 'off' }, notion: { configured: false, status: 'off' } },
+              runtime: { dbKind: 'pglite' },
+            })
+          }
+          return jsonResponse({ ok: true })
+        }),
+      )
+      await wrapper.find('[data-dashboard-logout]').trigger('click')
+      await flushPromises()
+      expect(wrapper.findComponent(DashboardLogin).exists()).toBe(false)
+      expect(wrapper.find('.db-shell').exists()).toBe(true)
+
+      // Split-origin setApiOrigin applied to fetchAdminOverview and fetchAdminHealth with credentials: 'include'
+      const seenReq: Array<{ url: string; credentials?: RequestCredentials }> = []
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+          const url = typeof input === 'string' ? input : input.toString()
+          seenReq.push({ url, credentials: init?.credentials })
+          if (url.includes('/api/admin/overview')) {
+            return jsonResponse({
+              generatedAt: '2026-11-24T00:00:00.000Z',
+              totals: { users: 1, progressRows: 0, completedLectures: 0, sessions: 0, messages: 0, checklistItems: 0, completedChecklistItems: 0 },
+              byStatus: {},
+              byGroup: [],
+              recentActivity: {},
+            })
+          }
+          return jsonResponse({
+            ok: true,
+            service: 'lecture-api',
+            checks: { db: { status: 'ok' }, ai: { status: 'off', provider: 'off' }, notion: { configured: false, status: 'off' } },
+            runtime: { dbKind: 'pglite' },
+          })
+        }),
+      )
+      setApiOrigin('https://api.example.com')
+      const ovRes = await fetchAdminOverview()
+      const hlRes = await fetchAdminHealth()
+      expect(ovRes.ok).toBe(true)
+      expect(hlRes.ok).toBe(true)
+      expect(seenReq).toEqual([
+        { url: 'https://api.example.com/api/admin/overview', credentials: 'include' },
+        { url: 'https://api.example.com/api/admin/health', credentials: 'include' },
+      ])
+    } finally {
+      setApiOrigin('')
+      unsub()
+    }
+  })
+
+  it('d) visibleSections from authStatus drives navigation tabs directly', async () => {
+    const currentAuthStatus = {
+      authAdapter: 'hybrid',
+      authenticated: true,
+      needsBootstrap: false,
+      authSource: 'session',
+      authMethod: 'password',
+      rememberMe: false,
+      user: { id: 'custom-user', name: 'Custom Section User', email: 'custom@example.com' },
+      roles: ['reader', 'author', 'admin'],
+      groups: [],
+      canAccessAdmin: true,
+      canAccessAuthor: true,
+      visibleSections: ['my-learning', 'overview', 'figures'],
+    }
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = typeof input === 'string' ? input : input.toString()
+        if (url.endsWith('/api/auth/status')) return jsonResponse(currentAuthStatus)
+        if (url.includes('/api/admin/overview')) {
+          return jsonResponse({
+            generatedAt: '2026-11-24T00:00:00.000Z',
+            totals: { users: 1, progressRows: 0, completedLectures: 0, sessions: 0, messages: 0, checklistItems: 0, completedChecklistItems: 0 },
+            byStatus: {},
+            byGroup: [],
+            recentActivity: {},
+          })
+        }
+        return jsonResponse({ ok: true })
+      }),
+    )
+
+    const wrapper = mount(DashboardPage)
+    await flushPromises()
+
+    const navTabs = wrapper.findAll('[data-dashboard-tab]').map((w) => w.attributes('data-dashboard-tab'))
+    expect(navTabs).toEqual(['my-learning', 'overview', 'figures'])
+  })
+
+  it('e) PageAccess refuses downgrade when server returns uninitialized_restricted and access is null', async () => {
+    dashboardState.mode = 'online'
+    dashboardState.canAccessAdmin = true
+    dashboardState.roles = ['admin']
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = typeof input === 'string' ? input : input.toString()
+        if (url.includes('/api/admin/access')) {
+          return jsonResponse({
+            ok: true,
+            source: 'uninitialized_restricted',
+            access: null,
+          })
+        }
+        return jsonResponse({ ok: true })
+      }),
+    )
+
+    const wrapper = mount(PageAccess, { props: { access: null, autheliaPreview: '' } })
+    await flushPromises()
+
+    expect(wrapper.find('[data-access-load-error]').exists()).toBe(true)
+    expect(wrapper.find('[data-access-save-btn]').exists()).toBe(false)
+  })
+
+  it('f) DashboardLogin toggles bootstrap mode and submits setupToken when bootstrapTokenRequired is true', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input.toString()
+      if (url.endsWith('/api/auth/bootstrap')) {
+        return jsonResponse({
+          ok: true,
+          authenticated: true,
+          user: { id: 'admin-1', username: 'tokenadmin', name: 'Token Admin', email: null },
+          roles: ['reader', 'author', 'admin'],
+          groups: [],
+          canAccessAdmin: true,
+          canAccessAuthor: true,
+        }, 201)
+      }
+      return jsonResponse({ ok: true })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const wrapper = mount(DashboardLogin, {
+      props: {
+        authStatus: {
+          authAdapter: 'local',
+          authenticated: false,
+          needsBootstrap: false,
+          bootstrapTokenRequired: true,
+          authSource: 'none',
+          authMethod: 'anonymous',
+          rememberMe: false,
+          user: null,
+          roles: ['reader'],
+          groups: [],
+          canAccessAdmin: false,
+          canAccessAuthor: false,
+          visibleSections: ['my-learning', 'account'],
+        },
+        methods: [
+          {
+            id: 'password',
+            name: 'Password',
+            description: 'Password login',
+            enabled: true,
+            implemented: true,
+            extensible: false,
+          },
+        ],
+      },
+    })
+
+    const toggleBtn = wrapper.find('[data-login-bootstrap-token-toggle]')
+    expect(toggleBtn.exists()).toBe(true)
+    expect(wrapper.find('[data-login-setup-token]').exists()).toBe(false)
+
+    await toggleBtn.trigger('click')
+    expect(wrapper.find('[data-login-setup-token]').exists()).toBe(true)
+
+    await wrapper.find('[data-login-setup-token]').setValue('my-setup-secret')
+    await wrapper.find('[data-login-username]').setValue('tokenadmin')
+    await wrapper.find('[data-login-password]').setValue('Password123!')
+    await wrapper.find('[data-login-confirm]').setValue('Password123!')
+    await wrapper.find('[data-login-form]').trigger('submit')
+    await flushPromises()
+
+    const bootCall = fetchMock.mock.calls.find(([url]) => String(url).endsWith('/api/auth/bootstrap'))
+    expect(bootCall).toBeTruthy()
+    const sentBody = JSON.parse(String(bootCall![1]?.body))
+    expect(sentBody.setupToken).toBe('my-setup-secret')
+    expect(sentBody.username).toBe('tokenadmin')
+    expect(wrapper.emitted('authenticated')).toBeTruthy()
+  })
+
+  it('g) PageLook delegates reserved setting key check to server and maps 400 reserved_setting_key on Load & Save', async () => {
+    dashboardState.mode = 'online'
+    dashboardState.canAccessAdmin = true
+    dashboardState.roles = ['admin']
+    dashboardState.tabs.look = 'modules'
+
+    const settingCalls: Array<{ url: string; method: string }> = []
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = typeof input === 'string' ? input : input.toString()
+        const method = init?.method?.toUpperCase() ?? 'GET'
+        if (url.includes('/api/admin/look')) {
+          return jsonResponse({ ok: true, look: { skin: 'reader', base: 'paper', custom: '#EAF2E3' } })
+        }
+        if (url.includes('/api/admin/settings/')) {
+          settingCalls.push({ url, method })
+          return jsonResponse(
+            {
+              error: 'reserved_setting_key',
+              message: `Cannot ${method === 'GET' ? 'read' : 'modify'} reserved domain setting key "gateway_auth_seen".`,
+            },
+            400,
+          )
+        }
+        return jsonResponse({ ok: true })
+      }),
+    )
+
+    const wrapper = mount(PageLook, { props: { status: null } })
+    await flushPromises()
+
+    const keyInput = wrapper.find('[data-look-setting-key]')
+    const valInput = wrapper.find('[data-look-setting-val]')
+    await keyInput.setValue('gateway_auth_seen')
+
+    await wrapper.find('[data-look-setting-load]').trigger('click')
+    await flushPromises()
+    expect(settingCalls.some((c) => c.method === 'GET' && c.url.endsWith('/api/admin/settings/gateway_auth_seen'))).toBe(
+      true,
+    )
+    expect(wrapper.find('[data-look-setting-msg]').text()).toBe(dashboardZhCN['dsh.lk.onlineSettingReservedErr'])
+
+    await valInput.setValue('{"seen":true}')
+    await wrapper.find('[data-look-setting-save]').trigger('click')
+    await flushPromises()
+    expect(settingCalls.some((c) => c.method === 'PUT' && c.url.endsWith('/api/admin/settings/gateway_auth_seen'))).toBe(
+      true,
+    )
+    expect(wrapper.find('[data-look-setting-msg]').text()).toBe(dashboardZhCN['dsh.lk.onlineSettingReservedErr'])
+  })
+
+  it('transferDb uses extended 130s timeout: does not abort at 30s and resolves at 45s, but aborts at 130s', async () => {
+    vi.useFakeTimers()
+    try {
+      // 1. Verify does not abort at 30s and resolves when server responds at 45s
+      const delayedFetch = vi.fn((_input: RequestInfo | URL, init?: RequestInit) => {
+        return new Promise<Response>((resolve, reject) => {
+          const timer = setTimeout(() => {
+            resolve(jsonResponse({ ok: true, dryRun: true, direction: 'push', tables: [] }))
+          }, 45_000)
+          init?.signal?.addEventListener('abort', () => {
+            clearTimeout(timer)
+            reject(new DOMException('The operation was aborted.', 'AbortError'))
+          })
+        })
+      })
+
+      const pendingTransfer = transferDb(
+        { targetUrl: 'postgresql://example.com/db', direction: 'push' },
+        delayedFetch as unknown as typeof fetch,
+      )
+
+      // Advance past default 30s timeout
+      await vi.advanceTimersByTimeAsync(30_000)
+      expect(delayedFetch).toHaveBeenCalledTimes(1)
+
+      // Advance by another 15s to reach 45s
+      await vi.advanceTimersByTimeAsync(15_000)
+      const res45 = await pendingTransfer
+      expect(res45.ok).toBe(true)
+      if (res45.ok) {
+        expect(res45.data.ok).toBe(true)
+      }
+
+      // 2. Verify aborts at TRANSFER_ADMIN_TIMEOUT_MS (130_000ms)
+      const hangingFetch = vi.fn((_input: RequestInfo | URL, init?: RequestInit) => {
+        return new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener('abort', () => {
+            reject(new DOMException('The operation was aborted.', 'AbortError'))
+          })
+        })
+      })
+
+      const timeoutTransfer = transferDb(
+        { targetUrl: 'postgresql://example.com/db', direction: 'push' },
+        hangingFetch as unknown as typeof fetch,
+      )
+
+      await vi.advanceTimersByTimeAsync(TRANSFER_ADMIN_TIMEOUT_MS)
+      const resTimeout = await timeoutTransfer
+      expect(resTimeout.ok).toBe(false)
+      if (!resTimeout.ok) {
+        expect(resTimeout.error.code).toBe('timeout')
+      }
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  // ── g) Cross-user progress isolation on Dashboard logout and re-login ───────
+  it('g) cross-user progress isolation: logout immediately clears User A records/outbox/timers, login reloads User B only and never flushes A writes', async () => {
+    // 1. User A (alice) is signed in
+    currentAuthStatus = {
+      authAdapter: 'hybrid',
+      authenticated: true,
+      needsBootstrap: false,
+      authSource: 'local',
+      authMethod: 'password',
+      rememberMe: false,
+      user: { id: 'alice', name: 'Alice User', email: 'alice@example.com' },
+      roles: ['reader'],
+      groups: [],
+      canAccessAdmin: false,
+      canAccessAuthor: false,
+      visibleSections: [],
+    }
+
+    const wrapper = mount(DashboardPage)
+    await flushPromises()
+
+    // 2. Set up progressStore attached to real getSession & subscribeSession
+    const clock = new FakeClock()
+    const scheduler = new FakeScheduler()
+    const storage = new MemoryStorage()
+    const backend = new ScriptedBackend('rest', clock)
+    backend.fetchAllResult = {
+      ok: true,
+      records: [rec('g01-l01', 'completed')],
+      serverDate: null,
+      unfilteredGet: true,
+    }
+
+    // Alice has cached completed lecture g01-l01 and a pending retry write g01-l02 with armed timer
+    storage.map.set(
+      STORAGE_KEYS.progressV2,
+      JSON.stringify({
+        schema: 1,
+        owner: 'alice',
+        server: { 'g01-l01': rec('g01-l01', 'completed') },
+        outbox: [op('g01-l02', 'completed', clock.t, { attempts: 1, nextAt: clock.t + 60_000 })],
+        seedVersion: null,
+        migratedV1: true,
+        skewMs: 0,
+      }),
+    )
+
+    const pStore = createProgressStore({
+      backend,
+      storage,
+      now: clock.now,
+      locks: new FakeLocks(),
+      scheduler,
+      target: window,
+      getSession: () => getSession(),
+      subscribeSession: (l) => subscribeSession(l),
+    })
+
+    try {
+      await pStore.load()
+      await pStore.flush()
+      expect(pStore.statusOf('g01-l01')).toBe('completed')
+      expect(pStore.statusOf('g01-l02')).toBe('completed')
+      expect(pStore.pending()).toBe(1)
+      expect(scheduler.timers.length).toBeGreaterThan(0)
+
+      // 3. User A clicks [data-dashboard-logout] in DashboardPage
+      currentAuthStatus = {
+        authAdapter: 'hybrid',
+        authenticated: false,
+        needsBootstrap: false,
+        authSource: 'none',
+        authMethod: 'none',
+        rememberMe: false,
+        user: null,
+        roles: [],
+        groups: [],
+        canAccessAdmin: false,
+        canAccessAuthor: false,
+        visibleSections: [],
+      }
+
+      const logoutBtn = wrapper.find('[data-dashboard-logout]')
+      expect(logoutBtn.exists()).toBe(true)
+      await logoutBtn.trigger('click')
+      await flushPromises()
+
+      // Dashboard shows login
+      expect(wrapper.findComponent(DashboardLogin).exists()).toBe(true)
+
+      // progressStore immediately clears A's records & outbox, cancels timer, persists owner: null
+      expect(pStore.pending()).toBe(0)
+      expect(pStore.statusOf('g01-l01')).toBe('not_started')
+      expect(pStore.statusOf('g01-l02')).toBe('not_started')
+      expect(scheduler.timers).toHaveLength(0)
+      expect(pStore.snapshot().owner).toBeNull()
+      const storedAfterLogout = JSON.parse(storage.map.get(STORAGE_KEYS.progressV2) ?? '{}')
+      expect(storedAfterLogout.owner).toBeNull()
+
+      // 4. User B (bob) logs in (DashboardLogin @authenticated) without reloading page
+      backend.fetchAllResult = {
+        ok: true,
+        records: [rec('g01-l03', 'completed')],
+        serverDate: null,
+        unfilteredGet: true,
+      }
+      currentAuthStatus = {
+        authAdapter: 'hybrid',
+        authenticated: true,
+        needsBootstrap: false,
+        authSource: 'local',
+        authMethod: 'password',
+        rememberMe: false,
+        user: { id: 'bob', name: 'Bob User', email: 'bob@example.com' },
+        roles: ['reader'],
+        groups: [],
+        canAccessAdmin: false,
+        canAccessAuthor: false,
+        visibleSections: [],
+      }
+
+      wrapper.findComponent(DashboardLogin).vm.$emit('authenticated')
+      await flushPromises()
+
+      // progressStore reloads ONLY bob's server progress, owner === 'bob'
+      expect(pStore.snapshot().owner).toBe('bob')
+      expect(pStore.statusOf('g01-l03')).toBe('completed')
+      expect(pStore.statusOf('g01-l01')).toBe('not_started')
+      expect(pStore.statusOf('g01-l02')).toBe('not_started')
+
+      // 5. Advancing scheduler timers / flushing NEVER sends alice's queued write
+      clock.advance(120_000)
+      for (const t of [...scheduler.timers]) t.fn()
+      await pStore.flush({ force: true })
+      await flushPromises()
+
+      for (const batch of backend.sent) {
+        for (const sentOp of batch) {
+          expect(sentOp.lectureId).not.toBe('g01-l02')
+        }
+      }
+    } finally {
+      pStore.destroy()
+    }
+  })
+
+  // ── h) Uninitialized online texts preserves deployed themeConfig.siteMeta values ─
+  it('h) PageTexts preserves deployed siteMeta values when GET /api/admin/texts returns null', async () => {
+    currentAuthStatus = {
+      authAdapter: 'hybrid',
+      authenticated: true,
+      needsBootstrap: false,
+      authSource: 'session',
+      authMethod: 'password',
+      rememberMe: false,
+      user: { id: 'author-2', name: 'Author', email: 'author@example.com' },
+      roles: ['reader', 'author'],
+      groups: [],
+      canAccessAdmin: false,
+      canAccessAuthor: true,
+      visibleSections: [],
+    }
+    const origFetch = globalThis.fetch
+    const putBodies: Array<Record<string, unknown>> = []
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = typeof input === 'string' ? input : input.toString()
+        const method = init?.method?.toUpperCase() ?? 'GET'
+        if (url.includes('/api/admin/texts')) {
+          if (method === 'PUT') {
+            const parsed = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>
+            putBodies.push(parsed)
+            return jsonResponse({ ok: true, texts: parsed.texts })
+          }
+          return jsonResponse({ ok: true, texts: null })
+        }
+        return origFetch(input, init)
+      }),
+    )
+
+    dashboardState.mode = 'online'
+    dashboardState.canAccessAuthor = true
+    dashboardState.canAccessAdmin = false
+    dashboardState.roles = ['reader', 'author']
+
+    const wrapper = mount(PageTexts, { props: { texts: null } })
+    await flushPromises()
+
+    const zhName = wrapper.find<HTMLInputElement>('[data-texts-input="zh.name"]')
+    const enName = wrapper.find<HTMLInputElement>('[data-texts-input="en.name"]')
+    const zhTagline = wrapper.find<HTMLInputElement>('[data-texts-input="zh.tagline"]')
+    expect(zhName.element.value).toBe('Site ZH')
+    expect(enName.element.value).toBe('Site EN')
+    expect(zhTagline.element.value).toBe('Tag ZH')
+
+    // Single-field edit succeeds without re-entering required zh.name / en.name
+    await zhTagline.setValue('New Single Tagline')
+    await wrapper.find('[data-texts-save-btn]').trigger('click')
+    await flushPromises()
+
+    expect(putBodies).toHaveLength(1)
+    expect(putBodies[0]?.texts).toEqual({
+      zh: { name: 'Site ZH', shortName: 'Site', navText: 'Nav ZH', tagline: 'New Single Tagline', description: 'Desc {lectures}' },
+      en: { name: 'Site EN', shortName: 'Site', navText: 'Nav EN', tagline: 'Tag EN', description: 'Desc {lectures}' },
+    })
+  })
+
+  it('confirms unsaved edits before logout and aborts logout when stay is selected (REV3-1)', async () => {
+    currentAuthStatus = {
+      authAdapter: 'password',
+      authenticated: true,
+      needsBootstrap: false,
+      authSource: 'cookie',
+      authMethod: 'password',
+      rememberMe: false,
+      user: { id: 'alice', name: 'Alice User', email: 'alice@example.com' },
+      roles: ['reader'],
+      groups: [],
+      canAccessAdmin: false,
+      canAccessAuthor: false,
+      visibleSections: [],
+    }
+
+    const wrapper = mount(DashboardPage)
+    await flushPromises()
+
+    expect(wrapper.find('[data-dashboard-logout]').exists()).toBe(true)
+    expect((await getSession()).status).toBe('authenticated')
+
+    // Register a dirty model on the current page
+    let isDirty = true
+    const unregister = registerModel('test-dirty-account', {
+      page: dashboardState.page,
+      dirty: () => isDirty,
+      save: async () => {
+        isDirty = false
+        return true
+      },
+      discard: () => {
+        isDirty = false
+      },
+    })
+
+    try {
+      const logoutBtn = wrapper.find('[data-dashboard-logout]')
+      await logoutBtn.trigger('click')
+      await flushPromises()
+
+      // The ask dialog is now open with leave confirmation
+      const askDialog = wrapper.find<HTMLDialogElement>('dialog.db-dlg')
+      expect(askDialog.exists()).toBe(true)
+
+      // Click the "stay" button
+      const stayButton = wrapper.find('[data-dlg-btn="stay"]')
+      expect(stayButton.exists()).toBe(true)
+      await stayButton.trigger('click')
+      await flushPromises()
+
+      // Logout was aborted: session remains authenticated, login screen is NOT shown
+      expect((await getSession()).status).toBe('authenticated')
+      expect(wrapper.findComponent(DashboardLogin).exists()).toBe(false)
+      const logoutFetch = fetchCalls.find((c) => c.url.includes('/api/auth/logout'))
+      expect(logoutFetch).toBeUndefined()
+    } finally {
+      unregister()
+    }
+  })
+
+  it('preserves configured per-tool switches when disabling and re-enabling an online MCP server', async () => {
+    dashboardState.mode = 'online'
+    dashboardState.canAccessAuthor = true
+    dashboardState.canAccessAdmin = true
+    dashboardState.roles = ['reader', 'author', 'admin']
+
+    const putPayloads: Array<{ servers?: Array<{ id: string; enabled?: boolean; tools?: Record<string, boolean> }> }> = []
+    let srvEnabled = true
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = typeof input === 'string' ? input : input.toString()
+        const method = (init?.method ?? 'GET').toUpperCase()
+        if (url.endsWith('/api/admin/ai-tools')) {
+          if (method === 'PUT' && typeof init?.body === 'string') {
+            const parsed = JSON.parse(init.body) as (typeof putPayloads)[number]
+            putPayloads.push(parsed)
+            const srvPatch = parsed.servers?.find((s) => s.id === 'docs')
+            if (typeof srvPatch?.enabled === 'boolean') srvEnabled = srvPatch.enabled
+          }
+          return jsonResponse({
+            ok: true,
+            mcpEndpoint: { enabled: false, path: '/api/mcp' },
+            engineTools: [
+              { name: 'search_concepts', enabled: true, calls7d: 0, errors7d: 0 },
+              { name: 'get_concept', enabled: true, calls7d: 0, errors7d: 0 },
+            ],
+            mcpServers: [
+              {
+                id: 'docs',
+                name: 'Docs MCP',
+                host: 'mcp.example.com',
+                enabled: srvEnabled,
+                connectionState: srvEnabled ? 'connected' : 'disabled',
+                configuredTools: { lookup: true, disabled_tool: false },
+                tools: [
+                  { name: 'lookup', enabled: srvEnabled, calls7d: 0, errors7d: 0 },
+                  { name: 'disabled_tool', enabled: false, calls7d: 0, errors7d: 0 },
+                ],
+              },
+            ],
+            settings: {
+              provider: 'openai',
+              maxSteps: 4,
+              timeoutMs: 9000,
+              maxResultBytes: 18000,
+              mcpTokenSet: true,
+              ticketSecretSet: true,
+              source: 'server/.env',
+            },
+            statsSource: 'memory',
+            toolCallCounts7d: {},
+          })
+        }
+        return jsonResponse({ ok: true })
+      }),
+    )
+
+    const wrapper = mount(CompanionTools)
+    await flushPromises()
+
+    // Turn server off and save -> effective tools are false on wire, configuredTools must preserve lookup: true
+    await wrapper.find('[data-server-switch="docs"]').trigger('click')
+    await wrapper.find('[data-tools-save]').trigger('click')
+    await flushPromises()
+
+    expect(putPayloads).toHaveLength(1)
+    expect(putPayloads[0]?.servers?.[0]).toEqual({
+      id: 'docs',
+      enabled: false,
+      tools: { lookup: true, disabled_tool: false },
+    })
+    expect(wrapper.find('[data-server-tool="docs/lookup"]').attributes('aria-checked')).toBe('true')
+
+    // Re-enable server and save -> lookup remains true without being wiped to false
+    await wrapper.find('[data-server-switch="docs"]').trigger('click')
+    await wrapper.find('[data-tools-save]').trigger('click')
+    await flushPromises()
+
+    expect(putPayloads).toHaveLength(2)
+    expect(putPayloads[1]?.servers?.[0]).toEqual({
+      id: 'docs',
+      enabled: true,
+      tools: { lookup: true, disabled_tool: false },
+    })
+
+    wrapper.unmount()
+  })
+
+  it('preserves restricted rules for hidden groups absent from theme.groups when saving PageAccess', async () => {
+    dashboardState.mode = 'online'
+    dashboardState.canAccessAuthor = true
+    dashboardState.canAccessAdmin = true
+    dashboardState.roles = ['reader', 'author', 'admin']
+
+    const fullAccess = {
+      default: 'public',
+      enforcement: 'gateway',
+      groups: {
+        G01: { read: 'public' },
+        G_HIDDEN_STAFF: { read: ['staff'] },
+        G_HIDDEN_LOGIN: { read: 'authenticated' },
+      },
+    }
+    const putAccessPayloads: Array<Record<string, unknown>> = []
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = typeof input === 'string' ? input : input.toString()
+        const method = (init?.method ?? 'GET').toUpperCase()
+        if (url.endsWith('/api/admin/access')) {
+          if (method === 'GET') {
+            return jsonResponse({ ok: true, source: 'db', access: fullAccess })
+          }
+          if (method === 'PUT' && typeof init?.body === 'string') {
+            const parsed = JSON.parse(init.body) as { access: Record<string, unknown> }
+            putAccessPayloads.push(parsed.access)
+            return jsonResponse({
+              ok: true,
+              access: parsed.access,
+              persistence: { mode: 'db', effect: 'rebuild_required' },
+            })
+          }
+        }
+        return jsonResponse({ ok: true })
+      }),
+    )
+
+    const wrapper = mount(PageAccess, { props: { access: null, autheliaPreview: '' } })
+    await flushPromises()
+
+    // 1. Change visible group G01 -> authenticated and save
+    await wrapper.find('[data-tpopen="G01"]').trigger('click')
+    await wrapper.find('[data-tpv="login"]').trigger('click')
+    await wrapper.find('[data-access-save-btn]').trigger('click')
+    await flushPromises()
+
+    expect(putAccessPayloads).toHaveLength(1)
+    expect(putAccessPayloads[0]).toEqual({
+      default: 'public',
+      enforcement: 'gateway',
+      groups: {
+        G01: { read: 'authenticated' },
+        G_HIDDEN_STAFF: { read: ['staff'] },
+        G_HIDDEN_LOGIN: { read: 'authenticated' },
+      },
+    })
+
+    // 2. Revert visible group G01 -> public and save again -> hidden restricted groups + enforcement='gateway' must remain intact
+    await wrapper.find('[data-tpopen="G01"]').trigger('click')
+    await wrapper.find('[data-tpv="public"]').trigger('click')
+    await wrapper.find('[data-access-save-btn]').trigger('click')
+    await flushPromises()
+
+    expect(putAccessPayloads).toHaveLength(2)
+    expect(putAccessPayloads[1]).toEqual({
+      default: 'public',
+      enforcement: 'gateway',
+      groups: {
+        G01: { read: 'public' },
+        G_HIDDEN_STAFF: { read: ['staff'] },
+        G_HIDDEN_LOGIN: { read: 'authenticated' },
+      },
+    })
+
+    wrapper.unmount()
+  })
+})

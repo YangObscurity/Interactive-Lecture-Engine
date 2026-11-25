@@ -210,17 +210,27 @@ test.describe('(d) the Dashboard entry in the top bar', () => {
     await page.waitForTimeout(400)
   }
 
-  for (const [name, setup] of [['anonymous', anonymous], ['a non-admin session', reader]] as const) {
-    test(`${name}: no entry on the home page or in the mobile menu`, async ({ page }) => {
-      await setup(page)
-      await open(page, '/')
-      await expect(page.locator('[data-lec-dashboard-link]')).toHaveCount(0)
-      await page.setViewportSize({ width: 375, height: 800 })
-      await page.locator('.VPNavBarHamburger').click()
-      await expect(page.locator('.VPNavScreen')).toBeVisible()
-      await expect(page.locator('[data-lec-dashboard-link]')).toHaveCount(0)
-    })
-  }
+  test('anonymous: no entry on the home page or in the mobile menu', async ({ page }) => {
+    await anonymous(page)
+    await open(page, '/')
+    await expect(page.locator('[data-lec-dashboard-link]')).toHaveCount(0)
+    await page.setViewportSize({ width: 375, height: 800 })
+    await page.locator('.VPNavBarHamburger').click()
+    await expect(page.locator('.VPNavScreen')).toBeVisible()
+    await expect(page.locator('[data-lec-dashboard-link]')).toHaveCount(0)
+  })
+
+  test('reader: Dashboard entry opens /dashboard for personal learning & account', async ({ page }) => {
+    await reader(page)
+    await open(page, '/')
+    await expect(link(page)).toHaveCount(1)
+    await expect(link(page)).toHaveText('控制台')
+    await expect(link(page)).toHaveAttribute('href', '/dashboard')
+    await page.setViewportSize({ width: 375, height: 800 })
+    await page.locator('.VPNavBarHamburger').click()
+    await expect(page.locator('.VPNavScreen')).toBeVisible()
+    await expect(page.locator('.VPNavScreen [data-lec-dashboard-link]')).toHaveCount(1)
+  })
 
   test('admin: the entry sits before the settings button and opens /dashboard (zh) and /en/dashboard (en)', async ({ page }) => {
     await admin(page)

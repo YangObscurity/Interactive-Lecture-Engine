@@ -100,18 +100,32 @@ export class ScriptedBackend implements ProgressBackend {
   readonly sent: OutboxOp[][] = []
   fetchAllCalls = 0
   fetchAllResult: FetchAllResult = { ok: true, records: [], serverDate: null, unfilteredGet: true }
+  /** Optional scripted results for successive `fetchAll` calls; falls back to `fetchAllResult`. */
+  fetchAllResults: Array<FetchAllResult | Promise<FetchAllResult>> = []
   /** Results returned by successive `send` calls; when exhausted, `defaultSend` runs. */
   sendResults: Array<SendResult | Promise<SendResult>> = []
+  readonly sendSignals: AbortSignal[] = []
+  readonly fetchSignals: AbortSignal[] = []
+  get lastSendSignal(): AbortSignal | undefined {
+    return this.sendSignals.at(-1)
+  }
+  get lastFetchSignal(): AbortSignal | undefined {
+    return this.fetchSignals.at(-1)
+  }
+
   constructor(
     public kind: 'local' | 'rest' = 'rest',
     private readonly clock: FakeClock = new FakeClock(),
   ) {}
-  async fetchAll(): Promise<FetchAllResult> {
+  async fetchAll(signal?: AbortSignal): Promise<FetchAllResult> {
     this.fetchAllCalls++
-    return this.fetchAllResult
+    if (signal) this.fetchSignals.push(signal)
+    const next = this.fetchAllResults.shift()
+    return next ?? this.fetchAllResult
   }
-  async send(ops: OutboxOp[]): Promise<SendResult> {
+  async send(ops: OutboxOp[], signal?: AbortSignal): Promise<SendResult> {
     this.sent.push(ops)
+    if (signal) this.sendSignals.push(signal)
     const next = this.sendResults.shift()
     if (next) return next
     return { ok: true, records: ops.map((o) => rec(o.lectureId, o.status, { groupId: o.groupId, updatedAt: this.clock.iso() })), serverDate: null }

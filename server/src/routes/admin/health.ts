@@ -52,7 +52,7 @@ export function createAdminHealthHandler(config: AppConfig, db: Db, recorder?: A
 
     const ok = dbStatus !== 'down' && notionStatus !== 'down'
 
-    const dbKind = config.databaseUrl.startsWith('pglite:') ? 'pglite' : 'postgres'
+    const dbKind = db.kind === 'pglite' ? 'pglite' : 'postgres'
 
     const responseData = {
       ok,

@@ -1,9 +1,10 @@
 import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs'
-import { dirname, resolve } from 'node:path'
+import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { PGlite } from '@electric-sql/pglite'
 import { redactSecret } from '../src/config/load.js'
+import { resolveBackupDir } from '../src/db/backupDir.js'
 import { redactUrlSecrets } from '../src/db/index.js'
 import { type DbCliOptions, resolveDatabaseConnection } from './db.js'
 
@@ -24,7 +25,6 @@ export interface BackupResult {
   pgDumpCommand?: string
 }
 
-const DEFAULT_BACKUP_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '../backups')
 const DEFAULT_RETENTION = 14
 
 export function formatTimestamp(date: Date = new Date()): string {
@@ -51,12 +51,7 @@ export async function runBackup(options: BackupOptions = {}): Promise<BackupResu
     _secretsToScrub = resolved.secretsToScrub
   }
 
-  const backupDir = resolve(
-    options.backupDir ??
-      options.env?.BACKUP_DIR ??
-      process.env.BACKUP_DIR ??
-      DEFAULT_BACKUP_DIR,
-  )
+  const backupDir = resolveBackupDir(options.backupDir, options.env?.BACKUP_DIR)
 
   const retention =
     options.retention ??

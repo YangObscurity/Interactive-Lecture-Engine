@@ -1,15 +1,21 @@
 import { describe, expect, it } from 'vitest'
 import {
+  ANONYMOUS_AUTH_RESULT,
   ANONYMOUS_SESSION,
   createAuthAdapter,
   createNoneAuthAdapter,
   createTrustedHeaderAuthAdapter,
+  hasSeenGatewayAuthInMemory,
+  markGatewayAuthSeen,
+  resetGatewayAuthSeen,
   resolveRoles,
   resolveTrustedHeaderAuth,
 } from '../../src/auth/index.js'
 import type { AppConfig } from '../../src/config/schema.js'
+import type { Db } from '../../src/db/types.js'
+import { FailedLoginBackoff } from '../../src/http/rateLimit.js'
 
-function makeMockConfig(overrides: Partial<AppConfig> = {}): AppConfig {
+function makeMockConfig<T extends Partial<AppConfig>>(overrides: T = {} as T): AppConfig & T {
   return {
     databaseUrl: 'postgres://localhost:5432/test',
     databaseUrlDirect: null,
@@ -57,6 +63,15 @@ function makeMockConfig(overrides: Partial<AppConfig> = {}): AppConfig {
     aiToolMaxSteps: 5,
     aiMcpToken: null,
     aiMcpTicketSecret: null,
+    authCookieName: 'lec_session',
+    authCookieSecure: 'auto',
+    sessionTtlHours: 12,
+    rememberMeDays: 30,
+    authMethodsEnabled: 'password,passkey,gateway',
+    webauthnRpId: '',
+    webauthnRpName: 'Interactive Lecture Engine',
+    webauthnOrigin: '',
+    authBootstrapToken: null,
     ...overrides,
   }
 }
@@ -264,5 +279,82 @@ describe('auth/trustedHeader', () => {
       expect(res.effectiveUserId).toBe('dave')
       expect(res.session.authenticated).toBe(true)
     })
+
+    it('rejects gateway headers as anonymous when gateway is disabled in AUTH_METHODS_ENABLED', () => {
+      const cfg = makeMockConfig({
+        authAdapter: 'trusted-header',
+        authMethodsEnabled: 'password,passkey',
+      })
+      const adapter = createAuthAdapter(cfg)
+      const getHeader = (n: string) => {
+        const lower = n.toLowerCase()
+        if (lower === 'remote-user') return 'alice'
+        if (lower === 'remote-groups') return 'admins'
+        return undefined
+      }
+      expect(adapter.authenticate(getHeader)).toEqual(ANONYMOUS_AUTH_RESULT)
+      expect(resolveTrustedHeaderAuth(getHeader, cfg).session.authenticated).toBe(false)
+    })
+
+    it('retries persisting gateway_auth_seen after transient setSetting failure while keeping in-memory guard', async () => {
+      let txCalls = 0
+      const mockDb: Db = {
+        kind: 'pglite',
+        query: async () => ({ rows: [], rowCount: 0 }),
+        exec: async () => {},
+        close: async () => {},
+        tx: async (fn) => {
+          txCalls += 1
+          if (txCalls === 1) throw new Error('transient db outage')
+          return fn({
+            query: async () => ({ rows: [], rowCount: 1 }),
+            exec: async () => {},
+          })
+        },
+      }
+      resetGatewayAuthSeen(mockDb)
+      markGatewayAuthSeen(mockDb)
+      expect(hasSeenGatewayAuthInMemory(mockDb)).toBe(true)
+      await new Promise((r) => setTimeout(r, 10))
+      expect(txCalls).toBe(1)
+
+      // Next request retries persistence since the first attempt failed
+      markGatewayAuthSeen(mockDb)
+      await new Promise((r) => setTimeout(r, 10))
+      expect(txCalls).toBe(2)
+
+      // Once persisted successfully, subsequent calls do not rewrite DB
+      markGatewayAuthSeen(mockDb)
+      await new Promise((r) => setTimeout(r, 10))
+      expect(txCalls).toBe(2)
+      resetGatewayAuthSeen(mockDb)
+    })
+  })
+})
+
+describe('http/rateLimit FailedLoginBackoff', () => {
+  it('replaces an expired key without evicting other active blocked accounts when full', () => {
+    let nowMs = 1_000_000
+    const backoff = new FailedLoginBackoff(2, () => nowMs, {
+      baseMs: 40_000,
+      maxMs: 40_000,
+      resetAfterMs: 60_000,
+      maxEntries: 2,
+    })
+
+    // Fill capacity with keyA (will expire at t0+60s) and keyB (blocked until t0+80s)
+    backoff.recordFailure('keyA')
+    nowMs += 40_000
+    backoff.recordFailure('keyB')
+    backoff.recordFailure('keyB')
+    expect(backoff.check('keyB').ok).toBe(false)
+
+    // keyA expires at t0+60s while keyB is still actively blocked for 20s more
+    nowMs += 20_000
+    backoff.recordFailure('keyA')
+
+    // Replacing expired keyA must NOT have evicted active keyB
+    expect(backoff.check('keyB').ok).toBe(false)
+    expect(backoff.check('keyA').ok).toBe(true)
   })
 })

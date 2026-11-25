@@ -506,6 +506,7 @@ html.dark[data-lec-theme='datasheet'] .lec-dashboard .db-unsaved { background: v
 .lec-dashboard .db-srv-h { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; padding: 10px 16px; }
 .lec-dashboard .db-srv-b { display: grid; gap: 10px; padding: 0 16px 14px; }
 .lec-dashboard .db-grow { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lec-dashboard .db-in.db-grow { flex: 1 1 12rem; width: auto; min-width: 0; }
 /* a changed table row (access tiers, tools): the accent bar on its first cell (原型 .tp-btn.dirty{border-left:3px solid accent}) */
 .lec-dashboard .db-t tr.dirty td:first-child { box-shadow: inset 3px 0 0 var(--lec-accent); }
 
@@ -614,3 +615,12 @@ html:has(.lec-dashboard .db-savebar) { scroll-padding-bottom: 72px; }
 .lec-dashboard .db-btn-danger:hover { background: color-mix(in srgb, var(--lec-danger) 10%, transparent); }
 .lec-dashboard .db-srv-confirm { border: 1px solid var(--lec-danger); border-radius: var(--db-r); padding: 10px 14px; background: var(--lec-surface); margin-top: 8px; display: grid; gap: 6px; }
 .lec-dashboard .db-addsrv { border-top: var(--db-line); padding: 14px 16px; display: grid; gap: 10px; }
+
+/* ── WP-5: sidebar footer & non-blocking rebuild banner ── */
+.lec-dashboard .db-side-foot { padding-top: 8px; border-top: var(--db-line); display: flex; gap: 8px; }
+.lec-dashboard .db-rebuild-banner { align-items: center; border-color: var(--lec-warning); }
+.lec-dashboard .db-navsel-row { display: none; gap: 8px; align-items: center; }
+@media (max-width: 720px) {
+  .lec-dashboard .db-navsel-row { display: flex; position: sticky; top: calc(var(--vp-nav-height, 64px) + 4px); z-index: 4; }
+  .lec-dashboard .db-navsel-row .db-navsel { flex: 1 1 auto; position: static; }
+}

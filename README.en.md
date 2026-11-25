@@ -138,7 +138,7 @@ How to write content: [docs/authoring/](docs/authoring/README.md).
 <summary><picture><source media="(prefers-color-scheme: dark)" srcset="docs/brand/icons/access-dark.svg"><img alt="" src="docs/brand/icons/access-light.svg" width="22"></picture>&nbsp; <b>Access control</b> · tiers per course group, restricted content kept out of public files</summary>
 
 - Every course group can have an access tier: public, signed-in readers, or named user groups.
-- At build time restricted content (titles, text, chart data, search index) stays out of the public files, and a gateway manifest for nginx is written. The reader's identity reaches the site and the backend from a gateway in front (e.g. Authelia) through request headers.
+- At build time restricted content (titles, text, chart data, search index) stays out of the public files, and a gateway manifest for nginx is written. Reader identity comes from built-in accounts (password or Passkeys), a sign-in gateway in front (e.g. Authelia) through request headers, or both (`hybrid`).
 
 </details>
 
@@ -154,10 +154,10 @@ How to write content: [docs/authoring/](docs/authoring/README.md).
 </details>
 
 <details>
-<summary><picture><source media="(prefers-color-scheme: dark)" srcset="docs/brand/icons/layers-dark.svg"><img alt="" src="docs/brand/icons/layers-light.svg" width="22"></picture>&nbsp; <b>Dashboard</b> · content checks, site texts, prompts, course groups, status</summary>
+<summary><picture><source media="(prefers-color-scheme: dark)" srcset="docs/brand/icons/layers-dark.svg"><img alt="" src="docs/brand/icons/layers-light.svg" width="22"></picture>&nbsp; <b>Dashboard</b> · reading record, content checks, access, database and system operations</summary>
 
-- The `/dashboard` page: content check results, site texts, companion prompts and quick actions, course groups and access tiers, themes, run status and the terminal log.
-- Editing works only on the local dev server, from the same machine and with the dev token; a deployed site is read-only.
+- The `/dashboard` page follows three roles: `reader` views personal progress and manages account security (password, Passkeys, sessions); `author` adds content checks, figures, site texts and AI companion prompts; `admin` adds access tiers, appearance, user roles, runtime status and logs, backup archives, database engine switching and table editing.
+- On the local dev server it edits `content/` directly (same machine plus dev token); with `lecture-api`, authenticated users can edit online by role in the database (also written to `CONTENT_DIR` when mounted, with a notice when a static rebuild is needed).
 
 </details>
 
@@ -172,7 +172,7 @@ How to write content: [docs/authoring/](docs/authoring/README.md).
 
 ## Backend: lecture-api (optional)
 
-A static site needs no backend. Deploy it when you want progress across devices, sign-in identities or the AI companion online.
+A static site needs no backend. Deploy it when you want progress across devices, sign-in accounts, online Dashboard management or the AI companion.
 
 <table>
 <tr>
@@ -185,7 +185,7 @@ A static site needs no backend. Deploy it when you want progress across devices,
 </tr>
 <tr>
 <td width="190"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/brand/icons/gateway-dark.svg"><img alt="" src="docs/brand/icons/gateway-light.svg" width="22"></picture>&nbsp; <b>Deployment</b></td>
-<td>behind nginx and a sign-in gateway that passes the reader's identity</td>
+<td>supports built-in accounts and Passkeys, sits behind nginx and a sign-in gateway, or runs both in <code>hybrid</code> mode</td>
 </tr>
 </table>
 
@@ -215,6 +215,7 @@ See [server/README.md](server/README.md); deployment, gateway, backups and upgra
 <a href="docs-dev/I18N.md">Languages</a><br>
 <a href="docs-dev/PROGRESS.md">Reading progress</a><br>
 <a href="docs-dev/ACCESS.md">Access tiers</a><br>
+<a href="docs-dev/DASHBOARD.md">Dashboard</a><br>
 <a href="docs-dev/DEBUGGING.md">Frontend debugging</a>
 
 </td>
@@ -226,7 +227,8 @@ See [server/README.md](server/README.md); deployment, gateway, backups and upgra
 <a href="docs-dev/GATEWAY.md">Gateway</a><br>
 <a href="docs-dev/BACKUP.md">Backups</a><br>
 <a href="docs-dev/UPGRADE.md">Upgrades</a><br>
-<a href="server/README.md">Backend</a>
+<a href="server/README.md">Backend</a><br>
+<a href="docs-dev/README_SYNC.md">README sync rules</a>
 
 </td>
 </tr>
@@ -259,7 +261,7 @@ Privacy check before a commit: `node scripts/privacy/install-hook.mjs` installs 
 
 > [!NOTE]
 > - The interface is in Chinese and English only.
-> - The Dashboard can only edit on the local dev server. A few items (reader usage, backup list) have no backend endpoint yet and are marked as unavailable.
+> - Without `lecture-api`, a static deployment keeps the Dashboard read-only; concept drafts can only be edited on the local dev server. The online backup restore button runs a read-only archive check (checksum, gzip and table counts); a physical restore needs stopping the server and running `npm run db:restore`.
 > - PDF and long-image export downloads a headless Chromium, not installed by default.
 > - Large sites need a lot of memory to build: about 6 GB at the peak for about 450 pages; for small hosts see [BUILD.md](docs-dev/BUILD.md).
 > - The AI companion needs an OpenAI-compatible model API, paid for by whoever deploys it.

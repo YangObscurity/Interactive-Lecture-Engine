@@ -2,7 +2,7 @@
 /**
  * DashboardLink.vue - the top-bar entry to the Dashboard (before the settings button; inside the mobile menu on narrow screens).
  *
- * Shown only when `showDashboardEntry` says so (admin session online, local author mode in development): everyone else gets no
+ * Shown only when `showDashboardEntry` says so (any signed-in user online, or local author mode in development): everyone else gets no
  * element at all, so nothing is reserved for them. The session arrives after mount (SSR and hydration render nothing), so the link
  * appears at the end of the button group and moves only the settings button after it, by its own width.
  * Style: only `--lec-*` tokens.

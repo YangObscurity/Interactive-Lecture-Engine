@@ -10,6 +10,7 @@ import {
   type AiProvider,
   type AppConfig,
   type AuthAdapter,
+  type AuthCookieSecure,
   type AuthHeaderPreset,
   type LogLevel,
 } from './schema.js'
@@ -241,14 +242,16 @@ export function loadConfig(
   const authHeaderName = explicitName ?? preset.name
   const authGroupSeparator = explicitSep ?? preset.groupSeparator
 
+  const isHeaderBackedAdapter = authAdapter === 'trusted-header' || authAdapter === 'hybrid'
+
   if (
-    authAdapter === 'trusted-header' &&
+    isHeaderBackedAdapter &&
     authHeaderPreset === 'custom' &&
     !authHeaderUser &&
     !invalidKeys.includes('AUTH_HEADER_USER')
   ) {
     errors.push(
-      'AUTH_HEADER_USER: 当 AUTH_ADAPTER=trusted-header 且 AUTH_HEADER_PRESET=custom 时必须配置 AUTH_HEADER_USER',
+      `AUTH_HEADER_USER: 当 AUTH_ADAPTER=${authAdapter} 且 AUTH_HEADER_PRESET=custom 时必须配置 AUTH_HEADER_USER`,
     )
     invalidKeys.push('AUTH_HEADER_USER', 'AUTH_HEADER_PRESET')
   }
@@ -260,14 +263,31 @@ export function loadConfig(
     !invalidKeys.includes('HOST') &&
     !invalidKeys.includes('AUTH_ADAPTER') &&
     !invalidKeys.includes('ALLOW_NON_LOOPBACK') &&
-    authAdapter === 'trusted-header' &&
+    isHeaderBackedAdapter &&
     !isLoopbackHost(host) &&
     !allowNonLoopback
   ) {
     errors.push(
-      `HOST (${host}): AUTH_ADAPTER=trusted-header 模式下禁止绑定非回环地址；请改用回环地址（如 127.0.0.1）或在确保上游网关覆盖身份头后显式设置 ALLOW_NON_LOOPBACK=true`,
+      `HOST (${host}): AUTH_ADAPTER=${authAdapter} 模式下禁止绑定非回环地址；请改用回环地址（如 127.0.0.1）或在确保上游网关覆盖身份头后显式设置 ALLOW_NON_LOOPBACK=true`,
     )
     invalidKeys.push('HOST', 'AUTH_ADAPTER', 'ALLOW_NON_LOOPBACK')
+  }
+
+  const authMethodsRaw = (resolved.get('AUTH_METHODS_ENABLED') as string | undefined) ?? 'password,passkey,gateway'
+  const enabledAuthMethods = authMethodsRaw
+    .split(',')
+    .map((m) => m.trim())
+    .filter(Boolean)
+  if (
+    !invalidKeys.includes('AUTH_ADAPTER') &&
+    !invalidKeys.includes('AUTH_METHODS_ENABLED') &&
+    authAdapter === 'trusted-header' &&
+    !enabledAuthMethods.includes('gateway')
+  ) {
+    errors.push(
+      'AUTH_METHODS_ENABLED: 当 AUTH_ADAPTER=trusted-header 时必须包含 gateway，否则网关头认证无法生效',
+    )
+    invalidKeys.push('AUTH_METHODS_ENABLED', 'AUTH_ADAPTER')
   }
 
   const aiProvider = (resolved.get('AI_PROVIDER') as AiProvider | undefined) ?? 'off'
@@ -308,6 +328,17 @@ export function loadConfig(
     authGroupSeparator,
     authRoleMap,
     logoutUrl: (resolved.get('LOGOUT_URL') as string | null) ?? null,
+    authCookieName: (resolved.get('AUTH_COOKIE_NAME') as string | undefined) ?? 'lec_session',
+    authCookieSecure: (resolved.get('AUTH_COOKIE_SECURE') as AuthCookieSecure | undefined) ?? 'auto',
+    sessionTtlHours: (resolved.get('SESSION_TTL_HOURS') as number | undefined) ?? 12,
+    rememberMeDays: (resolved.get('REMEMBER_ME_DAYS') as number | undefined) ?? 30,
+    authMethodsEnabled:
+      (resolved.get('AUTH_METHODS_ENABLED') as string | undefined) ?? 'password,passkey,gateway',
+    webauthnRpId: (resolved.get('WEBAUTHN_RP_ID') as string | undefined) ?? '',
+    webauthnRpName:
+      (resolved.get('WEBAUTHN_RP_NAME') as string | undefined) ?? 'Interactive Lecture Engine',
+    webauthnOrigin: (resolved.get('WEBAUTHN_ORIGIN') as string | undefined) ?? '',
+    authBootstrapToken: (resolved.get('AUTH_BOOTSTRAP_TOKEN') as string | null) ?? null,
     dbAutoMigrate: Boolean(resolved.get('DB_AUTO_MIGRATE')),
     notionHealthUrl: (resolved.get('NOTION_HEALTH_URL') as string | null) ?? null,
     allowNonLoopback,

@@ -49,6 +49,12 @@ reviews:
   path_instructions:
     - path: ".github/workflows/**"
       instructions: "检查最小权限（permissions）、Fork PR 与评论门控隔离、Action SHA 固定以及避免脚本注入和密钥泄露。"
+    - path: "README*.md"
+      instructions: "严格对照 docs-dev/README_SYNC.md 审查：只写已实现事实、命令与限制，禁止营销口号或夸张修辞；保留 banner/hero/highlights/architecture SVG、<picture> 明暗适配、#2155c4 徽章、截图表格与 <details> 折叠结构；改动 README.md 时必须确认 README.en.md 同步更新，且所有相对路径、anchors 和 CLI 命令在仓库中真实存在。"
+    - path: "server/README.md"
+      instructions: "对照 server/.env.example、server/src/config/schema.ts、server/src/app.ts 与 server/src/routes/** 审查：第 8 节配置表必须完整覆盖 server/.env.example 的全部变量与默认值，认证模式、管理端路由及限制描述须与代码一致，遵循 docs-dev/README_SYNC.md 的客观技术语气。"
+    - path: "docs-dev/README_SYNC.md"
+      instructions: "确保 README 风格锁定条款、PR 触发矩阵与 scripts/check_readme_sync.mjs / .github/workflows/readme-sync.yml 的实际实现保持一致。"
     - path: "server/**"
       instructions: "重点审查 API 鉴权、Zod 输入校验、SQL/PGlite 查询安全性、错误边界与配置校验。"
     - path: "site/**"
@@ -76,6 +82,7 @@ knowledge_base:
     filePatterns:
       - "AGENTS.md"
       - "docs/authoring/**"
+      - "docs-dev/README_SYNC.md"
   learnings:
     scope: "local"
   issues:

@@ -1,10 +1,11 @@
 import type { AppConfig } from '../config/schema.js'
+import { defaultAuthRegistry } from './providers/registry.js'
 import { resolveRoles } from './roles.js'
 import {
-  ANONYMOUS_SESSION,
-  type AuthAdapter,
+  ANONYMOUS_AUTH_RESULT,
   type AuthResult,
   type HeaderGetter,
+  type SyncAuthAdapter,
 } from './types.js'
 
 // ASCII control characters (0x00-0x1F and 0x7F DEL)
@@ -26,9 +27,14 @@ export function resolveTrustedHeaderAuth(
   getHeader: HeaderGetter,
   config: AppConfig,
 ): AuthResult {
+  const gatewayMethod = defaultAuthRegistry.get('gateway')
+  if (gatewayMethod && !gatewayMethod.isEnabled(config)) {
+    return ANONYMOUS_AUTH_RESULT
+  }
+
   const userHeader = config.authHeaderUser
   if (!userHeader) {
-    return { session: ANONYMOUS_SESSION, effectiveUserId: null }
+    return ANONYMOUS_AUTH_RESULT
   }
 
   const rawUser = getCaseInsensitive(getHeader, userHeader)
@@ -48,19 +54,19 @@ export function resolveTrustedHeaderAuth(
   for (const val of candidates) {
     if (val !== undefined && val !== null) {
       if (val.length > 256 || val.trim().length > 256 || CONTROL_CHAR_RE.test(val)) {
-        return { session: ANONYMOUS_SESSION, effectiveUserId: null }
+        return ANONYMOUS_AUTH_RESULT
       }
     }
   }
 
   // Missing or whitespace-only user header means no identity
   if (rawUser === undefined || rawUser === null) {
-    return { session: ANONYMOUS_SESSION, effectiveUserId: null }
+    return ANONYMOUS_AUTH_RESULT
   }
 
   const user = rawUser.trim()
   if (user.length === 0) {
-    return { session: ANONYMOUS_SESSION, effectiveUserId: null }
+    return ANONYMOUS_AUTH_RESULT
   }
 
   // Parse and deduplicate groups preserving encounter order
@@ -78,6 +84,8 @@ export function resolveTrustedHeaderAuth(
   }
 
   const roles = resolveRoles(groups, config.authRoleMap)
+  const canAccessAdmin = roles.includes('admin')
+  const canAccessAuthor = canAccessAdmin || roles.includes('author')
 
   const email =
     rawEmail !== undefined && rawEmail !== null && rawEmail.trim().length > 0
@@ -102,10 +110,16 @@ export function resolveTrustedHeaderAuth(
       logoutUrl: config.logoutUrl ?? null,
     },
     effectiveUserId: user,
+    authSource: 'gateway',
+    authMethod: 'gateway',
+    sessionId: null,
+    rememberMe: false,
+    canAccessAdmin,
+    canAccessAuthor,
   }
 }
 
-export function createTrustedHeaderAuthAdapter(config: AppConfig): AuthAdapter {
+export function createTrustedHeaderAuthAdapter(config: AppConfig): SyncAuthAdapter {
   return {
     authenticate(getHeader: HeaderGetter): AuthResult {
       return resolveTrustedHeaderAuth(getHeader, config)
