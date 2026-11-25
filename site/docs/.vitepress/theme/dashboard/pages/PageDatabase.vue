@@ -200,16 +200,23 @@ async function loadInitial(): Promise<void> {
   }
 }
 
+let rowsRequestSeq = 0
+
 async function loadRows(allowRetry = true): Promise<void> {
+  const reqSeq = ++rowsRequestSeq
+  const requestedTable = activeTable.value
   errorMessage.value = ''
   rowsLoading.value = true
-  const res = await fetchDbTableRows(activeTable.value, {
+  const res = await fetchDbTableRows(requestedTable, {
     limit: limit.value,
     offset: offset.value,
     sort: sortCol.value,
     order: sortOrder.value,
     ...(searchQ.value.trim() ? { q: searchQ.value.trim() } : {}),
   })
+  if (reqSeq !== rowsRequestSeq || requestedTable !== activeTable.value) {
+    return
+  }
   rowsLoading.value = false
   if (isAdminOk(res)) {
     if (allowRetry && res.data.rows.length === 0 && res.data.total > 0 && offset.value > 0) {
@@ -409,6 +416,8 @@ function selectTable(name: DbCrudTableName): void {
   sortOrder.value = 'desc'
   offset.value = 0
   searchQ.value = ''
+  rows.value = []
+  totalRows.value = 0
   editorMode.value = 'closed'
   pendingDeleteRow.value = null
   void loadRows()

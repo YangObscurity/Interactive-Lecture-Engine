@@ -10,7 +10,7 @@ import { createAdminAiToolsHandler, createAdminAiToolsSaveHandler } from './aiTo
 import { createAdminBackupsRouter } from './backups.js'
 import { createAdminChecksRouter } from './checks.js'
 import { createAdminCompanionRouter } from './companion.js'
-import { createAdminDbRouter } from './db.js'
+import { createAdminDbRouter, type AdminDbRouterOptions } from './db.js'
 import { createAdminFiguresRouter } from './figures.js'
 import { createAdminHealthHandler } from './health.js'
 import { createAdminLogsRouter } from './logs.js'
@@ -25,6 +25,7 @@ export function createAdminRouter(
   db: Db,
   aiRuntime?: AiRuntime,
   dbManager?: DbManager,
+  adminDbOptions?: AdminDbRouterOptions,
 ): Hono<AppEnv> {
   const router = new Hono<AppEnv>()
   const effectiveDbManager =
@@ -86,7 +87,7 @@ export function createAdminRouter(
 
   router.use('/db', requireStrictAdmin)
   router.use('/db/*', requireStrictAdmin)
-  router.route('/db', createAdminDbRouter(effectiveDbManager))
+  router.route('/db', createAdminDbRouter(effectiveDbManager, adminDbOptions))
 
   const reservedSettingResponse = (
     c: Context<AppEnv>,

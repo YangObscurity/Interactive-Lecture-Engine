@@ -671,6 +671,7 @@ async function applyPgStatementTimeout(
 
 export interface AdminDbRouterOptions {
   transferWriteTimeoutMs?: number
+  onActiveDataMutated?: () => Promise<void> | void
 }
 
 export function createAdminDbRouter(
@@ -1506,6 +1507,10 @@ export function createAdminDbRouter(
           category: 'admin',
           message: `Database transfer completed: direction=${direction}, strategy=${conflictStrategy}, target=${redactTarget(targetUrl)}`,
         })
+
+        if (direction === 'pull') {
+          await options?.onActiveDataMutated?.()
+        }
 
         return c.json(
           {

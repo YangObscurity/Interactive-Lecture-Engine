@@ -1358,5 +1358,63 @@ describe('WP-3: Admin DB Selector, Hot-Swap, Transfer & Whitelisted 6-Table CRUD
         await dbManager.close()
       }
     })
+
+    it('invalidates AI runtime caches after a successful pull transfer updates site_settings', async () => {
+      const mainDir = join(tempRoot, 'pull-cache-main')
+      const extDir = join(tempRoot, 'pull-cache-ext')
+      const mainDb = createDb(`pglite:${mainDir}`)
+      const extDb = createDb(`pglite:${extDir}`)
+      await runMigrations(mainDb)
+      await runMigrations(extDb)
+
+      // Seed active DB with default enabled search_lectures tool and populate AI cache before pull
+      await mainDb.query(
+        `INSERT INTO site_settings (key, value, updated_by, updated_at)
+         VALUES ('ai_tools', '{"version":1,"engineTools":{"search_lectures":{"enabled":true}},"mcpServers":[]}'::jsonb, 'admin', NOW())`,
+      )
+      await extDb.query(
+        `INSERT INTO site_settings (key, value, updated_by, updated_at)
+         VALUES ('ai_tools', '{"version":1,"engineTools":{"search_lectures":{"enabled":false}},"mcpServers":[]}'::jsonb, 'admin', NOW())`,
+      )
+      await extDb.close()
+
+      const dbManager = createDbManager(mainDb, { databaseUrl: `pglite:${mainDir}` })
+      const app = createApp(makeTestConfig({ databaseUrl: `pglite:${mainDir}` }), dbManager.asDb(), {
+        dbManager,
+      })
+
+      try {
+        // Warm runtime cache via GET /api/admin/ai-tools
+        const beforeRes = await app.request('/api/admin/ai-tools', { headers: ADMIN_HEADERS })
+        expect(beforeRes.status).toBe(200)
+        const beforeBody = (await beforeRes.json()) as {
+          engineTools: Array<{ name: string; enabled: boolean }>
+        }
+        expect(beforeBody.engineTools.find((t) => t.name === 'search_lectures')?.enabled).toBe(true)
+
+        // Pull from external DB (overwriting site_settings.ai_tools)
+        const pullRes = await app.request('/api/admin/db/transfer', {
+          method: 'POST',
+          headers: { ...ADMIN_HEADERS, 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            targetUrl: `pglite:${extDir}`,
+            direction: 'pull',
+            conflictStrategy: 'upsert',
+            dryRun: false,
+          }),
+        })
+        expect(pullRes.status).toBe(200)
+
+        // Cache must immediately reflect the pulled ai_tools setting without swap or restart
+        const afterRes = await app.request('/api/admin/ai-tools', { headers: ADMIN_HEADERS })
+        expect(afterRes.status).toBe(200)
+        const afterBody = (await afterRes.json()) as {
+          engineTools: Array<{ name: string; enabled: boolean }>
+        }
+        expect(afterBody.engineTools.find((t) => t.name === 'search_lectures')?.enabled).toBe(false)
+      } finally {
+        await dbManager.close()
+      }
+    })
   })
 })

@@ -137,11 +137,12 @@ export function createApp(config: AppConfig, db: Db, options: AppOptions = {}): 
       return null
     }
   })
-  dbManager.onSwap?.(async () => {
+  const invalidateDbDerivedCaches = async (): Promise<void> => {
     await aiRuntime.prompts.reload(null)
     await aiRuntime.mcpManager.applyConfigOverride(null)
     resetGatewayAuthSeen(effectiveDb)
-  })
+  }
+  dbManager.onSwap?.(invalidateDbDerivedCaches)
   appCloseHandlers.set(app, () => aiRuntime.mcpManager.closeAll())
   const writeLimiter = new WriteRateLimiter(config.writeRatePerMinute, now)
   const authLimiter = new WriteRateLimiter(config.writeRatePerMinute, now)
@@ -367,7 +368,9 @@ export function createApp(config: AppConfig, db: Db, options: AppOptions = {}): 
   app.route('/api/mcp', mcpRouter)
 
   // Tier 3: Admin Routes
-  const adminRouter = createAdminRouter(config, effectiveDb, aiRuntime, dbManager)
+  const adminRouter = createAdminRouter(config, effectiveDb, aiRuntime, dbManager, {
+    onActiveDataMutated: invalidateDbDerivedCaches,
+  })
   app.route('/api/admin', adminRouter)
 
   // Unimplemented routes fall through

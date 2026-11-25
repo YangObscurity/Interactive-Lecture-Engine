@@ -75,6 +75,34 @@ test.describe('S6Z-3 & S6Z-4: Online RBAC Mode', () => {
     })
     await open(page, '#companion:tools')
     await expect(page.locator('[data-dashboard-unavailable="tools-online"]')).toBeVisible()
+
+    await session(page, ADMIN)
+    await page.context().route('**/api/admin/ai-tools', (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json; charset=utf-8',
+        body: JSON.stringify({
+          mcpEndpoint: { enabled: false, path: '/api/mcp' },
+          engineTools: [{ name: 'search_lectures', enabled: true, calls7d: 0, errors7d: 0 }],
+          mcpServers: [],
+          settings: {
+            provider: 'off',
+            maxSteps: 5,
+            timeoutMs: 8000,
+            maxResultBytes: 24000,
+            mcpTokenSet: false,
+            ticketSecretSet: false,
+            source: 'server/.env',
+          },
+          statsSource: 'memory',
+          toolCallCounts7d: {},
+        }),
+      }),
+    )
+    await page.reload({ waitUntil: 'domcontentloaded' })
+    await page.waitForSelector('.lec-dashboard[data-dashboard-ready="1"]')
+    await expect(page.locator('[data-dashboard-unavailable="tools-online"]')).toHaveCount(0)
+    await expect(page.locator('[data-tools-online-note]')).toBeVisible()
   })
 })
 

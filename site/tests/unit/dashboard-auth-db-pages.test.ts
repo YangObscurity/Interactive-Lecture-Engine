@@ -1556,4 +1556,118 @@ describe('WP-4 PageDatabase.vue', () => {
 
     wrapper.unmount()
   })
+
+  it('discards stale out-of-order fetchDbTableRows response after selectTable switches table', async () => {
+    let resolveDelayedAuthUsers: ((res: Response) => void) | null = null
+    const delayedAuthUsers = new Promise<Response>((resolve) => {
+      resolveDelayedAuthUsers = resolve
+    })
+
+    const twoTablesFixture = [
+      {
+        name: 'auth_users',
+        pkColumns: ['id'],
+        columns: ['id', 'username', 'roles', 'created_at'],
+        readOnlyColumns: ['id', 'created_at'],
+        editableColumns: ['username', 'roles'],
+        searchableColumns: ['username'],
+        defaultSort: 'created_at',
+        rowCount: 1,
+      },
+      {
+        name: 'progress',
+        pkColumns: ['user_id', 'lecture_id'],
+        columns: ['user_id', 'lecture_id', 'status', 'updated_at'],
+        readOnlyColumns: ['updated_at'],
+        editableColumns: ['status'],
+        searchableColumns: ['user_id', 'lecture_id'],
+        defaultSort: 'updated_at',
+        rowCount: 1,
+      },
+    ]
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = typeof input === 'string' ? input : input.toString()
+        if (url === '/api/admin/db/config') {
+          return jsonRes({
+            ok: true,
+            kind: 'pglite',
+            databaseUrl: 'pglite:./data/pglite',
+            databaseUrlDirect: null,
+            pgliteDir: './data/pglite',
+            envFilePath: 'server/.env',
+            envWritable: true,
+            migrations: { applied: 3, pending: 0, total: 3 },
+            tableCounts: { auth_users: 1, progress: 1 },
+          })
+        }
+        if (url === '/api/admin/db/tables') {
+          return jsonRes({ ok: true, tables: twoTablesFixture })
+        }
+        if (url.startsWith('/api/admin/db/tables/auth_users/rows')) {
+          return delayedAuthUsers
+        }
+        if (url.startsWith('/api/admin/db/tables/progress/rows')) {
+          return jsonRes({
+            ok: true,
+            table: 'progress',
+            rows: [
+              {
+                user_id: 'prog-user',
+                lecture_id: 'mea/L01',
+                status: 'completed',
+                updated_at: '2026-11-25T10:00:00Z',
+              },
+            ],
+            total: 1,
+            limit: 25,
+            offset: 0,
+            sort: 'updated_at',
+            order: 'desc',
+          })
+        }
+        return jsonRes({ ok: false, error: 'unexpected_url' }, 404)
+      }),
+    )
+
+    const wrapper = mount(PageDatabase)
+    await flushPromises()
+
+    // Initial load started auth_users (still pending); user switches to progress immediately
+    await wrapper.get('[data-db-table-tab="progress"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('prog-user')
+    expect((wrapper.get('[data-db-sort-col]').element as HTMLSelectElement).value).toBe('updated_at')
+
+    // Now the older slow auth_users response finally arrives — it must be ignored
+    resolveDelayedAuthUsers!(
+      jsonRes({
+        ok: true,
+        table: 'auth_users',
+        rows: [
+          {
+            id: 'u-stale',
+            username: 'stale-alice',
+            roles: ['admin'],
+            created_at: '2026-11-24T10:00:00Z',
+          },
+        ],
+        total: 9,
+        limit: 25,
+        offset: 0,
+        sort: 'created_at',
+        order: 'asc',
+      }),
+    )
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('prog-user')
+    expect(wrapper.text()).not.toContain('stale-alice')
+    expect((wrapper.get('[data-db-sort-col]').element as HTMLSelectElement).value).toBe('updated_at')
+    expect((wrapper.get('[data-db-sort-order]').element as HTMLSelectElement).value).toBe('desc')
+
+    wrapper.unmount()
+  })
 })
