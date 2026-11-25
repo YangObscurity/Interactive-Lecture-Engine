@@ -152,7 +152,7 @@ DATABASE_URL=pglite:./data/pglite-db DB_AUTO_MIGRATE=true npm run dev
 
 1. **服务强制绑定回环地址**：
    - 生产环境中服务必须只监听 `127.0.0.1`（默认）或 `::1`，严禁将端口直接暴露给公网。
-   - **安全护栏**：若 `AUTH_ADAPTER=trusted-header` 且 `HOST` 配置为非回环地址（如 `0.0.0.0`），服务启动时将强制报错退出。只有在确信上游经过合规反向代理且显式配置 `ALLOW_NON_LOOPBACK=true` 时才允许启动。
+   - **安全护栏**：若 `AUTH_ADAPTER` 为 `trusted-header` 或 `hybrid` 且 `HOST` 配置为非回环地址（如 `0.0.0.0`），服务启动时将强制报错退出。只有在确信上游经过合规反向代理且显式配置 `ALLOW_NON_LOOPBACK=true` 时才允许启动。
 2. **反向代理覆盖身份头（防伪造核心）**：
    - Nginx 在所有转发到后端的 `location` 中，必须通过 `auth_request_set` 读取认证网关（如 Authelia / Authentik）验证后的真实身份，再用 `proxy_set_header` 写入后端。客户端直接携带的同名请求头会被强制冲刷覆盖。
 3. **公开与透传接口清空身份头**：
@@ -308,8 +308,8 @@ npm run config:check
 1. **服务启动报错：`Pending migrations exist... Please run: npm run db:migrate`**
    - 原因：数据库中有未应用的迁移，且未开启自动迁移。
    - 解决：执行 `npm run db:migrate`，或者在 `.env` 中设置 `DB_AUTO_MIGRATE=true`。
-2. **服务启动报错：`AUTH_ADAPTER=trusted-header 模式下禁止绑定非回环地址`**
-   - 原因：配置了 `AUTH_ADAPTER=trusted-header`，但 `HOST` 填写了公网 IP 或 `0.0.0.0`。
+2. **服务启动报错：`AUTH_ADAPTER=trusted-header 或 hybrid 模式下禁止绑定非回环地址`**
+   - 原因：配置了 `AUTH_ADAPTER=trusted-header` 或 `hybrid`，但 `HOST` 填写了公网 IP 或 `0.0.0.0`。
    - 解决：将 `HOST` 改为 `127.0.0.1`。如确在隔离容器中由网关反向代理，可设置 `ALLOW_NON_LOOPBACK=true`。
 3. **数据库迁移执行卡住或报错建议锁失败**
    - 原因：`DATABASE_URL_DIRECT` 未配置且 `DATABASE_URL` 走的是 PgBouncer 事务池。

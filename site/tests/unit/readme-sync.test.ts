@@ -10,7 +10,7 @@ import { createJiti } from 'jiti'
 interface ReadmeSyncModule {
   REPO_ROOT: string
   analyzeChangedFiles: (files: string[], skipTagPresent?: boolean) => { errors: string[]; advisories: string[] }
-  checkReadmes: (repoRoot?: string) => { ok: boolean; errors: string[]; warnings: string[] }
+  checkReadmes: (repoRoot?: string) => { ok: boolean; errors: string[] }
   extractEnvVarsFromExample: (text: string) => string[]
   extractTableVarsFromServerReadme: (text: string) => string[] | null
 }
@@ -107,8 +107,14 @@ describe('readme sync & style lock', () => {
     const skipped = syncModule.analyzeChangedFiles(['README.md'], true)
     expect(skipped.errors).toEqual([])
 
-    const surfaceOnly = syncModule.analyzeChangedFiles(['server/src/routes/admin/db.ts'])
-    expect(surfaceOnly.errors).toEqual([])
-    expect(surfaceOnly.advisories.length).toBe(1)
+    const surfaceRouteOnly = syncModule.analyzeChangedFiles(['server/src/routes/admin/db.ts'])
+    expect(surfaceRouteOnly.errors).toEqual([])
+    expect(surfaceRouteOnly.advisories.length).toBe(1)
+
+    const surfaceDashboardOnly = syncModule.analyzeChangedFiles([
+      'site/docs/.vitepress/theme/dashboard/DashboardPage.vue',
+    ])
+    expect(surfaceDashboardOnly.errors).toEqual([])
+    expect(surfaceDashboardOnly.advisories.length).toBe(1)
   })
 })

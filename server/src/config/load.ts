@@ -273,6 +273,23 @@ export function loadConfig(
     invalidKeys.push('HOST', 'AUTH_ADAPTER', 'ALLOW_NON_LOOPBACK')
   }
 
+  const authMethodsRaw = (resolved.get('AUTH_METHODS_ENABLED') as string | undefined) ?? 'password,passkey,gateway'
+  const enabledAuthMethods = authMethodsRaw
+    .split(',')
+    .map((m) => m.trim())
+    .filter(Boolean)
+  if (
+    !invalidKeys.includes('AUTH_ADAPTER') &&
+    !invalidKeys.includes('AUTH_METHODS_ENABLED') &&
+    authAdapter === 'trusted-header' &&
+    !enabledAuthMethods.includes('gateway')
+  ) {
+    errors.push(
+      'AUTH_METHODS_ENABLED: 当 AUTH_ADAPTER=trusted-header 时必须包含 gateway，否则网关头认证无法生效',
+    )
+    invalidKeys.push('AUTH_METHODS_ENABLED', 'AUTH_ADAPTER')
+  }
+
   const aiProvider = (resolved.get('AI_PROVIDER') as AiProvider | undefined) ?? 'off'
   const difyApiKey = resolved.get('DIFY_API_KEY') as string | null | undefined
   const openaiApiKey = resolved.get('OPENAI_API_KEY') as string | null | undefined

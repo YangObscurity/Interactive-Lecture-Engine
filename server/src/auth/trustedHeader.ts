@@ -1,4 +1,5 @@
 import type { AppConfig } from '../config/schema.js'
+import { defaultAuthRegistry } from './providers/registry.js'
 import { resolveRoles } from './roles.js'
 import {
   ANONYMOUS_AUTH_RESULT,
@@ -26,6 +27,11 @@ export function resolveTrustedHeaderAuth(
   getHeader: HeaderGetter,
   config: AppConfig,
 ): AuthResult {
+  const gatewayMethod = defaultAuthRegistry.get('gateway')
+  if (gatewayMethod && !gatewayMethod.isEnabled(config)) {
+    return ANONYMOUS_AUTH_RESULT
+  }
+
   const userHeader = config.authHeaderUser
   if (!userHeader) {
     return ANONYMOUS_AUTH_RESULT

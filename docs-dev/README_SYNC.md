@@ -9,7 +9,7 @@
 | 文档 | 权威事实源 | 强制同步关系 |
 |---|---|---|
 | `README.md` | `site/`、`server/`、`docs-dev/`、`scripts/`、仓库根目录布局 | 必须与 `README.en.md` 保持节数、结构块与事实完全对齐 |
-| `README.en.md` | 与 `README.md` 相同 | 与 `README.md` 必须成对更新（除非 PR 明确标记 `[skip-readme-sync]`） |
+| `README.en.md` | 与 `README.md` 相同 | 与 `README.md` 必须成对更新（除非 PR 标题/正文或提交信息明确标记 `[skip-readme-sync]`） |
 | `server/README.md` | `server/.env.example`、`server/src/config/schema.ts`、`server/src/app.ts`、`server/src/routes/**` | 第 8 节配置表必须覆盖 `server/.env.example` 的全部激活变量 |
 
 ---
@@ -35,7 +35,7 @@
 4. 亮点与工作方式：`docs/brand/highlights-{zh,en}-{light,dark}.svg`、`docs/brand/architecture-{zh,en}-{light,dark}.svg`。
 5. 截图主表与 `<details>` 更多截图折叠区（引用 `docs/screenshots/*.png`，不得手工编造或指向不存在的文件；截图刷新须走 `cd site && npm run screenshots:readme`）。
 6. 快速开始 3 步标题图标（`step-1..3-{light,dark}.svg`）。
-7. 功能区 5 个 `<details>` 折叠块（分别配 `lecture`、`map`、`theme`、`access`、`ai`、`layers` 图标）及可选后端 HTML 表格（`server`、`database`、`gateway` 图标）。
+7. 功能区 6 个 `<details>` 折叠块（分别配 `lecture`、`map`、`theme`、`access`、`ai`、`layers` 图标）及可选后端 HTML 表格（`server`、`database`、`gateway` 图标）。
 8. 文档 3 列表格（`pen`、`puzzle`、`rocket` 图标）、仓库目录、开发与测试命令、隐私检查、已知限制、`参与 / Contributing` 及底部 MIT 声明。
 
 ---
@@ -44,15 +44,15 @@
 
 ### 3.1 确定性脚本与 GitHub Actions（零 API 成本）
 
-`node scripts/check_readme_sync.mjs` 在每次 Push（`main` / `feat/**`）与 Pull Request 运行，校验：
+`node scripts/check_readme_sync.mjs` 在针对 `v2` / `main` 分支的 Push 与 Pull Request 时自动运行，校验：
 
 1. **版式与视觉元素完整**：品牌图、`#2155c4` 徽章、双语切换、`##` 章节数、`<details>` 折叠块数量在 `README.md` 与 `README.en.md` 之间一致。
 2. **锚点与相对路径有效**：所有页内 `#anchor` 能匹配真实标题；所有本地链接与图片路径（`src`、`href`、Markdown 链接）真实存在于仓库。
 3. **风格禁词扫描**：拦截上文列出的营销/AI 夸饰词与标题 Emoji。
 4. **环境变量 100% 对齐**：`server/.env.example` 中每个环境变量均必须在 `server/README.md` 第 8 节配置表中存在且无冗余过时变量。
 5. **PR 变更联动检测**（`--base` / `--head`）：
-   - **硬阻断**：修改了 `README.md` 但未同步 `README.en.md`（或反之），且提交/PR 标题未携带 `[skip-readme-sync]`。
-   - **提醒（Step Summary Notice）**：改动了 `server/src/app.ts`、`server/src/routes/**`、`site/docs/.vitepress/theme/components/dashboard/**`、`site/package.json` 或 `docs-dev/` 且未修改 README 时，提示维护者确认是否需要补充面向用户的说明（纯粹内部 bugfix 可直接忽略或加 `[skip-readme-sync]`）。
+   - **硬阻断**：修改了 `README.md` 但未同步 `README.en.md`（或反之），且 PR 标题、PR 正文或提交信息未携带 `[skip-readme-sync]`。
+   - **提醒（Step Summary Notice）**：改动了 `server/.env.example`、`server/src/config/schema.ts`、`server/src/app.ts`、`server/src/routes/**`、`site/docs/.vitepress/theme/dashboard/**`、`site/package.json` 或 `docs-dev/`（除本文件）且未修改 README 时，提示维护者确认是否需要补充面向用户的说明（纯粹内部 bugfix 可直接忽略或加 `[skip-readme-sync]`）。
 
 ### 3.2 CodeRabbit 与 PR-Agent 协作职责
 

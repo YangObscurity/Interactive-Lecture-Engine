@@ -61,7 +61,7 @@ const SURFACE_CODE_PATTERNS = [
   /^server\/src\/config\/schema\.ts$/,
   /^server\/src\/app\.ts$/,
   /^server\/src\/routes\//,
-  /^site\/docs\/\.vitepress\/theme\/components\/dashboard\//,
+  /^site\/docs\/\.vitepress\/theme\/dashboard\//,
   /^site\/package\.json$/,
   /^docs-dev\/(?!README_SYNC\.md$)/,
 ]
@@ -281,7 +281,6 @@ export function analyzeChangedFiles(changedFiles, skipTagPresent = false) {
 
 export function checkReadmes(repoRoot = REPO_ROOT) {
   const errors = []
-  const warnings = []
 
   const zhPath = path.join(repoRoot, 'README.md')
   const enPath = path.join(repoRoot, 'README.en.md')
@@ -298,7 +297,7 @@ export function checkReadmes(repoRoot = REPO_ROOT) {
       errors.push(`Missing required file: ${label}`)
     }
   }
-  if (errors.length > 0) return { ok: false, errors, warnings }
+  if (errors.length > 0) return { ok: false, errors }
 
   const zhText = fs.readFileSync(zhPath, 'utf8')
   const enText = fs.readFileSync(enPath, 'utf8')
@@ -376,7 +375,7 @@ export function checkReadmes(repoRoot = REPO_ROOT) {
     errors.push('server/README.md: missing section ## AI tools')
   }
 
-  return { ok: errors.length === 0, errors, warnings }
+  return { ok: errors.length === 0, errors }
 }
 
 function getGitChangedFiles(base, head, repoRoot) {
@@ -409,7 +408,7 @@ export function main(argv = process.argv.slice(2)) {
   const opts = parseCliArgs(argv)
   const res = checkReadmes(REPO_ROOT)
   const errors = [...res.errors]
-  const warnings = [...res.warnings]
+  const warnings = []
 
   const envSkip = /\[skip-readme-sync\]/i.test(`${process.env.PR_TITLE ?? ''}\n${process.env.PR_BODY ?? ''}\n${process.env.COMMIT_MESSAGE ?? ''}`)
   if (opts.base && opts.head && !/^0+$/.test(opts.base)) {

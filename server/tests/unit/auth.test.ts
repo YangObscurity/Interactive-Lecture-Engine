@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  ANONYMOUS_AUTH_RESULT,
   ANONYMOUS_SESSION,
   createAuthAdapter,
   createNoneAuthAdapter,
@@ -272,6 +273,22 @@ describe('auth/trustedHeader', () => {
       const res = adapter.authenticate((n) => (n.toLowerCase() === 'remote-user' ? 'dave' : undefined))
       expect(res.effectiveUserId).toBe('dave')
       expect(res.session.authenticated).toBe(true)
+    })
+
+    it('rejects gateway headers as anonymous when gateway is disabled in AUTH_METHODS_ENABLED', () => {
+      const cfg = makeMockConfig({
+        authAdapter: 'trusted-header',
+        authMethodsEnabled: 'password,passkey',
+      })
+      const adapter = createAuthAdapter(cfg)
+      const getHeader = (n: string) => {
+        const lower = n.toLowerCase()
+        if (lower === 'remote-user') return 'alice'
+        if (lower === 'remote-groups') return 'admins'
+        return undefined
+      }
+      expect(adapter.authenticate(getHeader)).toEqual(ANONYMOUS_AUTH_RESULT)
+      expect(resolveTrustedHeaderAuth(getHeader, cfg).session.authenticated).toBe(false)
     })
   })
 })

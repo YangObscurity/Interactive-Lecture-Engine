@@ -891,4 +891,22 @@ describe('20. config:gen, config:check, and index entrypoint stub', () => {
       }
     }
   })
+
+  it('rejects contradictory AUTH_ADAPTER=trusted-header without gateway in AUTH_METHODS_ENABLED', () => {
+    expect(() =>
+      loadConfig({
+        DATABASE_URL: 'pglite:memory',
+        AUTH_ADAPTER: 'trusted-header',
+        AUTH_METHODS_ENABLED: 'password,passkey',
+      }),
+    ).toThrow(/AUTH_METHODS_ENABLED/)
+
+    expect(() =>
+      loadConfig({
+        DATABASE_URL: 'pglite:memory',
+        AUTH_ADAPTER: 'hybrid',
+        AUTH_METHODS_ENABLED: 'password,passkey',
+      }),
+    ).not.toThrow()
+  })
 })
