@@ -89,10 +89,14 @@ describe('Native AI SDK v7 channel & External MCP integration (WP-K2 Items 2 & 5
   let extMcpUrl = ''
   let lastExtAuthHeader = ''
   let extSlowMs = 0
+  let suiteContentDir = ''
+  const prevContentDir = process.env['CONTENT_DIR']
   const tempDirs: string[] = []
   const appsToClose: Array<ReturnType<typeof createApp>> = []
 
   beforeAll(async () => {
+    suiteContentDir = mkdtempSync(join(tmpdir(), 'k2-content-'))
+    process.env['CONTENT_DIR'] = suiteContentDir
     db = createDb('pglite:memory')
     await runMigrations(db)
 
@@ -170,6 +174,14 @@ describe('Native AI SDK v7 channel & External MCP integration (WP-K2 Items 2 & 5
   afterAll(async () => {
     await new Promise<void>((resolveClose) => extMcpServer.close(() => resolveClose()))
     await db.close()
+    if (prevContentDir !== undefined) {
+      process.env['CONTENT_DIR'] = prevContentDir
+    } else {
+      delete process.env['CONTENT_DIR']
+    }
+    if (suiteContentDir) {
+      rmSync(suiteContentDir, { recursive: true, force: true })
+    }
   })
 
   function writeTempAiTools(content: unknown): string {

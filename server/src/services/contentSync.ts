@@ -6,9 +6,15 @@ import type { Db } from '../db/types.js'
 import { setSetting } from '../repo/siteSettings.js'
 
 export function resolveContentDir(config?: AppConfig): string | null {
-  const envDir = process.env.CONTENT_DIR || process.env.LECTURE_CONTENT_DIR
-  if (envDir && existsSync(envDir)) {
-    return envDir
+  const contentEnv = process.env.CONTENT_DIR
+  if (contentEnv !== undefined) {
+    const trimmed = contentEnv.trim()
+    if (!trimmed) return null
+    return existsSync(trimmed) ? trimmed : null
+  }
+  const lectureEnv = process.env.LECTURE_CONTENT_DIR?.trim()
+  if (lectureEnv) {
+    return existsSync(lectureEnv) ? lectureEnv : null
   }
   if (config?.siteDistDir) {
     const parentContent = resolve(config.siteDistDir, '../content')
