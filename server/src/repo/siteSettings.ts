@@ -27,20 +27,12 @@ export interface SiteSettingHistoryRow<T = unknown> {
 }
 
 export async function getSetting<T>(db: DbClient, key: string): Promise<T | null> {
-  const res = await db.query<{ value: T | string }>(
+  const res = await db.query<{ value: T | null }>(
     `SELECT value FROM site_settings WHERE key = $1`,
     [key],
   )
   if (res.rowCount === 0 || !res.rows[0]) return null
-  const val = res.rows[0].value
-  if (typeof val === 'string') {
-    try {
-      return JSON.parse(val) as T
-    } catch {
-      return val as unknown as T
-    }
-  }
-  return val as T
+  return res.rows[0].value ?? null
 }
 
 export async function setSetting<T>(

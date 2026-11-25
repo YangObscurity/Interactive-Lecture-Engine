@@ -2388,5 +2388,30 @@ describe('WP-2: Backend Authentication, Cookies, Passkeys, Hybrid, Me & Admin', 
       const expSessAfter = await memDb.query('SELECT id FROM auth_sessions WHERE id = $1', ['expired-sess-1'])
       expect(expSessAfter.rows).toHaveLength(0)
     })
+
+    it('preserves string JSONB setting values ("123", "null") without double JSON.parse', async () => {
+      const memDb = createDb('pglite:memory')
+      await runMigrations(memDb)
+      const cfg = makeTestConfig({ authAdapter: 'trusted-header' })
+      const app = createApp(cfg, memDb)
+      const adminHeaders = { 'Remote-User': 'alice', 'Remote-Groups': 'admins' }
+
+      for (const sample of ['123', 'null', '', false, 0, { nested: 'ok' }]) {
+        const putRes = await app.request('/api/admin/settings/example', {
+          method: 'PUT',
+          headers: { ...adminHeaders, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ value: sample }),
+        })
+        expect(putRes.status).toBe(200)
+
+        const getRes = await app.request('/api/admin/settings/example', {
+          headers: adminHeaders,
+        })
+        expect(getRes.status).toBe(200)
+        const getBody = (await getRes.json()) as { ok: boolean; value: unknown }
+        expect(getBody.ok).toBe(true)
+        expect(getBody.value).toEqual(sample)
+      }
+    })
   })
 })
