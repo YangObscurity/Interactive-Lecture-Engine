@@ -823,7 +823,6 @@ export const dashboardZhCN = {
   'dsh.usr.email': '邮箱',
   'dsh.usr.password': '初始密码',
   'dsh.usr.passwordHint': '至少 8 位；登录后可在「账户」中绑定 Passkey / 生物识别',
-  'dsh.usr.passwordless': '无密码账号（仅通过 Passkey 登录）',
   'dsh.usr.roles': '角色权限',
   'dsh.usr.roleReaderFixed': 'reader（基础角色，必选）',
   'dsh.usr.roleAuthor': 'author（内容与伴读编辑）',

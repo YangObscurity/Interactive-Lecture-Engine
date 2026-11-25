@@ -819,7 +819,6 @@ export const dashboardEn: Record<keyof typeof dashboardZhCN, string> = {
   'dsh.usr.email': 'Email',
   'dsh.usr.password': 'Initial password',
   'dsh.usr.passwordHint': 'Min 8 chars; users can bind Passkeys / biometrics in Account settings after signing in',
-  'dsh.usr.passwordless': 'Passwordless account (Passkey sign-in only)',
   'dsh.usr.roles': 'Roles',
   'dsh.usr.roleReaderFixed': 'reader (base role, always included)',
   'dsh.usr.roleAuthor': 'author (content & companion editing)',
