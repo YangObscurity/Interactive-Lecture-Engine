@@ -10,9 +10,9 @@
  */
 import { batchSyncStatusToNotion, syncStatusToNotion } from '../components/ai/notionSync'
 import { currentSession } from '../auth/session'
-import { progressStore } from './progressStore'
+import { isTempGroupId, progressStore } from './progressStore'
 import type { ProgressStore } from './progressStore'
-import { toLegacyStatus } from './types'
+import { groupOfLecture, toLegacyStatus } from './types'
 import type { LegacyProgressStatus } from './types'
 
 export function isNotionSyncAdmin(): boolean {
@@ -35,6 +35,8 @@ export interface NotionBridgeOptions {
   batch?: (items: NotionItem[]) => void
   /** Gate for admin-only runtime sync; tests injecting mock sync/batch default to allowed unless overridden. */
   canSync?: () => boolean
+  /** Return true when a group or lecture is a temporary group that must never sync to Notion. */
+  isTempGroup?: (groupId: string, lectureId: string) => boolean
 }
 
 /** Subscribe the bridge. Returns the function that stops it. */
@@ -43,19 +45,22 @@ export function startNotionBridge(options: NotionBridgeOptions = {}): () => void
   const sync = options.sync ?? syncStatusToNotion
   const batch = options.batch ?? batchSyncStatusToNotion
   const canSync = options.canSync ?? (options.sync || options.batch ? () => true : isNotionSyncAdmin)
+  const isTemp = options.isTempGroup ?? isTempGroupId
   return store.subscribe((event) => {
     if (event.kind !== 'change' || event.origin !== 'user') return
     if (!canSync()) return
     try {
-      const items: NotionItem[] = event.ids.map((id) => {
+      const items: NotionItem[] = []
+      for (const id of event.ids) {
+        if (isTemp(groupOfLecture(id), id)) continue
         const meta = store.metaOf(id)
-        return {
+        items.push({
           lectureId: id,
           status: toLegacyStatus(store.statusOf(id)),
           ...(meta.notionNodeId ? { notionNodeId: meta.notionNodeId } : {}),
           ...(meta.notionPageId ? { notionPageId: meta.notionPageId } : {}),
-        }
-      })
+        })
+      }
       const [first] = items
       if (first === undefined) return
       if (items.length === 1) sync(first.lectureId, first.status, first.notionNodeId, first.notionPageId)

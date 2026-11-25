@@ -80,6 +80,7 @@ export function buildCurriculumFromDisk(input: DiskInput): CurriculumBuild {
     dir: g.dir,
     title: g.title,
     ...(g.category !== undefined ? { category: g.category } : {}),
+    ...(g.temp === true ? { temp: true } : {}),
     ...(g.map !== undefined ? { map: g.map } : {}),
     ...(g.i18n ? { i18n: g.i18n } : {}),
     lectures: scanSourceLectures(input.docsRoot, g.dir),

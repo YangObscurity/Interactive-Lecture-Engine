@@ -113,7 +113,11 @@ watch(
               @click="onOpenGroup(g, $event)"
             >
               <b>{{ g.id }}</b>
-              <span>{{ g.title }}</span>
+              <span v-if="g.temp && labels.temp" class="cm-gtitle">
+                <span class="t">{{ g.title }}</span>
+                <i class="cm-temp" data-temp-badge>{{ labels.temp }}</i>
+              </span>
+              <span v-else>{{ g.title }}</span>
               <em>{{ g.read }}/{{ g.total }}</em>
             </a>
           </li>
@@ -122,6 +126,7 @@ watch(
         <div v-if="activeGroup" class="cm-lec">
           <header>
             <b>{{ activeGroup.id }} {{ activeGroup.title }}</b>
+            <span v-if="activeGroup.temp && labels.temp" class="cm-temp" data-temp-badge>{{ labels.temp }}</span>
             <em>{{ activeGroup.read }} / {{ activeGroup.total }} {{ labels.readSuffix }}</em>
             <a :href="activeGroup.href" @click="onOpenGroup(activeGroup, $event)">
               {{ labels.enterGroup }} →
@@ -178,6 +183,7 @@ watch(
               <span class="cm-mob-left">
                 <b class="cm-mob-id">{{ g.id }}</b>
                 <span class="cm-mob-title" :title="g.title">{{ g.title }}</span>
+                <span v-if="g.temp && labels.temp" class="cm-mob-temp" data-temp-badge>{{ labels.temp }}</span>
               </span>
               <span class="cm-mob-right">
                 <em class="cm-mob-count">{{ g.read }}/{{ g.total }}</em>
@@ -325,9 +331,32 @@ watch(
   text-align: center;
 }
 
-.cm-groups a span {
+.cm-groups a .cm-gtitle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.cm-groups a > span:not(.cm-gtitle),
+.cm-groups a .cm-gtitle .t {
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cm-temp,
+.cm-mob-temp {
+  flex: none;
+  font-style: normal;
+  font-family: var(--lec-font-mono);
+  font-size: 11px;
+  line-height: 1.45;
+  padding: 0 5px;
+  border: 1px dashed var(--lec-border);
+  border-radius: var(--lec-radius-1);
+  color: var(--lec-text-muted);
+  background: var(--lec-bg);
   white-space: nowrap;
 }
 

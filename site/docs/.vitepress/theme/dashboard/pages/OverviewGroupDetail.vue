@@ -29,6 +29,7 @@ const hasIssues = () => {
 <template>
   <div class="db-glist" :data-overview-detail="group.id">
     <p>{{ t('dsh.ov.groupDetail', { id: group.id, n: group.lectureCount ?? 0 }) }}</p>
+    <p v-if="group.temp" class="db-muted" data-overview-detail-temp>{{ t('dsh.ov.tempGroupHint') }}</p>
     <div class="db-lecs">
       <template v-for="n in lectureNumbers()" :key="n">
         <span v-if="issuesOf(n).length" class="db-lc x">

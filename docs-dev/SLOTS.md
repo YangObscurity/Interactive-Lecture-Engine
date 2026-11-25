@@ -17,7 +17,7 @@ what it is given. A theme that does not cover a slot gets the engine default imp
 | `AtlasPhase` | 1 | `AtlasNodeCommon` + strip + label, open | a stage of a long group (third column) |
 | `AtlasLecture` | 1 | `AtlasNodeCommon` + number, label, status | a lecture (last column) |
 | `AtlasLink` | 1 | `from`, `to`, `bus`, `kind`, `on` | the link from a parent to its child |
-| `GroupCard` | 1 | group fields, `ticks`, `pkg`, `next`, `labels` | the card of a course group on the home page |
+| `GroupCard` | 1 | group fields, `ticks`, `pkg`, `next`, `temp`, `tempLabel`, `labels` | the card of a course group on the home page |
 | `GroupMap` | 1 | `groupId`, `pkg`, `read`, `total`, `lectures`, `categories`, `categoryLang`, `labels` | the group map (quick navigation) of a group page |
 | `CanvasBackdrop` | 1 | `zones` | category zone boxes behind datasheet boards |
 | `CanvasGroup` | 1 | box, `title`, `progress`, datasheet `units` & `unitBuses` | course group blocks / DIP chips on the dependency canvas |
@@ -27,7 +27,7 @@ what it is given. A theme that does not cover a slot gets the engine default imp
 | `FigureFrame` | 1 | `type`, `tagLabel`, `figureLabel`, `title`, `caption`, `buttons` | figure chrome around `.chart-body` |
 | `QuizHeader` | 1 | `index`, `total`, `lectureNo`, `badge`, `heading`, `totalLabel` | self-test question strip above `.vp-doc details.details` |
 | `SearchPanel` | 1 | `query`, `scope`, `currentGroupId`, `groups`, `activeIndex`, `metaText`, `loadState`, `emptyState`, `labels`, callbacks | full-site & scoped search dialog (`Ctrl+K`) |
-| `NavCourseMenu` | 1 | `isOpen`, `isMobile`, `groups`, `activeGroupId`, `activeGroup`, `activeLectureIndex`, `activeColumn`, `expandedGroupIds`, `labels`, callbacks | topbar course menu (desktop flyout & mobile screen menu, spec board §04.1) |
+| `NavCourseMenu` | 1 | `isOpen`, `isMobile`, `groups` (with optional `temp`), `activeGroupId`, `activeGroup`, `activeLectureIndex`, `activeColumn`, `expandedGroupIds`, `labels` (with optional `temp`), callbacks | topbar course menu (desktop flyout & mobile screen menu, spec board §04.1) |
 
 All 18 registered slots are now implemented in v1 (`RESERVED_SLOT_NAMES` is empty).
 

@@ -1032,6 +1032,7 @@ export interface ProgressRuntime {
   authAdapter: string
   sessionEndpoint: string | undefined
   groupIds: string[]
+  tempGroupIds: string[]
 }
 
 const DEFAULT_RUNTIME: ProgressRuntime = {
@@ -1041,10 +1042,53 @@ const DEFAULT_RUNTIME: ProgressRuntime = {
   authAdapter: 'none',
   sessionEndpoint: undefined,
   groupIds: [],
+  tempGroupIds: [],
 }
 
 let runtime: ProgressRuntime = DEFAULT_RUNTIME
 let runtimeBackend: ProgressBackend = createLocalBackend()
+let tempGroupResolver: ((groupId: string, lectureId?: string) => boolean) | null = null
+
+/** Install a dynamic temporary-group check (reads merged restricted groups / page frontmatter at runtime). */
+export function setTempGroupResolver(resolver: ((groupId: string, lectureId?: string) => boolean) | null): void {
+  tempGroupResolver = resolver
+}
+
+/** Collect normalised group ids and dir slugs for every group marked `temp: true` in `themeConfig`. */
+export function parseTempGroupIds(theme: unknown): string[] {
+  const t = isObject(theme) ? theme : {}
+  const tempIds = new Set<string>()
+  if (Array.isArray(t.groups)) {
+    for (const g of t.groups) {
+      if (!isObject(g) || g.temp !== true) continue
+      if (typeof g.id === 'string' && g.id.trim()) tempIds.add(normaliseLectureId(g.id))
+      if (typeof g.dir === 'string' && g.dir.trim()) {
+        const dirGroup = groupOfDir(g.dir)
+        if (dirGroup) tempIds.add(dirGroup)
+      }
+    }
+  }
+  return [...tempIds]
+}
+
+/** True when a group (by dir slug or id) or lecture belongs to a temporary group (`temp: true`). */
+export function isTempGroupId(groupId: string, lectureId?: string): boolean {
+  const normGroup = normaliseLectureId(groupId)
+  const normLecture = lectureId ? normaliseLectureId(lectureId) : undefined
+  if (tempGroupResolver) {
+    try {
+      if (tempGroupResolver(normGroup, normLecture)) return true
+    } catch {
+      // fall back to static runtime list
+    }
+  }
+  if (runtime.tempGroupIds.includes(normGroup)) return true
+  if (normLecture) {
+    const derived = groupOfLecture(normLecture)
+    if (derived && runtime.tempGroupIds.includes(derived)) return true
+  }
+  return false
+}
 
 /** Read the site settings out of `themeConfig` (`useData().theme.value`); anything missing keeps its default. */
 export function parseProgressRuntime(theme: unknown): ProgressRuntime {
@@ -1067,6 +1111,7 @@ export function parseProgressRuntime(theme: unknown): ProgressRuntime {
     authAdapter: typeof auth.adapter === 'string' ? auth.adapter : 'none',
     sessionEndpoint: typeof auth.sessionEndpoint === 'string' && auth.sessionEndpoint ? auth.sessionEndpoint : undefined,
     groupIds,
+    tempGroupIds: parseTempGroupIds(theme),
   }
 }
 

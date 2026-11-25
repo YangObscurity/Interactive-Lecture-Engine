@@ -71,6 +71,7 @@ export const dashboardEn: Record<keyof typeof dashboardZhCN, string> = {
   'dsh.common.copyFailed': 'Copy failed: the browser gave no clipboard access',
   'dsh.common.readOnlyLine': 'The online site is read-only. To change something, run the dev server on your machine and open the Dashboard there; changes go to the content folder and are deployed after version control.',
   'dsh.common.unavailable': '{what}: not available yet',
+  'dsh.common.temp': 'Temp',
 
   'dsh.leave.title': 'Unsaved changes',
   'dsh.leave.body': 'The page "{page}" has changes that are not saved. What should happen to them?',
@@ -98,6 +99,7 @@ export const dashboardEn: Record<keyof typeof dashboardZhCN, string> = {
   'dsh.ov.figReadersLocal': 'No reader data on this machine',
   'dsh.ov.figTodo': 'To do',
   'dsh.ov.todoTitle': 'Needs attention',
+  'dsh.ov.tempGroupHint': 'Temporary group: progress is recorded in database or local storage only and excluded from Notion sync.',
   'dsh.ov.todoNone': 'Nothing to do',
   'dsh.ov.todoNoneLocal': 'The content check has no failures.',
   'dsh.ov.todoNoneOnline': 'The online health checks are fine; the content check runs on your machine.',

@@ -10,6 +10,7 @@ export interface DashGroup {
   id: string
   dir: string
   title: string
+  temp?: boolean
   lectureCount?: number
   chartCount?: number
   lectures?: { n: number; text: string; link: string }[]

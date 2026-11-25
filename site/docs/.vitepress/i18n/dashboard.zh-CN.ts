@@ -69,6 +69,7 @@ export const dashboardZhCN = {
   'dsh.common.copyFailed': '复制失败：浏览器没有给剪贴板权限',
   'dsh.common.readOnlyLine': '线上站点只读：要修改，请在本机运行开发服务器后打开 Dashboard。改动写回内容目录，经版本管理后再部署。',
   'dsh.common.unavailable': '{what}：暂不可用',
+  'dsh.common.temp': '临时',
 
   'dsh.leave.title': '有未保存的改动',
   'dsh.leave.body': '「{page}」页还有没保存的改动。离开前要怎么处理？',
@@ -97,6 +98,7 @@ export const dashboardZhCN = {
   'dsh.ov.figTodo': '待处理',
   'dsh.ov.todoTitle': '需要处理',
   'dsh.ov.todoNone': '没有待处理的事项',
+  'dsh.ov.tempGroupHint': '临时组：进度仅记录在数据库或本地，不纳入 Notion 知识图谱同步。',
   'dsh.ov.todoNoneLocal': '内容检查没有失败项。',
   'dsh.ov.todoNoneOnline': '线上健康检测都正常；内容检查只在本机运行。',
   'dsh.ov.todoAdminError': '读不到线上管理接口',

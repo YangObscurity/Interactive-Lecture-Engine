@@ -68,6 +68,7 @@ export const en: Messages = {
   // ---- shared -------------------------------------------------------------------------------
   'lecture.fallbackTitle': 'Lecture {n}',
   'group.temp': 'Temp',
+  'group.tempHint': 'Temporary group · Progress saved locally or in DB only (no Notion sync)',
 
   // ---- home page (HomeBody) -----------------------------------------------------------------
   'home.startFrom': 'Start with {id} {title}',
@@ -568,6 +569,9 @@ export const en: Messages = {
   'ai.notionSyncRetry': 'Retry sync',
   'ai.notionSyncFailed': 'Notion sync failed ({detail})',
   'ai.lpcAdminFooterHint': 'Admin · Notion sync active',
+  'ai.tempGroupBadge': 'Temp group',
+  'ai.tempGroupDbOnly': 'Temp group · Progress saved to DB only (no Notion sync)',
+  'ai.tempGroupLocalOnly': 'Temp group · Progress saved locally only (no Notion sync)',
   'ai.uploadNoFile': 'No file selected',
   'ai.uploadEmptyFile': 'File is empty (0 bytes)',
   'ai.uploadTooLarge': 'File exceeds 50 MB limit ({size})',

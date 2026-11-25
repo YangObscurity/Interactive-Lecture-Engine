@@ -139,13 +139,16 @@ export async function runContentCheck(options: { paths?: ContentPaths; only?: re
   const groupDirs = new Set(groups.map((g) => g.dir))
 
   // groups
+  const groupsFile = rel(paths, paths.groups)
   const ids = new Map<string, number>()
   const dirs = new Map<string, number>()
   for (const g of groups) {
+    if ('temp' in g && (g as { temp?: unknown }).temp !== undefined && typeof (g as { temp?: unknown }).temp !== 'boolean') {
+      push({ level: 'fail', code: 'group.invalid_temp', file: groupsFile, message: `group ${g.id} has non-boolean temp value` })
+    }
     ids.set(g.id.toUpperCase(), (ids.get(g.id.toUpperCase()) ?? 0) + 1)
     dirs.set(g.dir, (dirs.get(g.dir) ?? 0) + 1)
   }
-  const groupsFile = rel(paths, paths.groups)
   for (const [id, n] of ids) if (n > 1) push({ level: 'fail', code: 'group.duplicate_id', file: groupsFile, message: `group id ${id} is used ${n} times` })
   for (const [d, n] of dirs) if (n > 1) push({ level: 'fail', code: 'group.duplicate_dir', file: groupsFile, message: `group dir ${d} is used ${n} times` })
 

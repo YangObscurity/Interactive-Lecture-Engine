@@ -72,7 +72,7 @@ import { registerThemeDebugPanel } from './tokens/debugPanel'
 import { setLocaleKeys, localeKeysOf } from './core/locales'
 import { setReaderLang } from './core/readerLang'
 import { getRootLang, normalizeLang, setRootLang } from '../i18n/index.ts'
-import { configureProgress, progressRuntime, progressStore, registerProgressDebugPanel } from './progress/progressStore'
+import { configureProgress, progressRuntime, progressStore, registerProgressDebugPanel, setTempGroupResolver } from './progress/progressStore'
 import { startNotionBridge } from './progress/notionBridge'
 import { buildSeed } from './progress/seed'
 import { setPageTier } from './access/paths'
@@ -174,6 +174,33 @@ export default {
       // P3: the order matters, `configureProgress` must run before anything touches the store
       if (!progressStarted) {
         progressStarted = true
+        setTempGroupResolver((groupId, lectureId) => {
+          const t = theme.value as { groups?: Array<{ id?: unknown; dir?: unknown; temp?: unknown }> } | undefined
+          if (Array.isArray(t?.groups)) {
+            for (const g of t.groups) {
+              if (!g || g.temp !== true) continue
+              const idMatch = typeof g.id === 'string' && g.id.trim().toLowerCase() === groupId
+              const dirLast =
+                typeof g.dir === 'string' ? (g.dir.split('/').filter(Boolean).pop()?.toLowerCase() ?? '') : ''
+              const dirMatch = dirLast !== '' && dirLast === groupId
+              if (idMatch || dirMatch) return true
+            }
+          }
+          const fm = route.data.frontmatter as
+            | { groupMeta?: { id?: unknown; dir?: unknown; temp?: unknown }; groupTemp?: unknown }
+            | undefined
+          if (fm?.groupTemp === true) return true
+          if (fm?.groupMeta?.temp === true) {
+            const fid = typeof fm.groupMeta.id === 'string' ? fm.groupMeta.id.trim().toLowerCase() : ''
+            const fdir =
+              typeof fm.groupMeta.dir === 'string'
+                ? (fm.groupMeta.dir.split('/').filter(Boolean).pop()?.toLowerCase() ?? '')
+                : ''
+            const targetGroup = lectureId ? lectureId.replace(/-l\d+$/i, '').toLowerCase() || groupId : groupId
+            if (fid === groupId || fdir === groupId || fid === targetGroup || fdir === targetGroup) return true
+          }
+          return false
+        })
         configureProgress(theme.value)
         registerProgressDebugPanel()
         if (progressRuntime().notionSync) {

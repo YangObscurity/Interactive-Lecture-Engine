@@ -162,6 +162,7 @@ const groupsView = computed<CourseMenuGroupView[]>(() => {
       read: readCount,
       total: totalCount,
       isCurrent: isCurrentGroup,
+      ...(g.temp === true ? { temp: true } : {}),
       lectures,
     }
   })
@@ -336,6 +337,7 @@ const labels = computed<CourseMenuLabels>(() => ({
   hintClose: t('cmenu.hintClose'),
   expandGroup: t('cmenu.expandGroup'),
   collapseGroup: t('cmenu.collapseGroup'),
+  temp: t('group.temp'),
 }))
 
 const slotProps = computed<NavCourseMenuProps>(() => ({

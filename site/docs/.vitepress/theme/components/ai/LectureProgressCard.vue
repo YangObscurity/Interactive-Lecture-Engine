@@ -55,24 +55,36 @@ const isLecture = computed<boolean>(() => {
 
 // Read the (reactive, build-time) site config, not progressRuntime(): that is configured after hydration, so a
 // computed that already ran with a fast session answer would never see the flag flip and the control would stay hidden.
+const isTempGroup = computed<boolean>(() => lectureInfo.value.isTemp)
+
 const notionSyncConfigured = computed<boolean>(
   () =>
     (theme.value as { lectureModules?: { progress?: { notionSync?: unknown } } } | undefined)?.lectureModules?.progress
       ?.notionSync === true
 )
 
+const progressAdapter = computed<'local' | 'rest'>(() =>
+  (theme.value as { lectureModules?: { progress?: { adapter?: unknown } } } | undefined)?.lectureModules?.progress
+    ?.adapter === 'rest'
+    ? 'rest'
+    : 'local'
+)
+
 const showNotionSync = computed<boolean>(() => {
   return Boolean(
-    notionSyncConfigured.value &&
+    !isTempGroup.value &&
+      notionSyncConfigured.value &&
       session.value.status === 'authenticated' &&
       session.value.roles.includes('admin')
   )
 })
 
+const showTempProgress = computed<boolean>(() => Boolean(isLecture.value && isTempGroup.value))
+
 const notionNodeId = computed<string>(() => {
   const desc = (frontmatter.value?.description as string) || ''
   const m = desc.match(/\u8282\u70b9\s*`([^`]+)`/) || desc.match(/\bnode\s*`([^`]+)`/i)
-  return m ? m[1].trim() : ''
+  return m?.[1] ? m[1].trim() : ''
 })
 
 /** Domain status; stays not_started until client hydration completes. */
@@ -226,6 +238,7 @@ onUnmounted(() => {
               </div>
               <div class="lpc-sub-line">
                 <span class="lpc-id-badge">{{ lectureInfo.lectureId.toUpperCase() }}</span>
+                <span v-if="isTempGroup" class="lpc-temp-badge" data-lpc-temp-badge>{{ t('ai.tempGroupBadge') }}</span>
                 <span v-if="status === 'completed' && formattedCompletedTime" class="lpc-time-tag">
                   {{ t('ai.lpcCompletedAt', { time: formattedCompletedTime }) }}
                 </span>
@@ -311,6 +324,14 @@ onUnmounted(() => {
           </div>
           <div v-if="notionNodeId" class="lpc-node-ref">
             <code>{{ notionNodeId }}</code>
+          </div>
+        </div>
+        <div v-else-if="showTempProgress" class="lpc-footer lpc-footer-temp" data-lpc-temp-progress>
+          <div class="lpc-footer-left">
+            <span class="lpc-temp-dot" aria-hidden="true"></span>
+            <span class="lpc-footer-hint">
+              {{ progressAdapter === 'rest' ? t('ai.tempGroupDbOnly') : t('ai.tempGroupLocalOnly') }}
+            </span>
           </div>
         </div>
       </div>
@@ -441,6 +462,17 @@ onUnmounted(() => {
   color: var(--lec-text-muted);
 }
 
+.lpc-temp-badge {
+  font-size: 11px;
+  line-height: 1.45;
+  padding: 0 6px;
+  border-radius: var(--lec-radius-1);
+  border: 1px dashed var(--lec-border);
+  background: var(--lec-bg);
+  color: var(--lec-text-muted);
+  white-space: nowrap;
+}
+
 .lpc-time-tag {
   font-variant-numeric: tabular-nums;
   color: var(--lec-text-muted);
@@ -540,6 +572,14 @@ onUnmounted(() => {
   display: inline-flex;
   align-items: center;
   color: var(--lec-done-text);
+}
+
+.lpc-temp-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  border: 1.5px solid var(--lec-text-muted);
+  flex: none;
 }
 
 .lpc-sync-glyph.syncing,

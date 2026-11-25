@@ -158,6 +158,7 @@ const cards = computed<Array<{ key: string; props: GroupCardProps }>>(() =>
     else if (ui < 0) next = { kind: 'done', heading: t('card.next.done'), title: '' }
     else next = { kind: 'next', heading: t('card.next.next'), title: line(lecs[ui] as CardLecture) }
     const cg = curGroups.value.get(g.id)
+    const isTemp = Boolean((g as { temp?: unknown }).temp === true)
     return {
       key: g.id,
       props: {
@@ -175,6 +176,7 @@ const cards = computed<Array<{ key: string; props: GroupCardProps }>>(() =>
         ticks: st.map((s) => (s === 'completed' ? 'r' : s === 'in_progress' ? 'g' : 'u')).join(''),
         pkg: packageName(lecs.length),
         next,
+        ...(isTemp ? { temp: true, tempLabel: t('group.temp') } : {}),
         labels: {
           lectures: t('home.card.lectures', { n: lecs.length }),
           read: t('card.read', { read, total: lecs.length }),

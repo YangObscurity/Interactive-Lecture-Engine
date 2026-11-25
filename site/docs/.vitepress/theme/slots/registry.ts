@@ -180,6 +180,10 @@ export interface GroupCardProps {
   pkg: string
   /** Where to go on: `reading`, `start`, `done` or `next`, with its heading and the lecture title. */
   next: { kind: 'reading' | 'start' | 'done' | 'next'; heading: string; title: string }
+  /** True when the group is a temporary group (`temp: true`, DB/local progress only, no Notion sync). */
+  temp?: boolean
+  /** Localised temporary badge label (`group.temp`). */
+  tempLabel?: string
   /** Texts already in the reader's language. */
   labels: { lectures: string; read: string; readHeading: string; lecturesHeading: string; tagsHeading: string; tagsSeparator: string; enter: string }
 }
@@ -483,6 +487,7 @@ export interface CourseMenuGroupView {
   read: number
   total: number
   isCurrent: boolean
+  temp?: boolean
   lectures: readonly CourseMenuLectureView[]
 }
 
@@ -498,6 +503,7 @@ export interface CourseMenuLabels {
   hintClose: string
   expandGroup: string
   collapseGroup: string
+  temp?: string
 }
 
 /** `NavCourseMenu` v1: topbar course menu (desktop flyout & mobile screen menu, spec board §04.1). */
