@@ -438,6 +438,8 @@ onUnmounted(() => {
 }
 .scope-chips-bar::-webkit-scrollbar {
   display: none;
+  width: 0;
+  height: 0;
 }
 
 .scope-chip {

@@ -8,6 +8,7 @@ import 'katex/dist/katex.min.css'
 import './styles/vp-bridge.css'
 import './custom.css'
 import './styles/base.css'
+import './styles/scrollbars.css'
 import './styles/print.css'
 import './styles/concepts.css'
 // compiled --lec-* tokens + fonts and theme.css of the enabled theme packs (plugins/lectureThemePlugin.mts)

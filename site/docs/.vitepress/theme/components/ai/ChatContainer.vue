@@ -659,7 +659,6 @@ onUnmounted(() => {
   flex: 1;
   overflow-y: auto;
   padding: 16px 14px;
-  scrollbar-width: thin;
 }
 
 /* 极简空白态 */

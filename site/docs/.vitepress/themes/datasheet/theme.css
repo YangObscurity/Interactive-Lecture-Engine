@@ -75,3 +75,8 @@
 [data-lec-theme='datasheet'] .gp .gp-p-s h4 {
   font-weight: 900;
 }
+
+/* theme-governed sharp scrollbar thumbs in datasheet skin */
+[data-lec-theme='datasheet'] :where(*:not(html))::-webkit-scrollbar-thumb {
+  border-radius: 1px;
+}
