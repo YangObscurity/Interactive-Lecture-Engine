@@ -1071,6 +1071,48 @@ export function parseTempGroupIds(theme: unknown): string[] {
   return [...tempIds]
 }
 
+export interface TempGroupContextInput {
+  groupId: string
+  lectureId?: string
+  groups?: unknown
+  frontmatter?: unknown
+  routeGroup?: string | null
+}
+
+/**
+ * Resolve whether `(groupId, lectureId)` belongs to a temporary group using live runtime `groups` plus current
+ * route frontmatter (`groupMeta` on restricted group index pages, `groupTemp` + `routeGroup` on restricted lectures).
+ */
+export function matchesTempGroupContext(input: TempGroupContextInput): boolean {
+  const normGroup = normaliseLectureId(input.groupId)
+  const normLecture = input.lectureId ? normaliseLectureId(input.lectureId) : ''
+  const targetKeys = new Set<string>()
+  if (normGroup) targetKeys.add(normGroup)
+  if (normLecture) {
+    const derived = groupOfLecture(normLecture)
+    if (derived) targetKeys.add(derived)
+  }
+  if (targetKeys.size === 0) return false
+
+  for (const key of parseTempGroupIds({ groups: input.groups })) {
+    if (targetKeys.has(key)) return true
+  }
+
+  const fm = isObject(input.frontmatter) ? input.frontmatter : null
+  if (fm && isObject(fm.groupMeta) && fm.groupMeta.temp === true) {
+    const fid = typeof fm.groupMeta.id === 'string' ? normaliseLectureId(fm.groupMeta.id) : ''
+    const fdir = typeof fm.groupMeta.dir === 'string' ? groupOfDir(fm.groupMeta.dir) : ''
+    if ((fid && targetKeys.has(fid)) || (fdir && targetKeys.has(fdir))) return true
+  }
+
+  if (fm?.groupTemp === true && typeof input.routeGroup === 'string') {
+    const routeKey = normaliseLectureId(input.routeGroup)
+    if (routeKey && targetKeys.has(routeKey)) return true
+  }
+
+  return false
+}
+
 /** True when a group (by dir slug or id) or lecture belongs to a temporary group (`temp: true`). */
 export function isTempGroupId(groupId: string, lectureId?: string): boolean {
   const normGroup = normaliseLectureId(groupId)

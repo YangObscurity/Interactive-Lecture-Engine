@@ -8,7 +8,7 @@ import { EMPTY_SEED, buildSeed, seedIndex } from '../../docs/.vitepress/theme/pr
 import seedLoader from '../../docs/.vitepress/theme/progress/seed.data.mts'
 import { resolveContent } from '../../docs/.vitepress/content/paths.mts'
 import { startNotionBridge } from '../../docs/.vitepress/theme/progress/notionBridge'
-import { configureProgress, createProgressStore, isTempGroupId, parseProgressRuntime, parseTempGroupIds, progressRuntime, setTempGroupResolver } from '../../docs/.vitepress/theme/progress/progressStore'
+import { configureProgress, createProgressStore, isTempGroupId, matchesTempGroupContext, parseProgressRuntime, parseTempGroupIds, progressRuntime, setTempGroupResolver } from '../../docs/.vitepress/theme/progress/progressStore'
 import { useProgress } from '../../docs/.vitepress/theme/progress/useProgress'
 import type { UseProgress } from '../../docs/.vitepress/theme/progress/useProgress'
 import type { ProgressStore } from '../../docs/.vitepress/theme/progress/progressStore'
@@ -216,6 +216,24 @@ describe('notion bridge', () => {
 
     store.set('g01-l01', 'completed')
     expect(single).toEqual([['g01-l01', W.completed]])
+
+    // Restricted temporary lecture pre-merge context (`fm.groupTemp`): scopes Notion skip to current route group
+    setTempGroupResolver((groupId, lectureId) =>
+      matchesTempGroupContext({
+        groupId,
+        lectureId,
+        groups: [{ id: 'G01', dir: 'g01' }],
+        frontmatter: { groupTemp: true },
+        routeGroup: 'rtmp',
+      }),
+    )
+    single.length = 0
+    store.setMany([
+      { lectureId: 'rtmp-l02', status: 'completed' },
+      { lectureId: 'g01-l01', status: 'in_progress' },
+    ])
+    expect(store.statusOf('rtmp-l02')).toBe('completed')
+    expect(single).toEqual([['g01-l01', W.in_progress]])
 
     setTempGroupResolver(null)
     configureProgress(undefined)
