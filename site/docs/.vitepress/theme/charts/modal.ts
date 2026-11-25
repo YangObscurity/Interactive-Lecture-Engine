@@ -665,6 +665,9 @@ function mountVectorFigureIntoSlide(viewer: ActiveViewer, slideIndex: number, co
 
 export function closeModal(): void {
   openSeq++
+  if (typeof document !== 'undefined') {
+    document.documentElement.classList.remove('chart-modal-open')
+  }
   const cur = active
   if (!cur) return
   try {
@@ -1171,6 +1174,12 @@ function startViewer(
   pswp.on('destroy', () => {
     cleanupViewer(viewer)
   })
+
+  if (typeof window !== 'undefined') {
+    const closeOnNavigation = () => closeModal()
+    window.addEventListener('popstate', closeOnNavigation, { signal: listeners.signal })
+    window.addEventListener('pagehide', closeOnNavigation, { signal: listeners.signal })
+  }
 
   pswp.init()
 }

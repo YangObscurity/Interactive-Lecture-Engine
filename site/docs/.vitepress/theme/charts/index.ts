@@ -17,7 +17,7 @@ import type { AppFeature, PageContext, PageFeature } from '../core/types'
 import { registerDebugPanel } from '../debug/registry'
 import { waitForChartFonts } from './fonts'
 import { mountFigureFrame } from './frameSlot'
-import { isModalOpen } from './modal'
+import { closeModal, isModalOpen } from './modal'
 import { CHARTS_SETTLED_EVENT, PageCharts, describeFigures, getCurrentPage, stats } from './page'
 import type { ChartsDeps } from './page'
 import { installPrintBus } from './print'
@@ -54,7 +54,10 @@ export function mountCharts(ctx: PageContext, overrides: Partial<ChartsDeps> = {
   if (typeof window === 'undefined') return Promise.resolve()
   installPrintBus()
   const page = new PageCharts(ctx.path, ctx.signal, { ...deps, ...overrides })
-  ctx.defer(() => page.destroy())
+  ctx.defer(() => {
+    closeModal()
+    page.destroy()
+  })
   return page.run()
 }
 

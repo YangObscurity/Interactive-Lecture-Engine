@@ -185,4 +185,31 @@ test.describe('WP-F8: unified PhotoSwipe viewer for figures, ECharts & Mermaid',
     await expect(viewer).toHaveCount(0)
     expect(pageErrors).toEqual([])
   })
+
+  test('closes viewer and unlocks page scroll + scrollbar when navigating via browser back', async ({ page, pageErrors }) => {
+    await useTheme(page, 'reader', 'light')
+    await page.setViewportSize({ width: 1280, height: 860 })
+    await gotoAndSettle(page, '/mea/')
+    await gotoAndSettle(page, LECTURE)
+
+    const thumbMedia = page.locator('figure.lec-fig .lec-fig-media').first()
+    await thumbMedia.scrollIntoViewIfNeeded()
+    await thumbMedia.click()
+    const viewer = page.locator('.pswp.chart-modal')
+    await expect(viewer).toBeVisible()
+    await expect(page.locator('html')).toHaveClass(/chart-modal-open/)
+
+    await page.goBack()
+    await expect(page).toHaveURL(/\/mea\/?$/)
+    await expect(viewer).toHaveCount(0)
+    await expect(page.locator('html')).not.toHaveClass(/chart-modal-open/)
+
+    const docOverflow = await page.evaluate(() => ({
+      htmlOverflow: getComputedStyle(document.documentElement).overflowY,
+      bodyOverflow: getComputedStyle(document.body).overflowY,
+    }))
+    expect(docOverflow.htmlOverflow).not.toBe('hidden')
+    expect(docOverflow.bodyOverflow).not.toBe('hidden')
+    expect(pageErrors).toEqual([])
+  })
 })

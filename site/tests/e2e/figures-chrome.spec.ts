@@ -167,9 +167,11 @@ for (const theme of SKINS) {
       expect(shown.clientWidth, 'no layout shift when the scrollbar appears').toBe(idle.clientWidth)
       await expect.poll(async () => (await state()).on, { timeout: 6000 }).toBe(false)
       await expect.poll(async () => (await state()).thumb, { timeout: 3000 }).toBe('rgba(0, 0, 0, 0)')
-      // near the right edge it shows without scrolling, and goes away when the pointer leaves
+      // near the right edge and on the scrollbar gutter it shows without scrolling, and goes away when the pointer leaves
       const vw = page.viewportSize()?.width ?? 1280
       await page.mouse.move(vw - 6, 300)
+      await expect.poll(async () => (await state()).on).toBe(true)
+      await page.mouse.move(vw - 2, 300)
       await expect.poll(async () => (await state()).on).toBe(true)
       await page.mouse.move(700, 300)
       await expect.poll(async () => (await state()).on, { timeout: 6000 }).toBe(false)
