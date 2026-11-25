@@ -23,6 +23,7 @@ import { emitFiguresDistArtifacts } from './figures/gallery.ts'
 import { buildCurriculumFromDisk } from './curriculum/node.mts'
 import type { CurriculumBuild } from './curriculum/data.ts'
 import { conceptLinkPlugin } from './plugins/conceptLinkPlugin.mts'
+import { cjkEmphasisPlugin } from './plugins/cjkEmphasisPlugin.ts'
 import { conceptsVitePlugin, writeConceptDistAssets, writeConceptToolsDist } from './plugins/conceptsPlugin.mts'
 import {
   buildBacklinkPayloadsByTier,
@@ -414,6 +415,7 @@ export default async () =>
       /** 第 13 步：构建期 KaTeX。只认 \(…\) / \[…\] / $$…$$，**不接管裸 $…$ 与 ```math 围栏** */
       config: (md) => {
         md.use(mathPlugin)
+        md.use(cjkEmphasisPlugin)
         md.use(v2LocaleLinks)
         md.use(
           createFiguresMarkdownPlugin({

@@ -129,3 +129,20 @@ export function annotateChartFigureTag(tag: string, num: number, lectureNo: numb
   const attrs = ` data-fig-no="${num}" data-fig-lec="${lectureNo}" data-fig-label="${escapeAttr(label)}"`
   return tag.replace(/\s*>$/, `${attrs}>`)
 }
+
+export type InlineMermaidMode = 'all' | 'chart-only' | 'none'
+
+export const INLINE_MERMAID_META_CLASS = 'lec-mermaid-num'
+
+/** Extract normalized fence language token from markdown fence `info` (`mermaid:chart {..}` -> `mermaid:chart`). */
+export function isInlineMermaidInfo(info: string, mode: InlineMermaidMode = 'all'): boolean {
+  if (mode === 'none') return false
+  const lang = (info || '').trim().split(/[\s{=]/, 1)[0]?.toLowerCase() ?? ''
+  if (mode === 'chart-only') return lang === 'mermaid:chart'
+  return lang === 'mermaid' || lang === 'mermaid:chart'
+}
+
+/** Build-time hidden anchor placed immediately before an inline mermaid fence so runtime charts/page.ts preserves sequence numbers. */
+export function renderInlineMermaidMetaTag(num: number, lectureNo: number, label: string): string {
+  return `<span class="${INLINE_MERMAID_META_CLASS}" data-fig-no="${num}" data-fig-lec="${lectureNo}" data-fig-label="${escapeAttr(label)}" hidden></span>`
+}

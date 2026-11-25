@@ -203,6 +203,30 @@ describe('charts/page lifecycle', () => {
     expect(window.__CHARTS_DONE__).toBe(true)
     page.destroy()
   })
+
+  it('preserves build-time inline mermaid numbers across PageCharts runs and re-entry', async () => {
+    document.body.innerHTML = `
+      <span class="lec-mermaid-num" data-fig-no="1" data-fig-lec="30" data-fig-label="图 30-1" hidden></span>
+      <div class="language-mermaid"><pre><code>flowchart TD; A--&gt;B</code></pre></div>
+      <figure class="chart" data-lecture="G01-L30" data-id="c1" data-fig-no="3" data-fig-lec="30" data-fig-label="图 30-3"></figure>`
+    const ctl1 = new AbortController()
+    const p1 = new PageCharts('/g01/L30', ctl1.signal, makeDeps([]))
+    await p1.run()
+    expect(document.querySelector('.lec-mermaid-num')).toBeNull()
+    const inline1 = document.querySelector<HTMLElement>('figure.inline-mermaid')!
+    expect(inline1.dataset.figNo).toBe('1')
+    expect(inline1.dataset.figLec).toBe('30')
+    expect(inline1.dataset.figLabel).toBe('图 30-1')
+    ctl1.abort()
+    p1.destroy()
+
+    const p2 = new PageCharts('/g01/L30', new AbortController().signal, makeDeps([]))
+    await p2.run()
+    const inline2 = document.querySelector<HTMLElement>('figure.inline-mermaid')!
+    expect(inline2.dataset.figNo).toBe('1')
+    expect(inline2.dataset.figLabel).toBe('图 30-1')
+    p2.destroy()
+  })
 })
 
 describe('charts/fonts', () => {

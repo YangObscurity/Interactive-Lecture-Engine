@@ -20,7 +20,7 @@ test.describe('WP-F8: unified PhotoSwipe viewer for figures, ECharts & Mermaid',
     await page.setViewportSize({ width: 1280, height: 860 })
     await gotoAndSettle(page, LECTURE)
 
-    // 1. Click the group figure thumbnail -> opens unified PhotoSwipe viewer (slide 2 of SLIDES: after inline Mermaid c1)
+    // 1. Click the vector SVG figure thumbnail -> opens true vector SVG viewer (slide 2 of SLIDES: after Mermaid c1)
     const thumbMedia = page.locator('figure.lec-fig .lec-fig-media').first()
     await thumbMedia.scrollIntoViewIfNeeded()
     await thumbMedia.click()
@@ -29,14 +29,37 @@ test.describe('WP-F8: unified PhotoSwipe viewer for figures, ECharts & Mermaid',
     await expect(page.locator('html')).toHaveClass(/chart-modal-open/)
     await expect(viewer.locator('.chart-modal__counter')).toHaveText(`2 / ${SLIDES}`)
 
-    // the figure starts fitted inside the viewport below the bar, and only a figure with an original offers the link
+    // Vector SVG figure renders inline crisp <svg> inside full-viewport free-pan stage (no overflow scrollbars)
     await expect(viewer.locator('[data-m="original"]')).toBeVisible()
-    const fit = await viewer.locator('.pswp__img').first().evaluate((el) => {
+    const vecSvg = viewer.locator('.chart-modal__vec-host svg').first()
+    await expect(vecSvg).toBeVisible()
+    const stageOverflow = await viewer.locator('.chart-modal__stage').evaluate((el) => {
+      const st = getComputedStyle(el)
+      return { ovX: st.overflowX, ovY: st.overflowY, w: el.clientWidth, h: el.clientHeight }
+    })
+    expect(stageOverflow.ovX).toBe('hidden')
+    expect(stageOverflow.ovY).toBe('hidden')
+    expect(stageOverflow.w).toBeGreaterThanOrEqual(1200)
+
+    const fit = await vecSvg.evaluate((el) => {
       const r = el.getBoundingClientRect()
-      return { top: r.top, bottom: r.bottom, vh: window.innerHeight }
+      return { top: r.top, bottom: r.bottom, width: r.width, left: r.left, vh: window.innerHeight }
     })
     expect(fit.top).toBeGreaterThanOrEqual(44)
     expect(fit.bottom).toBeLessThanOrEqual(fit.vh)
+
+    // Vector zoom changes the rendered <svg> pixel box cleanly, and dragging pans freely in 2D
+    await viewer.locator('button[data-m="in"]').click()
+    const zoomedBox = await vecSvg.boundingBox()
+    expect(zoomedBox!.width).toBeGreaterThan(fit.width * 1.15)
+    await page.mouse.move(640, 450)
+    await page.mouse.down()
+    await page.mouse.move(760, 540, { steps: 8 })
+    await page.mouse.up()
+    const pannedBox = await vecSvg.boundingBox()
+    expect(pannedBox!.x - zoomedBox!.x).toBeGreaterThan(60)
+    expect(pannedBox!.y - zoomedBox!.y).toBeGreaterThan(40)
+    await viewer.locator('button[data-m="reset"]').click()
 
     // 2. Focus trap keeps focus inside dialog when pressing Tab repeatedly
     for (let i = 0; i < 8; i++) {
@@ -45,11 +68,20 @@ test.describe('WP-F8: unified PhotoSwipe viewer for figures, ECharts & Mermaid',
       expect(inside, `focus escaped viewer on Tab #${i + 1}`).toBe(true)
     }
 
-    // 3. Navigate left to Mermaid diagram slide inside the same viewer
+    // 3. Navigate left to Mermaid diagram slide inside the same full-viewport stage and pan freely even at initial fit
     await viewer.locator('button[data-m="prev"]').click()
     await expect(viewer.locator('.chart-modal__counter')).toHaveText(`1 / ${SLIDES}`)
     await expect(viewer.locator('[data-m="original"]')).toBeHidden()
-    await expect(viewer.locator('.chart-modal__stage figure.chart--modal[data-type="mermaid"] svg')).toBeVisible()
+    const mermaidSvg = viewer.locator('.chart-modal__stage figure.chart--modal[data-type="mermaid"] svg')
+    await expect(mermaidSvg).toBeVisible()
+    const mBefore = await mermaidSvg.boundingBox()
+    await page.mouse.move(640, 450)
+    await page.mouse.down()
+    await page.mouse.move(540, 360, { steps: 8 })
+    await page.mouse.up()
+    const mAfter = await mermaidSvg.boundingBox()
+    expect(Math.abs(mAfter!.x - mBefore!.x)).toBeGreaterThan(50)
+    expect(Math.abs(mAfter!.y - mBefore!.y)).toBeGreaterThan(40)
 
     // 4. Zoom buttons + Esc close cleanly and restore inline Mermaid chart
     await viewer.locator('button[data-m="in"]').click()
@@ -58,6 +90,14 @@ test.describe('WP-F8: unified PhotoSwipe viewer for figures, ECharts & Mermaid',
     await expect(viewer).toHaveCount(0)
     await expect(page.locator('html')).not.toHaveClass(/chart-modal-open/)
     await expect(page.locator('figure.chart[data-id="c1"] .chart-body svg')).toBeVisible()
+
+    // 5. Raster figures (.webp) still open via PhotoSwipe img fallback
+    await gotoAndSettle(page, '/mea/L03')
+    await page.locator('figure.lec-fig .lec-fig-media').first().click()
+    await expect(viewer).toBeVisible()
+    await expect(viewer.locator('.pswp__img').first()).toBeVisible()
+    await page.keyboard.press('Escape')
+    await expect(viewer).toHaveCount(0)
     expect(pageErrors).toEqual([])
   })
 
