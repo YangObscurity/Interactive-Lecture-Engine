@@ -998,7 +998,7 @@ describe('WP-4 PageUsers.vue', () => {
     wrapper.unmount()
   })
 
-  it('supports passwordless user creation, inline role edit 409, and password reset', async () => {
+  it('requires initial password on user creation, supports inline role edit 409, and password reset', async () => {
     const requests: Array<{ url: string; method: string; body: unknown }> = []
     const users = [
       {
@@ -1064,14 +1064,19 @@ describe('WP-4 PageUsers.vue', () => {
     await flushPromises()
 
     await wrapper.get('[data-users-open-create]').trigger('click')
+    expect(wrapper.find('[data-usr-create-passwordless]').exists()).toBe(false)
     await wrapper.get('[data-usr-create-username]').setValue('pk2')
-    await wrapper.get('[data-usr-create-passwordless]').setValue(true)
-    expect(wrapper.find('[data-usr-create-password]').exists()).toBe(false)
+    await wrapper.get('[data-usr-create-password]').setValue('short')
+    await wrapper.get('[data-users-create-panel] form').trigger('submit')
+    await flushPromises()
+    expect(wrapper.get('[data-users-error]').text()).toBe(dashboardZhCN['dsh.login.errPasswordShort'])
+
+    await wrapper.get('[data-usr-create-password]').setValue('Password123!')
     await wrapper.get('[data-users-create-panel] form').trigger('submit')
     await flushPromises()
     expect(requests.find((r) => r.url === '/api/admin/users' && r.method === 'POST')?.body).toMatchObject({
       username: 'pk2',
-      password: null,
+      password: 'Password123!',
     })
 
     await wrapper.get('[data-user-edit-roles="u-admin"]').trigger('click')
@@ -1305,6 +1310,7 @@ describe('WP-4 PageDatabase.vue', () => {
     const switchCalls: boolean[] = []
     const transferPayloads: Array<Record<string, unknown>> = []
     const patchPayloads: Array<Record<string, unknown>> = []
+    const postPayloads: Array<Record<string, unknown>> = []
     const rowOffsets: number[] = []
 
     const tablesFixture = [
@@ -1428,6 +1434,10 @@ describe('WP-4 PageDatabase.vue', () => {
           patchPayloads.push(body.data)
           return jsonRes({ ok: true, table: 'auth_users', row: { id: 'u1', ...body.data } })
         }
+        if (url === '/api/admin/db/tables/auth_users/rows' && method === 'POST') {
+          postPayloads.push(body)
+          return jsonRes({ ok: true, table: 'auth_users', row: { id: 'u2', ...body } }, 201)
+        }
         if (url === '/api/admin/db/switch' && method === 'POST') {
           switchCalls.push(Boolean(body.dryRun))
           return jsonRes({
@@ -1523,6 +1533,25 @@ describe('WP-4 PageDatabase.vue', () => {
       email: null,
       display_name: '',
       roles: ['reader', 'author'],
+    })
+    expect(patchPayloads[1]).not.toHaveProperty('password')
+
+    // Inserting auth_users requires password (min 8 chars) and sends password in create payload
+    await wrapper.get('[data-db-add-row]').trigger('click')
+    await wrapper.get('[data-db-field="username"]').setValue('bob')
+    await wrapper.get('[data-db-field="roles"]').setValue('["reader"]')
+    await wrapper.get('[data-db-field="password"]').setValue('short')
+    await wrapper.get('[data-db-row-editor] form').trigger('submit')
+    expect(wrapper.get('[data-db-error]').text()).toBe(dashboardZhCN['dsh.login.errPasswordShort'])
+    expect(postPayloads).toHaveLength(0)
+
+    await wrapper.get('[data-db-field="password"]').setValue('NewUserPass123!')
+    await wrapper.get('[data-db-row-editor] form').trigger('submit')
+    await flushPromises()
+    expect(postPayloads[0]).toMatchObject({
+      username: 'bob',
+      password: 'NewUserPass123!',
+      roles: ['reader'],
     })
 
     wrapper.unmount()

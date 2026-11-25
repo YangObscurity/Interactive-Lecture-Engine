@@ -38,7 +38,6 @@ const createForm = reactive({
   displayName: '',
   email: '',
   password: '',
-  passwordless: false,
   roleAuthor: false,
   roleAdmin: false,
 })
@@ -95,7 +94,7 @@ async function onCreateUser(): Promise<void> {
     errorMessage.value = t('dsh.login.errRequired')
     return
   }
-  if (!createForm.passwordless && createForm.password.length < 8) {
+  if (createForm.password.length < 8) {
     errorMessage.value = t('dsh.login.errPasswordShort')
     return
   }
@@ -108,7 +107,7 @@ async function onCreateUser(): Promise<void> {
   try {
     const res = await createAdminUser({
       username,
-      password: createForm.passwordless ? null : createForm.password,
+      password: createForm.password,
       ...(createForm.displayName.trim() ? { displayName: createForm.displayName.trim() } : {}),
       ...(createForm.email.trim() ? { email: createForm.email.trim() } : {}),
       roles,
@@ -124,7 +123,6 @@ async function onCreateUser(): Promise<void> {
     createForm.username = ''
     createForm.displayName = ''
     createForm.email = ''
-    createForm.passwordless = false
     createForm.roleAuthor = false
     createForm.roleAdmin = false
     showCreate.value = false
@@ -272,19 +270,19 @@ async function onDeleteUser(u: AdminUser): Promise<void> {
           </div>
         </div>
         <div class="db-frow one">
-          <label class="db-fl" for="usr-new-pw">{{ t('dsh.usr.password') }}</label>
+          <label class="db-fl" for="usr-new-pw">
+            {{ t('dsh.usr.password') }}
+            <small class="db-muted">{{ t('dsh.usr.passwordHint') }}</small>
+          </label>
           <div class="db-fld">
-            <label class="db-ck">
-              <input v-model="createForm.passwordless" type="checkbox" data-usr-create-passwordless />
-              <span>{{ t('dsh.usr.passwordless') }}</span>
-            </label>
             <input
-              v-if="!createForm.passwordless"
               id="usr-new-pw"
               v-model="createForm.password"
               class="db-in"
               type="password"
               autocomplete="new-password"
+              required
+              minlength="8"
               data-usr-create-password
             />
           </div>

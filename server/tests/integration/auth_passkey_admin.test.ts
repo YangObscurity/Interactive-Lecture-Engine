@@ -1582,7 +1582,7 @@ describe('WP-2: Backend Authentication, Cookies, Passkeys, Hybrid, Me & Admin', 
       expect(compBody.source).toBe('db')
     })
 
-    it('4. enforces rate limit: rightmost XFF proxy IP blocked on rotation; per-IP+user rate limit does not lock out other IPs', async () => {
+    it('4. enforces rate limit: rightmost XFF proxy IP blocked on rotation; direct socket ignores headers; per-username backoff blocks brute-force across IPs', async () => {
       const memDb = createDb('pglite:memory')
       await runMigrations(memDb)
       const tightConfig = makeTestConfig({
@@ -1623,14 +1623,56 @@ describe('WP-2: Backend Authentication, Cookies, Passkeys, Hybrid, Me & Admin', 
       })
       expect(blockedRes.status).toBe(429)
 
-      // Test 4b: Per-IP+username rate limit blocks brute-force from attacker IP without locking out legitimate IP
+      // Test 4b: Direct non-loopback socket ignores X-Real-IP / X-Forwarded-For
+      const directSocketEnv = { incoming: { socket: { remoteAddress: '198.51.100.44' } } }
+      const directDb = createDb('pglite:memory')
+      await runMigrations(directDb)
+      const directApp = createApp(tightConfig, directDb)
+      await directApp.request('/api/auth/bootstrap', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: 'direct_admin', password: 'Password123!' }),
+      })
+      for (let i = 0; i < 2; i++) {
+        const res = await directApp.request(
+          '/api/auth/login',
+          {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'X-Real-IP': `192.0.2.${i}`,
+              'X-Forwarded-For': `10.0.0.${i}`,
+            },
+            body: JSON.stringify({ username: 'direct_admin', password: 'WrongPassword!' }),
+          },
+          directSocketEnv,
+        )
+        expect(res.status).toBe(401)
+      }
+      const directBlocked = await directApp.request(
+        '/api/auth/login',
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Real-IP': '192.0.2.99',
+            'X-Forwarded-For': '10.0.0.99',
+          },
+          body: JSON.stringify({ username: 'direct_admin', password: 'WrongPassword!' }),
+        },
+        directSocketEnv,
+      )
+      expect(directBlocked.status).toBe(429)
+
+      // Test 4c: Per-username failed-login backoff ignores IP
       const freshDb = createDb('pglite:memory')
       await runMigrations(freshDb)
+      let clockMs = 1_700_000_000_000
       const userTightConfig = makeTestConfig({
         authAdapter: 'local',
         writeRatePerMinute: 2,
       })
-      const userTightApp = createApp(userTightConfig, freshDb)
+      const userTightApp = createApp(userTightConfig, freshDb, { now: () => clockMs })
 
       // Bootstrap user
       await userTightApp.request('/api/auth/bootstrap', {
@@ -1639,33 +1681,42 @@ describe('WP-2: Backend Authentication, Cookies, Passkeys, Hybrid, Me & Admin', 
         body: JSON.stringify({ username: 'bruteforce_target', password: 'Password123!' }),
       })
 
-      // 2 failed attempts from attacker IP 203.0.113.10
-      for (let i = 0; i < 2; i++) {
-        const res = await userTightApp.request('/api/auth/login', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'X-Forwarded-For': '203.0.113.10',
-          },
-          body: JSON.stringify({ username: 'bruteforce_target', password: 'WrongPassword!' }),
-        })
-        expect(res.status).toBe(401)
-      }
-
-      // 3rd attempt from the SAME attacker IP 203.0.113.10 -> 429
-      const attackerBlockedRes = await userTightApp.request('/api/auth/login', {
+      // 2 failed attempts from different IPs (203.0.113.1, 203.0.113.2)
+      const ip1Res = await userTightApp.request('/api/auth/login', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'X-Forwarded-For': '203.0.113.10',
+          'X-Forwarded-For': '203.0.113.1',
         },
         body: JSON.stringify({ username: 'bruteforce_target', password: 'WrongPassword!' }),
       })
-      expect(attackerBlockedRes.status).toBe(429)
-      const blockedBody = await attackerBlockedRes.json()
+      expect(ip1Res.status).toBe(401)
+
+      const ip2Res = await userTightApp.request('/api/auth/login', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Forwarded-For': '203.0.113.2',
+        },
+        body: JSON.stringify({ username: 'bruteforce_target', password: 'WrongPassword!' }),
+      })
+      expect(ip2Res.status).toBe(401)
+
+      // 3rd attempt from different IP 192.0.2.200 returns 429 rate_limited
+      const thirdBlockedRes = await userTightApp.request('/api/auth/login', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Forwarded-For': '192.0.2.200',
+        },
+        body: JSON.stringify({ username: 'bruteforce_target', password: 'WrongPassword!' }),
+      })
+      expect(thirdBlockedRes.status).toBe(429)
+      const blockedBody = await thirdBlockedRes.json()
       expect(blockedBody.error).toBe('rate_limited')
 
-      // Legitimate login for bruteforce_target from a DIFFERENT IP 198.51.100.77 STILL succeeds (200)
+      // Advancing clockMs += 1500 lets a legitimate login from 198.51.100.77 succeed with 200
+      clockMs += 1500
       const legitRes = await userTightApp.request('/api/auth/login', {
         method: 'POST',
         headers: {

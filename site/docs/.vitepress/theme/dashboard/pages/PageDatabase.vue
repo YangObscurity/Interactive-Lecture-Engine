@@ -480,7 +480,15 @@ async function onSaveRow(): Promise<void> {
     }
     const strVal = typeof raw === 'string' ? raw : ''
     if (col === 'password') {
-      if (strVal !== '') payload[col] = strVal
+      if (editorMode.value === 'create') {
+        if (strVal.length < 8) {
+          errorMessage.value = t('dsh.login.errPasswordShort')
+          return
+        }
+        payload[col] = strVal
+      } else if (strVal !== '') {
+        payload[col] = strVal
+      }
       continue
     }
     if (JSONB_COLS.has(col)) {
@@ -911,6 +919,7 @@ async function onDeleteRow(row: Record<string, unknown>): Promise<void> {
                   v-model="editorFields[col] as string"
                   class="db-in"
                   :type="col === 'password' ? 'password' : 'text'"
+                  :required="col === 'password' && editorMode === 'create'"
                   :data-db-field="col"
                 />
               </div>

@@ -54,7 +54,13 @@ vi.mock('virtual:lecture-theme', () => ({
 }))
 
 import { dashboardZhCN } from '../../docs/.vitepress/i18n/dashboard.zh-CN'
-import { fetchAdminHealth, fetchAdminOverview, setApiOrigin } from '../../docs/.vitepress/theme/api/admin'
+import {
+  fetchAdminHealth,
+  fetchAdminOverview,
+  setApiOrigin,
+  transferDb,
+  TRANSFER_ADMIN_TIMEOUT_MS,
+} from '../../docs/.vitepress/theme/api/admin'
 import type { AuthMethodInfo, AuthStatus } from '../../docs/.vitepress/theme/api/auth'
 import { currentSession, resetSession, subscribeSession } from '../../docs/.vitepress/theme/auth/session'
 import DashboardLogin from '../../docs/.vitepress/theme/dashboard/DashboardLogin.vue'
@@ -1087,5 +1093,63 @@ describe('WP-5 RBAC Online Dashboard Suite', () => {
       true,
     )
     expect(wrapper.find('[data-look-setting-msg]').text()).toBe(dashboardZhCN['dsh.lk.onlineSettingReservedErr'])
+  })
+
+  it('transferDb uses extended 130s timeout: does not abort at 30s and resolves at 45s, but aborts at 130s', async () => {
+    vi.useFakeTimers()
+    try {
+      // 1. Verify does not abort at 30s and resolves when server responds at 45s
+      const delayedFetch = vi.fn((_input: RequestInfo | URL, init?: RequestInit) => {
+        return new Promise<Response>((resolve, reject) => {
+          const timer = setTimeout(() => {
+            resolve(jsonResponse({ ok: true, dryRun: true, direction: 'push', tables: [] }))
+          }, 45_000)
+          init?.signal?.addEventListener('abort', () => {
+            clearTimeout(timer)
+            reject(new DOMException('The operation was aborted.', 'AbortError'))
+          })
+        })
+      })
+
+      const pendingTransfer = transferDb(
+        { targetUrl: 'postgresql://example.com/db', direction: 'push' },
+        delayedFetch as unknown as typeof fetch,
+      )
+
+      // Advance past default 30s timeout
+      await vi.advanceTimersByTimeAsync(30_000)
+      expect(delayedFetch).toHaveBeenCalledTimes(1)
+
+      // Advance by another 15s to reach 45s
+      await vi.advanceTimersByTimeAsync(15_000)
+      const res45 = await pendingTransfer
+      expect(res45.ok).toBe(true)
+      if (res45.ok) {
+        expect(res45.data.ok).toBe(true)
+      }
+
+      // 2. Verify aborts at TRANSFER_ADMIN_TIMEOUT_MS (130_000ms)
+      const hangingFetch = vi.fn((_input: RequestInfo | URL, init?: RequestInit) => {
+        return new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener('abort', () => {
+            reject(new DOMException('The operation was aborted.', 'AbortError'))
+          })
+        })
+      })
+
+      const timeoutTransfer = transferDb(
+        { targetUrl: 'postgresql://example.com/db', direction: 'push' },
+        hangingFetch as unknown as typeof fetch,
+      )
+
+      await vi.advanceTimersByTimeAsync(TRANSFER_ADMIN_TIMEOUT_MS)
+      const resTimeout = await timeoutTransfer
+      expect(resTimeout.ok).toBe(false)
+      if (!resTimeout.ok) {
+        expect(resTimeout.error.code).toBe('timeout')
+      }
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })

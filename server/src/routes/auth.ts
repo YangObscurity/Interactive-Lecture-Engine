@@ -21,6 +21,8 @@ import {
   validatePasswordStrength,
   verifyPassword,
 } from '../auth/password.js'
+import { rateLimited } from '../http/errors.js'
+import { type Clock, FailedLoginBackoff } from '../http/rateLimit.js'
 import type { AppConfig, Role } from '../config/schema.js'
 import type { Db } from '../db/types.js'
 import { randomUUID, timingSafeEqual } from 'node:crypto'
@@ -210,8 +212,10 @@ export function createAuthRouter(
   config: AppConfig,
   db: Db,
   registry: AuthProviderRegistry = defaultAuthRegistry,
+  now: Clock = Date.now,
 ): Hono<AppEnv> {
   const router = new Hono<AppEnv>()
+  const failedUserBackoff = new FailedLoginBackoff(Math.min(config.writeRatePerMinute, 5), now)
 
   // 1. GET /status — extended session status
   router.get('/status', async (c) => {
@@ -417,6 +421,12 @@ export function createAuthRouter(
       )
     }
 
+    const normUser = username.toLowerCase().slice(0, 64)
+    const backoff = failedUserBackoff.check(normUser)
+    if (!backoff.ok) {
+      throw rateLimited('auth_rate', backoff.retryAfterSec)
+    }
+
     const userRes = await db.query<{
       id: string
       username: string
@@ -436,6 +446,7 @@ export function createAuthRouter(
 
     if (userRes.rowCount === 0 || !userRes.rows[0]) {
       await dummyVerifyPassword()
+      failedUserBackoff.recordFailure(normUser)
       return c.json(
         { error: 'invalid_credentials', message: 'Invalid username or password' },
         401,
@@ -445,6 +456,7 @@ export function createAuthRouter(
     const user = userRes.rows[0]
     const valid = await verifyPassword(password, user.password_hash)
     if (!valid) {
+      failedUserBackoff.recordFailure(normUser)
       return c.json(
         { error: 'invalid_credentials', message: 'Invalid username or password' },
         401,
@@ -454,6 +466,8 @@ export function createAuthRouter(
     if (user.disabled) {
       return c.json({ error: 'account_disabled', message: 'Account has been disabled' }, 403)
     }
+
+    failedUserBackoff.reset(normUser)
 
     await db.query(`UPDATE auth_users SET last_login_at = NOW() WHERE id = $1`, [user.id])
 

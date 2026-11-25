@@ -8,6 +8,7 @@ import {
   type WireSession,
   type WireSessionUser,
 } from './auth/index.js'
+import { defaultAuthRegistry } from './auth/providers/registry.js'
 import type { AppConfig } from './config/schema.js'
 import { createDbManager, type DbManager } from './db/manager.js'
 import type { Db } from './db/types.js'
@@ -268,44 +269,35 @@ export function createApp(config: AppConfig, db: Db, options: AppOptions = {}): 
     await next()
   }
 
+  function isLoopbackAddress(addr: string): boolean {
+    return addr === '127.0.0.1' || addr === '::1' || addr === '::ffff:127.0.0.1'
+  }
+
   const limitAuthWrites: MiddlewareHandler<AppEnv> = async (c, next) => {
-    const realIp = c.req.header('x-real-ip')?.trim()
-    let clientIp = realIp
-    if (!clientIp) {
-      const xff = c.req.header('x-forwarded-for')?.split(',').map((s) => s.trim()).filter(Boolean)
-      if (xff && xff.length > 0) {
-        clientIp = xff[xff.length - 1]
-      }
-    }
-    if (!clientIp) {
-      const incoming = (c.env as { incoming?: { socket?: { remoteAddress?: string } } } | undefined)?.incoming
-      if (incoming?.socket?.remoteAddress) {
-        clientIp = incoming.socket.remoteAddress
+    const socketIp = (
+      c.env as { incoming?: { socket?: { remoteAddress?: string } } } | undefined
+    )?.incoming?.socket?.remoteAddress?.trim()
+
+    let clientIp: string | undefined
+    if (socketIp && !isLoopbackAddress(socketIp)) {
+      clientIp = socketIp
+    } else {
+      const realIp = c.req.header('x-real-ip')?.trim()
+      if (realIp) {
+        clientIp = realIp
+      } else {
+        const xff = c.req.header('x-forwarded-for')?.split(',').map((s) => s.trim()).filter(Boolean)
+        if (xff && xff.length > 0) {
+          clientIp = xff[xff.length - 1]
+        } else {
+          clientIp = socketIp
+        }
       }
     }
     const ipKey = clientIp ? `auth:ip:${clientIp}` : 'auth:ip:direct'
     const ipDecision = authLimiter.check(ipKey)
     if (!ipDecision.ok) {
       throw rateLimited(ipDecision.kind ?? 'auth_rate', ipDecision.retryAfterSec)
-    }
-
-    if (c.req.method === 'POST' && c.req.path === '/api/auth/login') {
-      let normUser: string | null = null
-      try {
-        const cloned = c.req.raw.clone()
-        const body = (await cloned.json()) as { username?: unknown }
-        if (body && typeof body === 'object' && typeof body.username === 'string') {
-          normUser = body.username.trim().toLowerCase().slice(0, 64) || null
-        }
-      } catch {
-        // Let endpoint handle malformed JSON
-      }
-      if (normUser) {
-        const userDecision = authLimiter.check(`auth:ip-user:${clientIp || 'direct'}:${normUser}`)
-        if (!userDecision.ok) {
-          throw rateLimited(userDecision.kind ?? 'auth_rate', userDecision.retryAfterSec)
-        }
-      }
     }
 
     await next()
@@ -339,7 +331,7 @@ export function createApp(config: AppConfig, db: Db, options: AppOptions = {}): 
   // Tier 1: Public Routes
   app.get('/api/health', createHealthHandler(config, effectiveDb, { ai: aiRuntime.recorder, now }))
   app.route('/api/auth/session', createSessionRouter())
-  app.route('/api/auth', createAuthRouter(config, effectiveDb))
+  app.route('/api/auth', createAuthRouter(config, effectiveDb, defaultAuthRegistry, now))
 
   // Tier 2: User Routes
   const meRouter = createMeRouter(config, effectiveDb)

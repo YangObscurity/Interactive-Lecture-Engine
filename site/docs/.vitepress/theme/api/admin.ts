@@ -350,6 +350,8 @@ export function isAdminError<T>(res: AdminApiResult<T>): res is { ok: false; err
 }
 
 export const DEFAULT_ADMIN_TIMEOUT_MS = 30_000
+export const DB_ADMIN_TIMEOUT_MS = 65_000
+export const TRANSFER_ADMIN_TIMEOUT_MS = 130_000
 
 export function formatAdminError(err: AdminApiError | unknown): string {
   if (isRecord(err)) {
@@ -973,41 +975,53 @@ export function testDbConnection(payload: {
   return adminFetch<DbTestResponse>('POST', '/api/admin/db/test', payload)
 }
 
-export function initDb(payload?: {
-  targetUrl?: string | null
-  targetDirectUrl?: string | null
-  dryRun?: boolean
-}): Promise<AdminApiResult<DbMigrateResponse>> {
-  return adminFetch<DbMigrateResponse>('POST', '/api/admin/db/init', payload ?? {})
+export function initDb(
+  payload?: {
+    targetUrl?: string | null
+    targetDirectUrl?: string | null
+    dryRun?: boolean
+  },
+  fetchImpl?: typeof fetch,
+): Promise<AdminApiResult<DbMigrateResponse>> {
+  return adminFetch<DbMigrateResponse>('POST', '/api/admin/db/init', payload ?? {}, fetchImpl, DB_ADMIN_TIMEOUT_MS)
 }
 
-export function migrateDb(payload?: {
-  targetUrl?: string | null
-  targetDirectUrl?: string | null
-  dryRun?: boolean
-}): Promise<AdminApiResult<DbMigrateResponse>> {
-  return adminFetch<DbMigrateResponse>('POST', '/api/admin/db/migrate', payload ?? {})
+export function migrateDb(
+  payload?: {
+    targetUrl?: string | null
+    targetDirectUrl?: string | null
+    dryRun?: boolean
+  },
+  fetchImpl?: typeof fetch,
+): Promise<AdminApiResult<DbMigrateResponse>> {
+  return adminFetch<DbMigrateResponse>('POST', '/api/admin/db/migrate', payload ?? {}, fetchImpl, DB_ADMIN_TIMEOUT_MS)
 }
 
-export function switchDb(payload: {
-  targetUrl: string
-  targetDirectUrl?: string | null
-  dryRun?: boolean
-  autoMigrate?: boolean
-  updateEnv?: boolean
-}): Promise<AdminApiResult<DbSwitchResponse>> {
-  return adminFetch<DbSwitchResponse>('POST', '/api/admin/db/switch', payload)
+export function switchDb(
+  payload: {
+    targetUrl: string
+    targetDirectUrl?: string | null
+    dryRun?: boolean
+    autoMigrate?: boolean
+    updateEnv?: boolean
+  },
+  fetchImpl?: typeof fetch,
+): Promise<AdminApiResult<DbSwitchResponse>> {
+  return adminFetch<DbSwitchResponse>('POST', '/api/admin/db/switch', payload, fetchImpl, 95_000)
 }
 
-export function transferDb(payload: {
-  targetUrl: string
-  targetDirectUrl?: string | null
-  direction: 'push' | 'pull'
-  conflictStrategy?: 'upsert' | 'skip'
-  dryRun?: boolean
-  migrateTarget?: boolean
-}): Promise<AdminApiResult<DbTransferResponse>> {
-  return adminFetch<DbTransferResponse>('POST', '/api/admin/db/transfer', payload)
+export function transferDb(
+  payload: {
+    targetUrl: string
+    targetDirectUrl?: string | null
+    direction: 'push' | 'pull'
+    conflictStrategy?: 'upsert' | 'skip'
+    dryRun?: boolean
+    migrateTarget?: boolean
+  },
+  fetchImpl?: typeof fetch,
+): Promise<AdminApiResult<DbTransferResponse>> {
+  return adminFetch<DbTransferResponse>('POST', '/api/admin/db/transfer', payload, fetchImpl, TRANSFER_ADMIN_TIMEOUT_MS)
 }
 
 export function fetchDbTables(): Promise<AdminApiResult<{ ok: boolean; tables: DbTableMeta[] }>> {
