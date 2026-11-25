@@ -44,7 +44,7 @@ export function installAutoScrollbar(win: Window = window): () => void {
     const innerW = win.innerWidth || root.clientWidth
     const innerH = win.innerHeight || root.clientHeight
     const edgeStart = Math.max(0, root.clientWidth - EDGE_PX)
-    return clientX >= edgeStart && clientX <= innerW + EDGE_PX && clientY >= 0 && clientY <= innerH
+    return clientX >= edgeStart && clientX < innerW && clientY >= 0 && clientY < innerH
   }
 
   const onMove = (e: PointerEvent): void => {
@@ -69,8 +69,8 @@ export function installAutoScrollbar(win: Window = window): () => void {
 
   const onLeave = (e?: PointerEvent): void => {
     // Moving onto the native right-side scrollbar gutter fires `document.pointerleave` in Chromium
-    // while the pointer is still on the scrollbar track; keep `near` intact unless it actually exits the window.
-    if (e && isInRightEdge(e.clientX, e.clientY)) {
+    // while the pointer is still on the scrollbar track; keep `near` intact for mouse/pen unless it exits the viewport.
+    if (e && e.pointerType !== 'touch' && isInRightEdge(e.clientX, e.clientY)) {
       near = true
       win.clearTimeout(timer)
       show()

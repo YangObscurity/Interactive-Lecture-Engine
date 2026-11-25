@@ -190,7 +190,10 @@ test.describe('WP-F8: unified PhotoSwipe viewer for figures, ECharts & Mermaid',
     await useTheme(page, 'reader', 'light')
     await page.setViewportSize({ width: 1280, height: 860 })
     await gotoAndSettle(page, '/mea/')
-    await gotoAndSettle(page, LECTURE)
+    const spaLink = page.locator('a[href*="/mea/L05"]').first()
+    await expect(spaLink).toBeVisible()
+    await spaLink.click()
+    await expect(page).toHaveURL(/\/mea\/L0?5\/?$/)
 
     const thumbMedia = page.locator('figure.lec-fig .lec-fig-media').first()
     await thumbMedia.scrollIntoViewIfNeeded()

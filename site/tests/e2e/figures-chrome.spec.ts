@@ -172,6 +172,7 @@ for (const theme of SKINS) {
       await page.mouse.move(vw - 6, 300)
       await expect.poll(async () => (await state()).on).toBe(true)
       await page.mouse.move(vw - 2, 300)
+      await page.waitForTimeout(1100)
       await expect.poll(async () => (await state()).on).toBe(true)
       await page.mouse.move(700, 300)
       await expect.poll(async () => (await state()).on, { timeout: 6000 }).toBe(false)

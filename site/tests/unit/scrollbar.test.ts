@@ -59,6 +59,17 @@ describe('core/scrollbar installAutoScrollbar', () => {
     vi.advanceTimersByTime(HIDE_DELAY_MS + 10)
     expect(document.documentElement.getAttribute(SCROLLBAR_ATTR)).toBeNull()
 
+    // Touch pointerleave after a tap near the right edge must not stay stuck open
+    const touchLeave = new Event('pointerleave')
+    Object.defineProperty(touchLeave, 'pointerType', { value: 'touch' })
+    Object.defineProperty(touchLeave, 'clientX', { value: 1204 })
+    Object.defineProperty(touchLeave, 'clientY', { value: 250 })
+    window.dispatchEvent(new Event('scroll'))
+    expect(document.documentElement.getAttribute(SCROLLBAR_ATTR)).toBe('on')
+    document.dispatchEvent(touchLeave)
+    vi.advanceTimersByTime(HIDE_DELAY_MS + 10)
+    expect(document.documentElement.getAttribute(SCROLLBAR_ATTR)).toBeNull()
+
     stop()
   })
 

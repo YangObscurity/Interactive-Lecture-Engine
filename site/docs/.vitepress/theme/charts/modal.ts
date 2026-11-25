@@ -862,12 +862,24 @@ export function openUnifiedViewer(
   const firstOrigin = slides[startIndex]?.originEl ?? null
   const restoreTo = opener ?? (activeEl && activeEl !== document.body && firstOrigin?.contains(activeEl) ? activeEl : null)
 
+  const cancelPending = new AbortController()
+  if (typeof window !== 'undefined') {
+    const abortOpen = () => {
+      if (seq === openSeq) ++openSeq
+      closeModal()
+    }
+    window.addEventListener('popstate', abortOpen, { signal: cancelPending.signal })
+    window.addEventListener('pagehide', abortOpen, { signal: cancelPending.signal })
+  }
+
   void loadPhotoSwipe().then(
     (Ctor) => {
+      cancelPending.abort()
       if (seq !== openSeq) return
       startViewer(Ctor, slides, startIndex, restoreTo)
     },
     () => {
+      cancelPending.abort()
       /* library chunk failed to load (offline): the inline figure stays as it is */
     },
   )
