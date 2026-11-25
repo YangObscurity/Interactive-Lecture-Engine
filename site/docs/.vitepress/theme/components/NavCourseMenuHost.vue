@@ -64,10 +64,17 @@ const wrapRef = ref<HTMLElement | null>(null)
 
 let restoreFocusEl: HTMLElement | null = null
 
+function isFocusInsidePanel(): boolean {
+  if (typeof document === 'undefined') return false
+  const panel = wrapRef.value?.querySelector('.cm')
+  return Boolean(panel && document.activeElement instanceof Node && panel.contains(document.activeElement))
+}
+
 const hoverController = createCourseMenuHoverController({
   isMobile: () => Boolean(props.screenMenu),
   isOpen: () => isOpen.value,
   getMode: () => openMode.value,
+  hasFocusWithin: isFocusInsidePanel,
   openHover: () => openMenu('hover'),
   closeHover: () => closeMenu(false),
 })
@@ -216,15 +223,34 @@ function openMenu(mode: CourseMenuOpenMode = 'explicit'): void {
 }
 
 function closeMenu(restoreFocus = true): void {
-  hoverController.clearTimer()
+  hoverController.reset()
   const wasExplicit = openMode.value === 'explicit'
+  const wasFocusInPanel = isFocusInsidePanel()
+  const triggerEl = wrapRef.value?.querySelector<HTMLElement>('.cm-trigger') ?? null
   openMode.value = null
   isOpen.value = false
-  const target = restoreFocusEl
+  const prevTarget = restoreFocusEl
   restoreFocusEl = null
-  if (restoreFocus && wasExplicit && target && typeof requestAnimationFrame !== 'undefined') {
+  const target = wasExplicit ? prevTarget : wasFocusInPanel ? triggerEl : null
+  if (restoreFocus && target && typeof requestAnimationFrame !== 'undefined') {
     requestAnimationFrame(() => target.focus())
   }
+}
+
+function handleFocusIn(ev: FocusEvent): void {
+  if (!isOpen.value || props.screenMenu) return
+  const panel = wrapRef.value?.querySelector('.cm')
+  if (panel && ev.target instanceof Node && panel.contains(ev.target)) {
+    hoverController.onFocusIn()
+  }
+}
+
+function handleFocusOut(ev: FocusEvent): void {
+  if (!isOpen.value || props.screenMenu) return
+  const panel = wrapRef.value?.querySelector('.cm')
+  if (!panel) return
+  const next = ev.relatedTarget as Node | null
+  hoverController.onFocusOut(Boolean(next && panel.contains(next)))
 }
 
 function toggleMenu(): void {
@@ -355,7 +381,7 @@ function handleDocumentKeyDown(ev: KeyboardEvent): void {
   if (!isOpen.value || props.screenMenu) return
   if (ev.key === 'Escape') {
     ev.preventDefault()
-    closeMenu(openMode.value === 'explicit')
+    closeMenu(openMode.value === 'explicit' || isFocusInsidePanel())
   }
 }
 
@@ -408,14 +434,14 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
-  hoverController.clearTimer()
+  hoverController.reset()
   document.removeEventListener('click', handleDocumentClick, true)
   document.removeEventListener('keydown', handleDocumentKeyDown)
 })
 </script>
 
 <template>
-  <div ref="wrapRef" class="lec-course-menu-host">
+  <div ref="wrapRef" class="lec-course-menu-host" @focusin="handleFocusIn" @focusout="handleFocusOut">
     <LecSlot name="NavCourseMenu" v-bind="slotProps" />
   </div>
 </template>

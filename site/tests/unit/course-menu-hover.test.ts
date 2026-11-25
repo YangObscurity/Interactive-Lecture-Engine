@@ -220,6 +220,41 @@ describe('createCourseMenuHoverController', () => {
     vi.advanceTimersByTime(COURSE_MENU_HOVER_CLOSE_DELAY_MS * 2)
     expect(open).toBe(true)
   })
+
+  it('keeps hover-opened menu open while focus is inside the panel and closes once both hover and focus leave', () => {
+    let open = false
+    let mode: CourseMenuOpenMode | null = null
+    let focusedInside = false
+    const ctrl = createCourseMenuHoverController({
+      isOpen: () => open,
+      getMode: () => mode,
+      hasFocusWithin: () => focusedInside,
+      openHover: () => {
+        open = true
+        mode = 'hover'
+      },
+      closeHover: () => {
+        open = false
+        mode = null
+      },
+    })
+
+    ctrl.onHoverEnter()
+    expect(open).toBe(true)
+
+    // Keyboard user tabs into the panel before pointer moves away
+    focusedInside = true
+    ctrl.onFocusIn()
+    ctrl.onHoverLeave()
+    vi.advanceTimersByTime(COURSE_MENU_HOVER_CLOSE_DELAY_MS * 2)
+    expect(open).toBe(true)
+
+    // Moving focus out of the panel while pointer is already outside closes after delay
+    focusedInside = false
+    ctrl.onFocusOut(false)
+    vi.advanceTimersByTime(COURSE_MENU_HOVER_CLOSE_DELAY_MS)
+    expect(open).toBe(false)
+  })
 })
 
 describe.each([

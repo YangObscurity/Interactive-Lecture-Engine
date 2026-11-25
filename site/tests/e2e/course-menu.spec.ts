@@ -177,6 +177,19 @@ for (const [theme, expectedImpl] of SKINS) {
       await expect(dialog).toBeHidden()
       await expect(trigger).toHaveAttribute('aria-expanded', 'false')
 
+      // Hover open -> Tab into menu -> moving pointer away keeps keyboard focus open, Esc returns focus to trigger
+      await trigger.focus()
+      await trigger.hover()
+      await expect(dialog).toBeVisible()
+      await page.keyboard.press('Tab')
+      await expect(page.locator('.cm-groups li a').first()).toBeFocused()
+      await page.mouse.move(20, 650)
+      await page.waitForTimeout(240)
+      await expect(dialog).toBeVisible()
+      await page.keyboard.press('Escape')
+      await expect(dialog).toBeHidden()
+      await expect(trigger).toBeFocused()
+
       expect(pageErrors.map(String)).toEqual([])
     })
 
