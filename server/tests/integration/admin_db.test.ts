@@ -1484,5 +1484,48 @@ describe('WP-3: Admin DB Selector, Hot-Swap, Transfer & Whitelisted 6-Table CRUD
         await dbManager.close()
       }
     })
+
+    it('accepts JSON null values in POST and PATCH site_settings CRUD row routes', async () => {
+      const dbDir = join(tempRoot, 'json-null-crud-db')
+      const mainDb = createDb(`pglite:${dbDir}`)
+      await runMigrations(mainDb)
+
+      const dbManager = createDbManager(mainDb, { databaseUrl: `pglite:${dbDir}` })
+      const app = createApp(makeTestConfig({ databaseUrl: `pglite:${dbDir}` }), dbManager.asDb(), {
+        dbManager,
+      })
+
+      try {
+        const postRes = await app.request('/api/admin/db/tables/site_settings/rows', {
+          method: 'POST',
+          headers: { ...ADMIN_HEADERS, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ key: 'crud_null_post', value: null }),
+        })
+        expect(postRes.status).toBe(201)
+        const postBody = (await postRes.json()) as { ok: boolean; row: { key: string; value: unknown } }
+        expect(postBody.ok).toBe(true)
+        expect(postBody.row.key).toBe('crud_null_post')
+        expect(postBody.row.value).toBeNull()
+
+        const patchNonNull = await app.request('/api/admin/db/tables/site_settings/rows/crud_null_post', {
+          method: 'PATCH',
+          headers: { ...ADMIN_HEADERS, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ data: { value: 'changed' } }),
+        })
+        expect(patchNonNull.status).toBe(200)
+
+        const patchBackNull = await app.request('/api/admin/db/tables/site_settings/rows/crud_null_post', {
+          method: 'PATCH',
+          headers: { ...ADMIN_HEADERS, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ data: { value: null } }),
+        })
+        expect(patchBackNull.status).toBe(200)
+        const patchBody = (await patchBackNull.json()) as { ok: boolean; row: { key: string; value: unknown } }
+        expect(patchBody.ok).toBe(true)
+        expect(patchBody.row.value).toBeNull()
+      } finally {
+        await dbManager.close()
+      }
+    })
   })
 })

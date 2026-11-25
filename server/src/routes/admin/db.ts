@@ -1706,7 +1706,7 @@ export function createAdminDbRouter(
     const pushField = (colName: string, value: unknown, isJsonb: boolean) => {
       insertCols.push(`"${colName}"`)
       if (isJsonb) {
-        insertParams.push(value === null ? null : JSON.stringify(value))
+        insertParams.push(JSON.stringify(value))
         placeholders.push(`$${insertParams.length}::jsonb`)
       } else {
         insertParams.push(value)
@@ -1957,7 +1957,7 @@ export function createAdminDbRouter(
     for (const key of updateKeys) {
       const val = data[key]
       if (spec.jsonbColumns.has(key)) {
-        params.push(val === null ? null : JSON.stringify(val))
+        params.push(JSON.stringify(val))
         setClauses.push(`"${key}" = $${params.length}::jsonb`)
       } else {
         params.push(val)

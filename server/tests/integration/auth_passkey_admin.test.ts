@@ -2413,5 +2413,52 @@ describe('WP-2: Backend Authentication, Cookies, Passkeys, Hybrid, Me & Admin', 
         expect(getBody.value).toEqual(sample)
       }
     })
+
+    it('revokes local session cookie token during hybrid logout even when gateway headers win', async () => {
+      resetGatewayAuthSeenForTests()
+      const memDb = createDb('pglite:memory')
+      await runMigrations(memDb)
+      const cfg = makeTestConfig({ authAdapter: 'hybrid', logoutUrl: null })
+      const app = createApp(cfg, memDb)
+
+      try {
+        // Bootstrap a local password admin account and obtain a persistent DB session cookie
+        const bootRes = await app.request('/api/auth/bootstrap', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            username: 'hybrid_admin',
+            password: 'StrongPassword!123',
+            displayName: 'Hybrid Admin',
+            rememberMe: false,
+          }),
+        })
+        expect(bootRes.status).toBe(201)
+        const rawCookie = extractCookie(bootRes).value!
+        expect(rawCookie).toBeTruthy()
+
+        // Calling logout with BOTH trusted gateway headers AND the local session cookie:
+        // gateway takes precedence (sessionId=null), so logout must still revoke rawCookie in DB
+        const logoutRes = await app.request('/api/auth/logout', {
+          method: 'POST',
+          headers: {
+            'Remote-User': 'alice',
+            'Remote-Groups': 'admins',
+            Cookie: `lec_session=${rawCookie}`,
+          },
+        })
+        expect(logoutRes.status).toBe(200)
+
+        // Using a retained copy of that cookie without gateway headers must now be unauthenticated
+        const checkRes = await app.request('/api/auth/session', {
+          headers: { Cookie: `lec_session=${rawCookie}` },
+        })
+        expect(checkRes.status).toBe(200)
+        const checkBody = (await checkRes.json()) as { authenticated: boolean }
+        expect(checkBody.authenticated).toBe(false)
+      } finally {
+        resetGatewayAuthSeenForTests()
+      }
+    })
   })
 })

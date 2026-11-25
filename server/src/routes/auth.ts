@@ -11,7 +11,9 @@ import {
 import {
   createSessionRow,
   isSecureConnection,
+  parseCookies,
   revokeSessionById,
+  revokeSessionByRawToken,
   serializeClearSessionCookie,
   serializeSessionCookie,
 } from '../auth/sessions.js'
@@ -520,6 +522,10 @@ export function createAuthRouter(
     const sessionId = c.get('sessionId')
     if (sessionId) {
       await revokeSessionById(db, sessionId)
+    }
+    const rawCookieToken = parseCookies(c.req.header('Cookie'))[config.authCookieName]
+    if (rawCookieToken) {
+      await revokeSessionByRawToken(db, rawCookieToken)
     }
 
     const secure = isSecureConnection(config.authCookieSecure, c.req.url, (n) => c.req.header(n))
