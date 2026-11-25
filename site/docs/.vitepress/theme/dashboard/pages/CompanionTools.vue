@@ -280,7 +280,9 @@ function buildOnlineToolsView(aiData: OnlineAiToolsPayload | undefined): ToolsPa
     url: srv.host,
     enabled: srv.enabled,
     headers: [],
-    tools: Object.fromEntries(srv.tools.map((tl) => [tl.name, tl.enabled])),
+    tools: Object.fromEntries(
+      srv.tools.map((tl) => [tl.name, srv.configuredTools?.[tl.name] ?? tl.enabled]),
+    ),
     timeoutMs: aiData?.settings?.timeoutMs ?? null,
   }))
 

@@ -1437,4 +1437,93 @@ describe('WP-5 RBAC Online Dashboard Suite', () => {
       unregister()
     }
   })
+
+  it('preserves configured per-tool switches when disabling and re-enabling an online MCP server', async () => {
+    dashboardState.mode = 'online'
+    dashboardState.canAccessAuthor = true
+    dashboardState.canAccessAdmin = true
+    dashboardState.roles = ['reader', 'author', 'admin']
+
+    const putPayloads: Array<{ servers?: Array<{ id: string; enabled?: boolean; tools?: Record<string, boolean> }> }> = []
+    let srvEnabled = true
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = typeof input === 'string' ? input : input.toString()
+        const method = (init?.method ?? 'GET').toUpperCase()
+        if (url.endsWith('/api/admin/ai-tools')) {
+          if (method === 'PUT' && typeof init?.body === 'string') {
+            const parsed = JSON.parse(init.body) as (typeof putPayloads)[number]
+            putPayloads.push(parsed)
+            const srvPatch = parsed.servers?.find((s) => s.id === 'docs')
+            if (typeof srvPatch?.enabled === 'boolean') srvEnabled = srvPatch.enabled
+          }
+          return jsonResponse({
+            ok: true,
+            mcpEndpoint: { enabled: false, path: '/api/mcp' },
+            engineTools: [
+              { name: 'search_concepts', enabled: true, calls7d: 0, errors7d: 0 },
+              { name: 'get_concept', enabled: true, calls7d: 0, errors7d: 0 },
+            ],
+            mcpServers: [
+              {
+                id: 'docs',
+                name: 'Docs MCP',
+                host: 'mcp.example.com',
+                enabled: srvEnabled,
+                connectionState: srvEnabled ? 'connected' : 'disabled',
+                configuredTools: { lookup: true, disabled_tool: false },
+                tools: [
+                  { name: 'lookup', enabled: srvEnabled, calls7d: 0, errors7d: 0 },
+                  { name: 'disabled_tool', enabled: false, calls7d: 0, errors7d: 0 },
+                ],
+              },
+            ],
+            settings: {
+              provider: 'openai',
+              maxSteps: 4,
+              timeoutMs: 9000,
+              maxResultBytes: 18000,
+              mcpTokenSet: true,
+              ticketSecretSet: true,
+              source: 'server/.env',
+            },
+            statsSource: 'memory',
+            toolCallCounts7d: {},
+          })
+        }
+        return jsonResponse({ ok: true })
+      }),
+    )
+
+    const wrapper = mount(CompanionTools)
+    await flushPromises()
+
+    // Turn server off and save -> effective tools are false on wire, configuredTools must preserve lookup: true
+    await wrapper.find('[data-server-switch="docs"]').trigger('click')
+    await wrapper.find('[data-tools-save]').trigger('click')
+    await flushPromises()
+
+    expect(putPayloads).toHaveLength(1)
+    expect(putPayloads[0]?.servers?.[0]).toEqual({
+      id: 'docs',
+      enabled: false,
+      tools: { lookup: true, disabled_tool: false },
+    })
+    expect(wrapper.find('[data-server-tool="docs/lookup"]').attributes('aria-checked')).toBe('true')
+
+    // Re-enable server and save -> lookup remains true without being wiped to false
+    await wrapper.find('[data-server-switch="docs"]').trigger('click')
+    await wrapper.find('[data-tools-save]').trigger('click')
+    await flushPromises()
+
+    expect(putPayloads).toHaveLength(2)
+    expect(putPayloads[1]?.servers?.[0]).toEqual({
+      id: 'docs',
+      enabled: true,
+      tools: { lookup: true, disabled_tool: false },
+    })
+
+    wrapper.unmount()
+  })
 })

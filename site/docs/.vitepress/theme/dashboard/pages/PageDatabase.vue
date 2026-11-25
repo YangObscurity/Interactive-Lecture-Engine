@@ -145,6 +145,16 @@ const editableFormColumns = computed<string[]>(() => {
   return [...meta.editableColumns]
 })
 
+function isSwitchOutcomeUncertain(err: AdminApiError): boolean {
+  return (
+    err.status === 0 ||
+    err.status === 504 ||
+    err.code === 'timeout' ||
+    err.code === 'network_error' ||
+    err.code === 'network_unavailable'
+  )
+}
+
 function mapDbError(err: AdminApiError): string {
   if (err.code === 'cannot_remove_last_admin') return t('dsh.usr.errLastAdmin')
   return formatAdminError(err)
@@ -344,7 +354,7 @@ async function onSwitchCheck(dryRun: boolean): Promise<void> {
   pendingSwitchConfirm.value = false
   if (!isAdminOk(res)) {
     const errText = isAdminError(res) ? mapDbError(res.error) : 'unknown_error'
-    if (!dryRun) {
+    if (!dryRun && (!isAdminError(res) || isSwitchOutcomeUncertain(res.error))) {
       await loadInitial()
       errorMessage.value = t('dsh.db.errSwitchUnknownOutcome', { error: errText })
     } else {

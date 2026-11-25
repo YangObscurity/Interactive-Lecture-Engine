@@ -28,6 +28,7 @@ async function buildAiToolsPayload(config: AppConfig, rt: AiRuntime) {
     host: srv.host,
     enabled: srv.enabled,
     connectionState: srv.connectionState,
+    ...(srv.configuredTools ? { configuredTools: srv.configuredTools } : {}),
     tools: srv.tools.map((t) => {
       const key = `${srv.id}:${t.name}`
       const stat = stats7d[key]

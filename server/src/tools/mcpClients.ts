@@ -14,6 +14,7 @@ export interface ManagedMcpServerStatus {
   enabled: boolean
   connectionState: McpConnectionState
   tools: Array<{ name: string; enabled: boolean }>
+  configuredTools?: Record<string, boolean>
 }
 
 export interface McpClientFactory {
@@ -382,6 +383,7 @@ export class ExternalMcpManager {
       for (const configuredTool of Object.keys(server.tools)) {
         discoveredSet.add(configuredTool)
       }
+      const sortedToolNames = [...discoveredSet].sort()
 
       servers.push({
         id: server.id,
@@ -389,10 +391,13 @@ export class ExternalMcpManager {
         host: serverHostOf(server.url),
         enabled: server.enabled,
         connectionState: !server.enabled ? 'disabled' : (entry?.state ?? 'disconnected'),
-        tools: [...discoveredSet].sort().map((toolName) => ({
+        tools: sortedToolNames.map((toolName) => ({
           name: toolName,
           enabled: server.enabled && server.tools[toolName]?.enabled === true,
         })),
+        configuredTools: Object.fromEntries(
+          sortedToolNames.map((toolName) => [toolName, server.tools[toolName]?.enabled === true]),
+        ),
       })
     }
 

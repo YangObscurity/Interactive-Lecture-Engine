@@ -743,6 +743,7 @@ export interface OnlineAiToolsPayload {
     host: string
     enabled: boolean
     connectionState: string
+    configuredTools?: Record<string, boolean>
     tools: Array<{ name: string; enabled: boolean; calls7d: number; errors7d: number }>
   }>
   settings?: {

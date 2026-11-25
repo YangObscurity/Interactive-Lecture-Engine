@@ -1715,6 +1715,49 @@ describe('WP-4 PageDatabase.vue', () => {
     expect(configCalls).toBe(2)
     expect(wrapper.text()).toContain('postgres://user:***@db.example/prod')
     expect(wrapper.find('[data-db-error]').exists()).toBe(true)
+    expect(wrapper.get('[data-db-error]').text()).toContain('Request timed out')
+
+    // Definite 4xx/502 server rejections report the mapped server error without claiming uncertain outcome
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = typeof input === 'string' ? input : input.toString()
+        const method = (init?.method ?? 'GET').toUpperCase()
+        if (url === '/api/admin/db/config' && method === 'GET') {
+          configCalls += 1
+          return jsonRes({
+            ok: true,
+            kind: 'pg',
+            databaseUrl: 'postgres://user:***@db.example/prod',
+            databaseUrlDirect: null,
+            pgliteDir: './data/pglite',
+            envFilePath: 'server/.env',
+            envWritable: true,
+            migrations: { applied: 4, pending: 0, total: 4 },
+            tableCounts: { progress: 12 },
+          })
+        }
+        if (url === '/api/admin/db/tables' && method === 'GET') {
+          return jsonRes({ ok: true, tables: [] })
+        }
+        if (url === '/api/admin/db/switch' && method === 'POST') {
+          return jsonRes(
+            { ok: false, error: 'target_not_migrated', message: 'Target database missing migrations' },
+            409,
+          )
+        }
+        return jsonRes({ ok: false, error: 'unexpected_url' }, 404)
+      }),
+    )
+
+    await wrapper.get('[data-db-switch-btn]').trigger('click')
+    await wrapper.get('[data-db-confirm-switch]').trigger('click')
+    await flushPromises()
+
+    expect(configCalls).toBe(2)
+    expect(wrapper.get('[data-db-error]').text()).toContain('Target database missing migrations')
+    expect(wrapper.get('[data-db-error]').text()).not.toContain('重新刷新当前数据库状态')
+    expect(wrapper.get('[data-db-error]').text()).not.toContain('refreshed current engine status')
 
     wrapper.unmount()
   })
