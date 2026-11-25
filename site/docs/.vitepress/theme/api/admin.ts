@@ -560,7 +560,7 @@ export function fetchOnlineFigures(): Promise<AdminApiResult<OnlineFiguresPayloa
 
 export interface OnlineTextsPayload {
   ok: boolean
-  texts: Record<string, unknown>
+  texts: Record<string, unknown> | null
   persistence?: OnlinePersistenceInfo
 }
 

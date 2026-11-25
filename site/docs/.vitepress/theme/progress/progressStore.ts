@@ -815,6 +815,35 @@ export function createProgressStore(deps: ProgressStoreDeps): ProgressStore {
     return loading
   }
 
+  function resetBoundary(opts: {
+    established: string
+    reason?: string
+    clearLoading?: boolean
+    markReady?: boolean
+    persistState?: boolean
+    clearData?: { owner: string | null } | 'all'
+  }): void {
+    invalidatePendingWork(opts.clearLoading ? { clearLoading: true } : undefined)
+    loadSeq++
+    extraSeed.clear()
+    seed = baseSeedData ? seedIndex(baseSeedData) : new Map()
+    unfilteredGet = null
+    if (opts.clearData === 'all') {
+      latestSubSession = null
+      state = emptyState()
+    } else if (opts.clearData) {
+      state.server = dict()
+      state.outbox = []
+      state.owner = opts.clearData.owner
+    }
+    establishedIdentity = opts.established
+    if (opts.reason) note(opts.reason)
+    if (opts.persistState) persist()
+    if (opts.markReady) ready = true
+    emit({ kind: 'reset' })
+    notifySync()
+  }
+
   function onSessionChange(s: SessionState): void {
     if (s.status !== 'authenticated' && !(s.status === 'anonymous' && s.source === 'server')) {
       return
@@ -830,24 +859,17 @@ export function createProgressStore(deps: ProgressStoreDeps): ProgressStore {
       return
     }
 
-    invalidatePendingWork({ clearLoading: s.status !== 'authenticated' })
-    extraSeed.clear()
-    seed = baseSeedData ? seedIndex(baseSeedData) : new Map()
-    state.server = dict()
-    state.outbox = []
-    unfilteredGet = null
-    state.owner = s.status === 'authenticated' ? s.user.id : null
-    establishedIdentity = nextIdentity
-    note(`identity boundary switch (${currentIdentity} -> ${nextIdentity}): cleared records, outbox, and in-flight work`)
-    persist()
-    ready = true
-    emit({ kind: 'reset' })
-    notifySync()
+    resetBoundary({
+      established: nextIdentity,
+      reason: `identity boundary switch (${currentIdentity} -> ${nextIdentity}): cleared records, outbox, and in-flight work`,
+      clearLoading: s.status !== 'authenticated',
+      markReady: true,
+      persistState: true,
+      clearData: { owner: s.status === 'authenticated' ? s.user.id : null },
+    })
 
     if (s.status === 'authenticated') {
       loading = doLoad(s)
-    } else if (s.status === 'anonymous' && s.source === 'server') {
-      loadSeq++
     }
   }
 
@@ -881,14 +903,7 @@ export function createProgressStore(deps: ProgressStoreDeps): ProgressStore {
       const prevOwner = state.owner
       if (refresh()) {
         if (state.owner !== prevOwner) {
-          invalidatePendingWork()
-          loadSeq++
-          extraSeed.clear()
-          seed = baseSeedData ? seedIndex(baseSeedData) : new Map()
-          unfilteredGet = null
-          establishedIdentity = state.owner !== null ? `user:${state.owner}` : 'anon'
-          emit({ kind: 'reset' })
-          notifySync()
+          resetBoundary({ established: state.owner !== null ? `user:${state.owner}` : 'anon' })
         } else {
           emit({ kind: 'reset' })
           notifySync()
@@ -911,18 +926,13 @@ export function createProgressStore(deps: ProgressStoreDeps): ProgressStore {
   // ---- misc -------------------------------------------------------------------------------------
 
   function reset(): void {
-    invalidatePendingWork({ clearLoading: true })
-    loadSeq++
-    extraSeed.clear()
-    seed = baseSeedData ? seedIndex(baseSeedData) : new Map()
-    establishedIdentity = 'none'
-    latestSubSession = null
-    state = emptyState()
-    unfilteredGet = null
-    persist()
-    note('state reset')
-    emit({ kind: 'reset' })
-    notifySync()
+    resetBoundary({
+      established: 'none',
+      reason: 'state reset',
+      clearLoading: true,
+      persistState: true,
+      clearData: 'all',
+    })
   }
 
   function snapshot(): ProgressSnapshot {

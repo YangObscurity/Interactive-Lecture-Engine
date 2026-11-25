@@ -332,7 +332,9 @@ export function createMeRouter(config: AppConfig, db: Db): Hono<AppEnv> {
           throw new Error('not_found')
         }
 
-        const hasPassword = Boolean(userRes.rows[0].password_hash && userRes.rows[0].password_hash !== '')
+        const passwordLoginEnabled = Boolean(defaultAuthRegistry.get('password')?.isEnabled(config))
+        const hasPassword =
+          passwordLoginEnabled && Boolean(userRes.rows[0].password_hash && userRes.rows[0].password_hash !== '')
         const countRes = await txClient.query<{ count: number }>(
           `SELECT COUNT(*)::int AS count FROM auth_credentials WHERE user_id = $1 AND method = 'passkey'`,
           [userId],
@@ -354,10 +356,13 @@ export function createMeRouter(config: AppConfig, db: Db): Hono<AppEnv> {
         return c.json({ error: 'gateway_managed_account', message: 'External gateway accounts have no local credentials' }, 400)
       }
       if (msg === 'cannot_remove_last_login_method') {
+        const pwEnabled = Boolean(defaultAuthRegistry.get('password')?.isEnabled(config))
         return c.json(
           {
             error: 'cannot_remove_last_login_method',
-            message: 'Cannot remove last login method without a password set',
+            message: pwEnabled
+              ? 'Cannot remove last login method without a password set'
+              : 'Cannot remove last passkey while password login is disabled',
           },
           400,
         )

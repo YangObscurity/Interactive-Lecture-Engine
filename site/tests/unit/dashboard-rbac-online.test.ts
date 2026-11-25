@@ -1313,4 +1313,66 @@ describe('WP-5 RBAC Online Dashboard Suite', () => {
       pStore.destroy()
     }
   })
+
+  // ── h) Uninitialized online texts preserves deployed themeConfig.siteMeta values ─
+  it('h) PageTexts preserves deployed siteMeta values when GET /api/admin/texts returns null', async () => {
+    currentAuthStatus = {
+      authAdapter: 'hybrid',
+      authenticated: true,
+      needsBootstrap: false,
+      authSource: 'session',
+      authMethod: 'password',
+      rememberMe: false,
+      user: { id: 'author-2', name: 'Author', email: 'author@example.com' },
+      roles: ['reader', 'author'],
+      groups: [],
+      canAccessAdmin: false,
+      canAccessAuthor: true,
+      visibleSections: [],
+    }
+    const origFetch = globalThis.fetch
+    const putBodies: Array<Record<string, unknown>> = []
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = typeof input === 'string' ? input : input.toString()
+        const method = init?.method?.toUpperCase() ?? 'GET'
+        if (url.includes('/api/admin/texts')) {
+          if (method === 'PUT') {
+            const parsed = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>
+            putBodies.push(parsed)
+            return jsonResponse({ ok: true, texts: parsed.texts })
+          }
+          return jsonResponse({ ok: true, texts: null })
+        }
+        return origFetch(input, init)
+      }),
+    )
+
+    dashboardState.mode = 'online'
+    dashboardState.canAccessAuthor = true
+    dashboardState.canAccessAdmin = false
+    dashboardState.roles = ['reader', 'author']
+
+    const wrapper = mount(PageTexts, { props: { texts: null } })
+    await flushPromises()
+
+    const zhName = wrapper.find<HTMLInputElement>('[data-texts-input="zh.name"]')
+    const enName = wrapper.find<HTMLInputElement>('[data-texts-input="en.name"]')
+    const zhTagline = wrapper.find<HTMLInputElement>('[data-texts-input="zh.tagline"]')
+    expect(zhName.element.value).toBe('Site ZH')
+    expect(enName.element.value).toBe('Site EN')
+    expect(zhTagline.element.value).toBe('Tag ZH')
+
+    // Single-field edit succeeds without re-entering required zh.name / en.name
+    await zhTagline.setValue('New Single Tagline')
+    await wrapper.find('[data-texts-save-btn]').trigger('click')
+    await flushPromises()
+
+    expect(putBodies).toHaveLength(1)
+    expect(putBodies[0]?.texts).toEqual({
+      zh: { name: 'Site ZH', shortName: 'Site', navText: 'Nav ZH', tagline: 'New Single Tagline', description: 'Desc {lectures}' },
+      en: { name: 'Site EN', shortName: 'Site', navText: 'Nav EN', tagline: 'Tag EN', description: 'Desc {lectures}' },
+    })
+  })
 })

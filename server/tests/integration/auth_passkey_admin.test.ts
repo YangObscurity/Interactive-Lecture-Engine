@@ -4,10 +4,12 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { createApp } from '../../src/app.js'
+import { hashPassword } from '../../src/auth/password.js'
 import { cborEncode } from '../../src/auth/providers/cbor.js'
 import { defaultAuthRegistry } from '../../src/auth/providers/registry.js'
 import { isOriginAllowed } from '../../src/auth/origin.js'
 import type { AuthMethodProvider } from '../../src/auth/providers/types.js'
+import { createSessionRow } from '../../src/auth/sessions.js'
 import { loadConfig } from '../../src/config/load.js'
 import type { AppConfig } from '../../src/config/schema.js'
 import { createDb, createDbManager } from '../../src/db/index.js'
@@ -2189,6 +2191,105 @@ describe('WP-2: Backend Authentication, Cookies, Passkeys, Hybrid, Me & Admin', 
         body: payload,
       })
       expect(sameOriginRes.status).toBe(201)
+    })
+
+    it('13. GET /api/admin/texts returns null when neither DB texts nor disk site-texts.json exists', async () => {
+      const savedEnvContent = process.env['CONTENT_DIR']
+      const memDb = createDb('pglite:memory')
+      await runMigrations(memDb)
+      const emptyRoot = mkdtempSync(join(tmpdir(), 'ile-no-texts-'))
+      try {
+        process.env['CONTENT_DIR'] = ''
+        const app = createApp(makeTestConfig({ authAdapter: 'local', siteDistDir: emptyRoot }), memDb)
+
+        const bootRes = await app.request('/api/auth/bootstrap', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username: 'admin_notext', password: 'Password123!' }),
+        })
+        expect(bootRes.status).toBe(201)
+        const cookie = extractCookie(bootRes).value!
+
+        const getRes = await app.request('/api/admin/texts', {
+          headers: { Cookie: `lec_session=${cookie}` },
+        })
+        expect(getRes.status).toBe(200)
+        const body = (await getRes.json()) as { ok: boolean; texts: unknown }
+        expect(body.ok).toBe(true)
+        expect(body.texts).toBeNull()
+
+        const validTexts = {
+          zh: { name: 'Site ZH', shortName: 'SZ', navText: '', tagline: '', description: '' },
+          en: { name: 'Site EN', shortName: 'SE', navText: '', tagline: '', description: '' },
+        }
+        const putRes = await app.request('/api/admin/texts', {
+          method: 'PUT',
+          headers: { Cookie: `lec_session=${cookie}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ texts: validTexts }),
+        })
+        expect(putRes.status).toBe(200)
+
+        const afterRes = await app.request('/api/admin/texts', {
+          headers: { Cookie: `lec_session=${cookie}` },
+        })
+        expect(afterRes.status).toBe(200)
+        const afterBody = (await afterRes.json()) as { ok: boolean; texts: typeof validTexts }
+        expect(afterBody.texts).toEqual(validTexts)
+      } finally {
+        if (savedEnvContent !== undefined) process.env['CONTENT_DIR'] = savedEnvContent
+        else delete process.env['CONTENT_DIR']
+        rmSync(emptyRoot, { recursive: true, force: true })
+      }
+    })
+
+    it('14. blocks deleting last usable passkey when password login is disabled even if password_hash is present', async () => {
+      const memDb = createDb('pglite:memory')
+      await runMigrations(memDb)
+      const pwDisabledCfg = makeTestConfig({ authAdapter: 'local', authMethodsEnabled: 'passkey' })
+      const app = createApp(pwDisabledCfg, memDb)
+
+      // Seed a user with a non-empty password_hash AND two enrolled passkeys (simulating disabling password login later)
+      const pwHash = await hashPassword('Password123!')
+      const userId = 'u-pk-only-test14'
+      await memDb.query(
+        `INSERT INTO auth_users (id, username, email, display_name, password_hash, roles)
+         VALUES ($1, 'passkey_only_u', 'pk@example.com', 'PK User', $2, $3)`,
+        [userId, pwHash, JSON.stringify(['reader'])],
+      )
+      await memDb.query(
+        `INSERT INTO auth_credentials (id, user_id, method, credential_id, public_key, sign_count, transports, label)
+         VALUES ('c-pk-1', $1, 'passkey', 'cred-pk-1', 'cGstb25l', 0, '["internal"]', 'Key 1')`,
+        [userId],
+      )
+      await memDb.query(
+        `INSERT INTO auth_credentials (id, user_id, method, credential_id, public_key, sign_count, transports, label)
+         VALUES ('c-pk-2', $1, 'passkey', 'cred-pk-2', 'cGstdHdv', 0, '["internal"]', 'Key 2')`,
+        [userId],
+      )
+      const sess = await createSessionRow(memDb, {
+        userId,
+        authMethod: 'passkey',
+        rememberMe: false,
+        sessionTtlHours: pwDisabledCfg.sessionTtlHours,
+        rememberMeDays: pwDisabledCfg.rememberMeDays,
+      })
+
+      // Deleting 1 of 2 passkeys succeeds
+      const del1 = await app.request('/api/me/credentials/c-pk-1', {
+        method: 'DELETE',
+        headers: { Cookie: `lec_session=${sess.rawToken}` },
+      })
+      expect(del1.status).toBe(200)
+
+      // Deleting the last remaining passkey MUST be refused because password provider is disabled
+      const del2 = await app.request('/api/me/credentials/c-pk-2', {
+        method: 'DELETE',
+        headers: { Cookie: `lec_session=${sess.rawToken}` },
+      })
+      expect(del2.status).toBe(400)
+      const errBody = (await del2.json()) as { error: string; message: string }
+      expect(errBody.error).toBe('cannot_remove_last_login_method')
+      expect(errBody.message).toMatch(/disabled/i)
     })
   })
 })

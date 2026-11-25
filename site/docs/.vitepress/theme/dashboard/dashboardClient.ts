@@ -83,7 +83,7 @@ export const dashboardClient = {
   },
 
   // ── Texts ───────────────────────────────────────────────────────────────────
-  async fetchTexts(): Promise<{ ok: boolean; texts?: Record<string, unknown>; error?: string }> {
+  async fetchTexts(): Promise<{ ok: boolean; texts?: Record<string, unknown> | null; error?: string }> {
     const res = await fetchOnlineTexts()
     if (isAdminOk(res)) {
       return { ok: true, texts: res.data.texts }

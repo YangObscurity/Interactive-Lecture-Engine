@@ -117,8 +117,8 @@ export function createAdminTextsRouter(config: AppConfig, db: Db): Hono<AppEnv> 
   router.get('/', async (c) => {
     c.header('Cache-Control', 'no-store')
     const fromDb = await getSetting<unknown>(db, 'texts')
-    const texts = isSiteTextsShape(fromDb) ? fromDb : (readDiskTexts(config) ?? emptyTexts())
-    return c.json({ ok: true, texts }, 200)
+    const texts = isSiteTextsShape(fromDb) ? fromDb : readDiskTexts(config)
+    return c.json({ ok: true, texts: texts ?? null }, 200)
   })
 
   router.put('/', async (c) => {
