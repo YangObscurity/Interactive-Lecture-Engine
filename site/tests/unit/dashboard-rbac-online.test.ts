@@ -62,7 +62,10 @@ import {
   TRANSFER_ADMIN_TIMEOUT_MS,
 } from '../../docs/.vitepress/theme/api/admin'
 import type { AuthMethodInfo, AuthStatus } from '../../docs/.vitepress/theme/api/auth'
-import { currentSession, resetSession, subscribeSession } from '../../docs/.vitepress/theme/auth/session'
+import { currentSession, getSession, resetSession, subscribeSession } from '../../docs/.vitepress/theme/auth/session'
+import { STORAGE_KEYS } from '../../docs/.vitepress/site.config.mts'
+import { createProgressStore } from '../../docs/.vitepress/theme/progress/progressStore'
+import { FakeClock, FakeLocks, FakeScheduler, MemoryStorage, ScriptedBackend, op, rec } from './progress-helpers'
 import DashboardLogin from '../../docs/.vitepress/theme/dashboard/DashboardLogin.vue'
 import DashboardPage from '../../docs/.vitepress/theme/dashboard/DashboardPage.vue'
 import CompanionTools from '../../docs/.vitepress/theme/dashboard/pages/CompanionTools.vue'
@@ -159,6 +162,18 @@ describe('WP-5 RBAC Online Dashboard Suite', () => {
         // Auth status & methods
         if (url.endsWith('/api/auth/status')) {
           return jsonResponse(currentAuthStatus)
+        }
+        if (url.endsWith('/api/auth/session')) {
+          if (!currentAuthStatus.authenticated || !currentAuthStatus.user) {
+            return jsonResponse({ authenticated: false, user: null, roles: [], groups: [], logoutUrl: null })
+          }
+          return jsonResponse({
+            authenticated: true,
+            user: currentAuthStatus.user,
+            roles: currentAuthStatus.roles,
+            groups: currentAuthStatus.groups,
+            logoutUrl: null,
+          })
         }
         if (url.endsWith('/api/auth/methods')) {
           return jsonResponse({ ok: true, methods: currentAuthMethods })
@@ -1151,5 +1166,149 @@ describe('WP-5 RBAC Online Dashboard Suite', () => {
     } finally {
       vi.useRealTimers()
     }
+  })
+
+  // ── g) Cross-user progress isolation on Dashboard logout and re-login ───────
+  it('g) cross-user progress isolation: logout immediately clears User A records/outbox/timers, login reloads User B only and never flushes A writes', async () => {
+    // 1. User A (alice) is signed in
+    currentAuthStatus = {
+      authAdapter: 'hybrid',
+      authenticated: true,
+      needsBootstrap: false,
+      authSource: 'local',
+      authMethod: 'password',
+      rememberMe: false,
+      user: { id: 'alice', name: 'Alice User', email: 'alice@example.com' },
+      roles: ['reader'],
+      groups: [],
+      canAccessAdmin: false,
+      canAccessAuthor: false,
+      visibleSections: [],
+    }
+
+    const wrapper = mount(DashboardPage)
+    await flushPromises()
+
+    // 2. Set up progressStore attached to real getSession & subscribeSession
+    const clock = new FakeClock()
+    const scheduler = new FakeScheduler()
+    const storage = new MemoryStorage()
+    const backend = new ScriptedBackend('rest', clock)
+    backend.fetchAllResult = {
+      ok: true,
+      records: [rec('g01-l01', 'completed')],
+      serverDate: null,
+      unfilteredGet: true,
+    }
+
+    // Alice has cached completed lecture g01-l01 and a pending retry write g01-l02 with armed timer
+    storage.map.set(
+      STORAGE_KEYS.progressV2,
+      JSON.stringify({
+        schema: 1,
+        owner: 'alice',
+        server: { 'g01-l01': rec('g01-l01', 'completed') },
+        outbox: [op('g01-l02', 'completed', clock.t, { attempts: 1, nextAt: clock.t + 60_000 })],
+        seedVersion: null,
+        migratedV1: true,
+        skewMs: 0,
+      }),
+    )
+
+    const pStore = createProgressStore({
+      backend,
+      storage,
+      now: clock.now,
+      locks: new FakeLocks(),
+      scheduler,
+      target: window,
+      getSession: () => getSession(),
+      subscribeSession: (l) => subscribeSession(l),
+    })
+
+    await pStore.load()
+    await pStore.flush()
+    expect(pStore.statusOf('g01-l01')).toBe('completed')
+    expect(pStore.statusOf('g01-l02')).toBe('completed')
+    expect(pStore.pending()).toBe(1)
+    expect(scheduler.timers.length).toBeGreaterThan(0)
+
+    // 3. User A clicks [data-dashboard-logout] in DashboardPage
+    currentAuthStatus = {
+      authAdapter: 'hybrid',
+      authenticated: false,
+      needsBootstrap: false,
+      authSource: 'none',
+      authMethod: 'none',
+      rememberMe: false,
+      user: null,
+      roles: [],
+      groups: [],
+      canAccessAdmin: false,
+      canAccessAuthor: false,
+      visibleSections: [],
+    }
+
+    const logoutBtn = wrapper.find('[data-dashboard-logout]')
+    expect(logoutBtn.exists()).toBe(true)
+    await logoutBtn.trigger('click')
+    await flushPromises()
+
+    // Dashboard shows login
+    expect(wrapper.findComponent(DashboardLogin).exists()).toBe(true)
+
+    // progressStore immediately clears A's records & outbox, cancels timer, persists owner: null
+    expect(pStore.pending()).toBe(0)
+    expect(pStore.statusOf('g01-l01')).toBe('not_started')
+    expect(pStore.statusOf('g01-l02')).toBe('not_started')
+    expect(scheduler.timers).toHaveLength(0)
+    expect(pStore.snapshot().owner).toBeNull()
+    const storedAfterLogout = JSON.parse(storage.map.get(STORAGE_KEYS.progressV2) ?? '{}')
+    expect(storedAfterLogout.owner).toBeNull()
+
+    // 4. User B (bob) logs in (DashboardLogin @authenticated) without reloading page
+    backend.fetchAllResult = {
+      ok: true,
+      records: [rec('g01-l03', 'completed')],
+      serverDate: null,
+      unfilteredGet: true,
+    }
+    currentAuthStatus = {
+      authAdapter: 'hybrid',
+      authenticated: true,
+      needsBootstrap: false,
+      authSource: 'local',
+      authMethod: 'password',
+      rememberMe: false,
+      user: { id: 'bob', name: 'Bob User', email: 'bob@example.com' },
+      roles: ['reader'],
+      groups: [],
+      canAccessAdmin: false,
+      canAccessAuthor: false,
+      visibleSections: [],
+    }
+
+    wrapper.findComponent(DashboardLogin).vm.$emit('authenticated')
+    await flushPromises()
+
+    // progressStore reloads ONLY bob's server progress, owner === 'bob'
+    expect(pStore.snapshot().owner).toBe('bob')
+    expect(pStore.statusOf('g01-l03')).toBe('completed')
+    expect(pStore.statusOf('g01-l01')).toBe('not_started')
+    expect(pStore.statusOf('g01-l02')).toBe('not_started')
+
+    // 5. Advancing scheduler timers / flushing NEVER sends alice's queued write
+    clock.advance(120_000)
+    for (const t of [...scheduler.timers]) t.fn()
+    await pStore.flush({ force: true })
+    await flushPromises()
+
+    for (const batch of backend.sent) {
+      for (const sentOp of batch) {
+        expect(sentOp.lectureId).not.toBe('g01-l02')
+      }
+    }
+
+    pStore.destroy()
   })
 })
