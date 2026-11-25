@@ -19,7 +19,7 @@ jobs:
     env:
       LECTURE_PRIVACY_TERMS: ${{ secrets.LECTURE_PRIVACY_TERMS }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - id: gate
         run: |
           if [ -f scripts/privacy/ENGINE_REPO ]; then echo "on=1" >> "$GITHUB_OUTPUT"; else echo "not the engine repository: skipped"; fi
