@@ -15,6 +15,7 @@ import {
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { parseEnv, updateEnvText } from '../config/env.js'
+import { HttpError } from '../http/errors.js'
 import { redactUrlSecrets } from './pg.js'
 import type { Db, DbClient, DbQueryResult } from './types.js'
 
@@ -197,17 +198,20 @@ export function createDbManager(
   interface RequestPin {
     db: Db
     released: boolean
-    activeInTracker: boolean
+    held: boolean
   }
 
   const requestStore = new AsyncLocalStorage<RequestPin>()
-  const inflight = new WeakMap<Db, { count: number; waiters: Array<() => void> }>()
+  const inflightSql = new WeakMap<Db, { count: number; waiters: Array<() => void> }>()
+  const requestPinCounts = new WeakMap<Db, number>()
+  const retiredPendingClose = new Set<Db>()
+  const pendingClosePromises = new Set<Promise<void>>()
 
   function getTracker(db: Db): { count: number; waiters: Array<() => void> } {
-    let t = inflight.get(db)
+    let t = inflightSql.get(db)
     if (!t) {
       t = { count: 0, waiters: [] }
-      inflight.set(db, t)
+      inflightSql.set(db, t)
     }
     return t
   }
@@ -220,17 +224,33 @@ export function createDbManager(
     }
   }
 
-  function acquirePinTracker(pin: RequestPin): void {
-    if (!pin.activeInTracker && !pin.released) {
-      pin.activeInTracker = true
-      getTracker(pin.db).count++
-    }
+  async function closeDbTracked(db: Db): Promise<void> {
+    const p = db
+      .close()
+      .catch(() => {})
+      .finally(() => {
+        pendingClosePromises.delete(p)
+      })
+    pendingClosePromises.add(p)
+    await p
   }
 
-  function releasePinTracker(pin: RequestPin): void {
-    if (pin.activeInTracker) {
-      pin.activeInTracker = false
-      decrementTracker(getTracker(pin.db))
+  async function closeRetiredDb(db: Db): Promise<void> {
+    if (!retiredPendingClose.delete(db)) return
+    await closeDbTracked(db)
+  }
+
+  async function releasePin(pin: RequestPin): Promise<void> {
+    if (!pin.held) return
+    pin.held = false
+    const remaining = Math.max(0, (requestPinCounts.get(pin.db) ?? 1) - 1)
+    if (remaining === 0) {
+      requestPinCounts.delete(pin.db)
+      if (retiredPendingClose.has(pin.db)) {
+        await closeRetiredDb(pin.db)
+      }
+    } else {
+      requestPinCounts.set(pin.db, remaining)
     }
   }
 
@@ -252,7 +272,7 @@ export function createDbManager(
     }
   }
 
-  async function drainDb(db: Db, timeoutMs: number): Promise<void> {
+  async function drainSql(db: Db, timeoutMs: number): Promise<void> {
     const tracker = getTracker(db)
     if (tracker.count === 0) return
     await Promise.race([
@@ -417,27 +437,33 @@ export function createDbManager(
       if (existing && !existing.released) {
         return fn()
       }
+      const pinnedDb = currentDb
       const pin: RequestPin = {
-        db: currentDb,
+        db: pinnedDb,
         released: false,
-        activeInTracker: false,
+        held: true,
       }
-      acquirePinTracker(pin)
+      requestPinCounts.set(pinnedDb, (requestPinCounts.get(pinnedDb) ?? 0) + 1)
       try {
         return await requestStore.run(pin, fn)
       } finally {
         pin.released = true
-        releasePinTracker(pin)
+        await releasePin(pin)
       }
     },
 
     runExclusive<T>(fn: () => Promise<T>): Promise<T> {
       const pin = requestStore.getStore()
       if (pin && !pin.released) {
-        releasePinTracker(pin)
+        const entryDb = pin.db
         return operationMutex.run(async () => {
-          if (!pin.released && pin.db === currentDb) {
-            acquirePinTracker(pin)
+          if (pin.released || entryDb !== currentDb) {
+            pin.released = true
+            await releasePin(pin)
+            throw new HttpError(409, 'db_swapped_in_flight', {
+              message:
+                'Active database changed while this operation was queued; retry against the active database.',
+            })
           }
           return await fn()
         })
@@ -460,7 +486,7 @@ export function createDbManager(
         const callerPin = requestStore.getStore()
         if (callerPin && !callerPin.released && callerPin.db === previousDb) {
           callerPin.released = true
-          releasePinTracker(callerPin)
+          await releasePin(callerPin)
         }
 
         currentDb = nextDb
@@ -468,8 +494,13 @@ export function createDbManager(
         currentDatabaseUrlDirect = nextMeta.databaseUrlDirect ?? null
 
         if (previousDb !== nextDb) {
-          await drainDb(previousDb, DRAIN_TIMEOUT_MS)
-          await previousDb.close().catch(() => {})
+          await drainSql(previousDb, DRAIN_TIMEOUT_MS)
+          if ((requestPinCounts.get(previousDb) ?? 0) === 0) {
+            await closeDbTracked(previousDb)
+          } else {
+            // Leave previousDb open until active request pins exit so slow requests neither fail nor block swapTo
+            retiredPendingClose.add(previousDb)
+          }
         }
 
         let envUpdated = false
@@ -506,8 +537,12 @@ export function createDbManager(
 
     async close(): Promise<void> {
       await swapMutex.run(async () => {
-        await drainDb(currentDb, DRAIN_TIMEOUT_MS)
-        await currentDb.close()
+        await drainSql(currentDb, DRAIN_TIMEOUT_MS)
+        await closeDbTracked(currentDb)
+        for (const retiredDb of [...retiredPendingClose]) {
+          await closeRetiredDb(retiredDb)
+        }
+        await Promise.allSettled([...pendingClosePromises])
       })
     },
   }

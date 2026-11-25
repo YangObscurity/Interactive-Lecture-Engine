@@ -1630,15 +1630,15 @@ describe('WP-3: Admin DB Selector, Hot-Swap, Transfer & Whitelisted 6-Table CRUD
         const [userRes] = await Promise.all([userReqPromise, swapPromise])
         expect(userRes.status).toBe(201)
 
-        // Whole request finished inserting on dbA BEFORE swapTo closed dbA, waking drainDb without hitting 5s timeout
+        // swapTo finishes immediately on idle SQL (without 5s wait), yet keeps dbA open until pinned request finishes INSERT and exits
         expect(swapDurationMs).toBeGreaterThanOrEqual(0)
-        expect(swapDurationMs).toBeLessThan(2500)
+        expect(swapDurationMs).toBeLessThan(1500)
         const insertIdx = events.indexOf('user_insert_on_dbA')
+        const reqDoneIdx = events.indexOf('user_req_done:201')
         const closeIdx = events.indexOf('dbA_closed')
-        const swapDoneIdx = events.indexOf('swap_done')
         expect(insertIdx).toBeGreaterThan(-1)
         expect(closeIdx).toBeGreaterThan(insertIdx)
-        expect(swapDoneIdx).toBeGreaterThan(closeIdx)
+        expect(reqDoneIdx).toBeGreaterThan(closeIdx)
 
         // Request authorized on dbA must NOT insert into dbB
         const dbBUsers = await dbB.query<{ username: string }>('SELECT username FROM auth_users')
@@ -1656,6 +1656,120 @@ describe('WP-3: Admin DB Selector, Hot-Swap, Transfer & Whitelisted 6-Table CRUD
           await reopenedA.close()
         }
       } finally {
+        await dbManager.close().catch(() => {})
+      }
+    })
+
+    it('rejects stale queued runExclusive operations with 409 after a swap and lets slow non-SQL pins complete without blocking swapTo', async () => {
+      const dirA = join(tempRoot, 'stale-queue-a')
+      const dirB = join(tempRoot, 'stale-queue-b')
+      const rawDbA = createDb(`pglite:${dirA}`)
+      await runMigrations(rawDbA)
+
+      let dbAClosed = false
+      const instrumentedDbA: Db = {
+        kind: rawDbA.kind,
+        query: (sql, params) => rawDbA.query(sql, params),
+        exec: (sql) => rawDbA.exec(sql),
+        tx: (fn) => rawDbA.tx(fn),
+        close: async () => {
+          dbAClosed = true
+          await rawDbA.close()
+        },
+        withSession: rawDbA.withSession?.bind(rawDbA),
+      }
+
+      const dbManager = createDbManager(instrumentedDbA, { databaseUrl: `pglite:${dirA}` })
+      const app = createApp(makeTestConfig({ databaseUrl: `pglite:${dirA}` }), dbManager.asDb(), { dbManager })
+
+      let releaseBlocker!: () => void
+      const blockerRelease = new Promise<void>((resolve) => {
+        releaseBlocker = resolve
+      })
+
+      try {
+        // 1. Start a slow request pinned to dbA that sits idle (like AI upstream wait) for 150ms BEFORE querying
+        let sawOpenDbAAfterSwap = false
+        let signalSlowStarted!: () => void
+        const slowStarted = new Promise<void>((resolve) => {
+          signalSlowStarted = resolve
+        })
+        const slowReqPromise = dbManager.runWithRequestDb!(async () => {
+          signalSlowStarted()
+          await new Promise((r) => setTimeout(r, 150))
+          sawOpenDbAAfterSwap = !dbAClosed
+          await dbManager.asDb().query('SELECT 1')
+          return 'ok'
+        })
+        await slowStarted
+
+        // 2. Occupy operationMutex briefly while both /switch and /migrate enter HTTP + pin dbA deterministically
+        let signalBlockerActive!: () => void
+        const blockerActive = new Promise<void>((resolve) => {
+          signalBlockerActive = resolve
+        })
+        const blockerPromise = dbManager.runExclusive(async () => {
+          signalBlockerActive()
+          await blockerRelease
+        })
+        await blockerActive
+
+        const origRunExclusive = dbManager.runExclusive.bind(dbManager)
+        let queueCount = 0
+        let signalSwitchQueued!: () => void
+        let signalMigrateQueued!: () => void
+        const switchQueued = new Promise<void>((resolve) => {
+          signalSwitchQueued = resolve
+        })
+        const migrateQueued = new Promise<void>((resolve) => {
+          signalMigrateQueued = resolve
+        })
+        vi.spyOn(dbManager, 'runExclusive').mockImplementation((fn) => {
+          queueCount++
+          if (queueCount === 1) signalSwitchQueued()
+          if (queueCount === 2) signalMigrateQueued()
+          return origRunExclusive(fn)
+        })
+
+        const switchReqPromise = Promise.resolve(
+          app.request('/api/admin/db/switch', {
+            method: 'POST',
+            headers: { ...ADMIN_HEADERS, 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              targetUrl: `pglite:${dirB}`,
+              autoMigrate: true,
+              updateEnv: false,
+              dryRun: false,
+            }),
+          }),
+        )
+        await switchQueued
+
+        const queuedMigratePromise = Promise.resolve(
+          app.request('/api/admin/db/migrate', {
+            method: 'POST',
+            headers: { ...ADMIN_HEADERS, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ dryRun: false }),
+          }),
+        )
+        await migrateQueued
+
+        releaseBlocker()
+        await blockerPromise
+
+        const [switchRes, queuedMigrateRes] = await Promise.all([switchReqPromise, queuedMigratePromise])
+        expect(switchRes.status).toBe(200)
+        // Queued /migrate was pinned to dbA before switch published dbB, so it fails cleanly with 409 instead of touching disposed dbA or crossing to dbB
+        expect(queuedMigrateRes.status).toBe(409)
+        expect((await queuedMigrateRes.json()).error).toBe('db_swapped_in_flight')
+
+        // Slow request was not closed under it during switch and completes cleanly on dbA, triggering deferred close on exit
+        expect(await slowReqPromise).toBe('ok')
+        expect(sawOpenDbAAfterSwap).toBe(true)
+        expect(dbAClosed).toBe(true)
+      } finally {
+        vi.restoreAllMocks()
+        releaseBlocker?.()
         await dbManager.close().catch(() => {})
       }
     })
