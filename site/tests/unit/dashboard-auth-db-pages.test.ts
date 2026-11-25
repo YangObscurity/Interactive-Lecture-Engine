@@ -1759,6 +1759,43 @@ describe('WP-4 PageDatabase.vue', () => {
     expect(wrapper.get('[data-db-error]').text()).not.toContain('重新刷新当前数据库状态')
     expect(wrapper.get('[data-db-error]').text()).not.toContain('refreshed current engine status')
 
+    // 2xx with invalid JSON / truncated body is also ambiguous -> refresh current database status
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = typeof input === 'string' ? input : input.toString()
+        const method = (init?.method ?? 'GET').toUpperCase()
+        if (url === '/api/admin/db/config' && method === 'GET') {
+          configCalls += 1
+          return jsonRes({
+            ok: true,
+            kind: 'pglite',
+            databaseUrl: 'pglite:./data/pglite',
+            databaseUrlDirect: null,
+            pgliteDir: './data/pglite',
+            envFilePath: 'server/.env',
+            envWritable: true,
+            migrations: { applied: 4, pending: 0, total: 4 },
+            tableCounts: { progress: 12 },
+          })
+        }
+        if (url === '/api/admin/db/tables' && method === 'GET') {
+          return jsonRes({ ok: true, tables: [] })
+        }
+        if (url === '/api/admin/db/switch' && method === 'POST') {
+          return new Response('<html>truncated proxy reply', { status: 200 })
+        }
+        return jsonRes({ ok: false, error: 'unexpected_url' }, 404)
+      }),
+    )
+
+    await wrapper.get('[data-db-switch-btn]').trigger('click')
+    await wrapper.get('[data-db-confirm-switch]').trigger('click')
+    await flushPromises()
+
+    expect(configCalls).toBe(3)
+    expect(wrapper.get('[data-db-error]').text()).toContain('HTTP 200')
+
     wrapper.unmount()
   })
 })

@@ -149,9 +149,12 @@ function isSwitchOutcomeUncertain(err: AdminApiError): boolean {
   return (
     err.status === 0 ||
     err.status === 504 ||
+    (err.status >= 200 && err.status < 300) ||
     err.code === 'timeout' ||
     err.code === 'network_error' ||
-    err.code === 'network_unavailable'
+    err.code === 'network_unavailable' ||
+    err.code === 'read_error' ||
+    err.code === 'invalid_json'
   )
 }
 
