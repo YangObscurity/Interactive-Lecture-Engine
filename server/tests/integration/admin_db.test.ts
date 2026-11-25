@@ -1,21 +1,23 @@
 import { PGlite } from '@electric-sql/pglite'
 import { PGLiteSocketServer } from '@electric-sql/pglite-socket'
+import { Hono } from 'hono'
 import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { createApp } from '../../src/app.js'
+import { createApp, type AppEnv } from '../../src/app.js'
 import { verifyPassword } from '../../src/auth/password.js'
 import { parseEnv } from '../../src/config/env.js'
 import type { AppConfig } from '../../src/config/schema.js'
 import { createDb, createDbManager, type DbManager } from '../../src/db/index.js'
 import { getMigrationStatus, runMigrations } from '../../src/db/migrate.js'
-import type { Db } from '../../src/db/types.js'
+import type { Db, DbClient } from '../../src/db/types.js'
 import { createMessage } from '../../src/repo/aiMessages.js'
 import { upsertSession } from '../../src/repo/aiSessions.js'
 import { upsertProgress } from '../../src/repo/progress.js'
 import { upsertReviewChecklistBatch } from '../../src/repo/reviewChecklists.js'
 import { setSetting } from '../../src/repo/siteSettings.js'
+import { createAdminDbRouter } from '../../src/routes/admin/db.js'
 
 function makeTestConfig(overrides: Partial<AppConfig> = {}): AppConfig {
   return {
@@ -1140,6 +1142,78 @@ describe('WP-3: Admin DB Selector, Hot-Swap, Transfer & Whitelisted 6-Table CRUD
           body: JSON.stringify({ username: 'ab' }),
         })
         expect(shortPatch.status).toBe(400)
+      } finally {
+        await dbManager.close()
+      }
+    })
+
+    it('enforces transfer write deadline inside destDb.tx() and rolls back atomically before returning 504', async () => {
+      const extSourceDir = join(tempRoot, 'timeout-ext-src')
+      const extSourceDb = createDb(`pglite:${extSourceDir}`)
+      await runMigrations(extSourceDb)
+      // Insert 120 rows (>1 TRANSFER_BATCH_SIZE=100) so at least one batch inserts before batch 2 checks deadline
+      for (let i = 0; i < 120; i++) {
+        await upsertProgress(extSourceDb, `timeout-u-${String(i).padStart(3, '0')}`, {
+          lecture_id: 'g01-l01',
+          status: '已完成',
+        })
+      }
+      await extSourceDb.close()
+
+      const destDir = join(tempRoot, 'timeout-dest')
+      const realDestDb = createDb(`pglite:${destDir}`)
+      await runMigrations(realDestDb)
+
+      let insertBatchesExecuted = 0
+      const slowDestDb: Db = {
+        kind: realDestDb.kind,
+        query: (sql, params) => realDestDb.query(sql, params),
+        exec: (sql) => realDestDb.exec(sql),
+        close: () => realDestDb.close(),
+        tx: (fn) =>
+          realDestDb.tx(async (txClient) => {
+            const wrappedClient: DbClient = {
+              query: async <T = Record<string, unknown>>(sql: string, params?: unknown[]) => {
+                const res = await txClient.query<T>(sql, params)
+                if (sql.startsWith('INSERT INTO "progress"')) {
+                  insertBatchesExecuted += 1
+                  await new Promise((r) => setTimeout(r, 30))
+                }
+                return res
+              },
+              exec: (sql) => txClient.exec(sql),
+            }
+            return fn(wrappedClient)
+          }),
+      }
+
+      const dbManager = createDbManager(slowDestDb, { databaseUrl: `pglite:${destDir}` })
+      const testApp = new Hono<AppEnv>()
+      testApp.route('/api/admin/db', createAdminDbRouter(dbManager, { transferWriteTimeoutMs: 15 }))
+
+      try {
+        const res = await testApp.request('/api/admin/db/transfer', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            targetUrl: `pglite:${extSourceDir}`,
+            direction: 'pull',
+            conflictStrategy: 'upsert',
+            migrateTarget: false,
+          }),
+        })
+
+        expect(res.status).toBe(504)
+        const body = (await res.json()) as { ok: boolean; error: string; message: string }
+        expect(body.ok).toBe(false)
+        expect(body.error).toBe('transfer_timeout')
+        expect(insertBatchesExecuted).toBe(1)
+
+        // Rollback must already have completed BEFORE the 504 response returned
+        const countRes = await realDestDb.query<{ cnt: number }>(
+          'SELECT COUNT(*)::int AS cnt FROM progress',
+        )
+        expect(countRes.rows[0]?.cnt).toBe(0)
       } finally {
         await dbManager.close()
       }

@@ -53,6 +53,7 @@ vi.mock('virtual:lecture-theme', () => ({
   },
 }))
 
+import { dashboardZhCN } from '../../docs/.vitepress/i18n/dashboard.zh-CN'
 import { fetchAdminHealth, fetchAdminOverview, setApiOrigin } from '../../docs/.vitepress/theme/api/admin'
 import type { AuthMethodInfo, AuthStatus } from '../../docs/.vitepress/theme/api/auth'
 import { currentSession, resetSession, subscribeSession } from '../../docs/.vitepress/theme/auth/session'
@@ -1034,5 +1035,57 @@ describe('WP-5 RBAC Online Dashboard Suite', () => {
     expect(sentBody.setupToken).toBe('my-setup-secret')
     expect(sentBody.username).toBe('tokenadmin')
     expect(wrapper.emitted('authenticated')).toBeTruthy()
+  })
+
+  it('g) PageLook delegates reserved setting key check to server and maps 400 reserved_setting_key on Load & Save', async () => {
+    dashboardState.mode = 'online'
+    dashboardState.canAccessAdmin = true
+    dashboardState.roles = ['admin']
+    dashboardState.tabs.look = 'modules'
+
+    const settingCalls: Array<{ url: string; method: string }> = []
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = typeof input === 'string' ? input : input.toString()
+        const method = init?.method?.toUpperCase() ?? 'GET'
+        if (url.includes('/api/admin/look')) {
+          return jsonResponse({ ok: true, look: { skin: 'reader', base: 'paper', custom: '#EAF2E3' } })
+        }
+        if (url.includes('/api/admin/settings/')) {
+          settingCalls.push({ url, method })
+          return jsonResponse(
+            {
+              error: 'reserved_setting_key',
+              message: `Cannot ${method === 'GET' ? 'read' : 'modify'} reserved domain setting key "gateway_auth_seen".`,
+            },
+            400,
+          )
+        }
+        return jsonResponse({ ok: true })
+      }),
+    )
+
+    const wrapper = mount(PageLook, { props: { status: null } })
+    await flushPromises()
+
+    const keyInput = wrapper.find('[data-look-setting-key]')
+    const valInput = wrapper.find('[data-look-setting-val]')
+    await keyInput.setValue('gateway_auth_seen')
+
+    await wrapper.find('[data-look-setting-load]').trigger('click')
+    await flushPromises()
+    expect(settingCalls.some((c) => c.method === 'GET' && c.url.endsWith('/api/admin/settings/gateway_auth_seen'))).toBe(
+      true,
+    )
+    expect(wrapper.find('[data-look-setting-msg]').text()).toBe(dashboardZhCN['dsh.lk.onlineSettingReservedErr'])
+
+    await valInput.setValue('{"seen":true}')
+    await wrapper.find('[data-look-setting-save]').trigger('click')
+    await flushPromises()
+    expect(settingCalls.some((c) => c.method === 'PUT' && c.url.endsWith('/api/admin/settings/gateway_auth_seen'))).toBe(
+      true,
+    )
+    expect(wrapper.find('[data-look-setting-msg]').text()).toBe(dashboardZhCN['dsh.lk.onlineSettingReservedErr'])
   })
 })

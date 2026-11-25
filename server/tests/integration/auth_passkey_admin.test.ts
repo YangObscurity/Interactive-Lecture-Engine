@@ -1582,7 +1582,7 @@ describe('WP-2: Backend Authentication, Cookies, Passkeys, Hybrid, Me & Admin', 
       expect(compBody.source).toBe('db')
     })
 
-    it('4. enforces rate limit: rightmost XFF proxy IP blocked on rotation; per-username rate limit blocked across different IPs', async () => {
+    it('4. enforces rate limit: rightmost XFF proxy IP blocked on rotation; per-IP+user rate limit does not lock out other IPs', async () => {
       const memDb = createDb('pglite:memory')
       await runMigrations(memDb)
       const tightConfig = makeTestConfig({
@@ -1623,7 +1623,7 @@ describe('WP-2: Backend Authentication, Cookies, Passkeys, Hybrid, Me & Admin', 
       })
       expect(blockedRes.status).toBe(429)
 
-      // Test 4b: Per-username rate limit across different client IPs
+      // Test 4b: Per-IP+username rate limit blocks brute-force from attacker IP without locking out legitimate IP
       const freshDb = createDb('pglite:memory')
       await runMigrations(freshDb)
       const userTightConfig = makeTestConfig({
@@ -1639,34 +1639,45 @@ describe('WP-2: Backend Authentication, Cookies, Passkeys, Hybrid, Me & Admin', 
         body: JSON.stringify({ username: 'bruteforce_target', password: 'Password123!' }),
       })
 
-      // 2 failed attempts from different IPs for bruteforce_target
-      for (let i = 1; i <= 2; i++) {
+      // 2 failed attempts from attacker IP 203.0.113.10
+      for (let i = 0; i < 2; i++) {
         const res = await userTightApp.request('/api/auth/login', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'X-Forwarded-For': `203.0.113.${i}`,
+            'X-Forwarded-For': '203.0.113.10',
           },
           body: JSON.stringify({ username: 'bruteforce_target', password: 'WrongPassword!' }),
         })
         expect(res.status).toBe(401)
       }
 
-      // 3rd attempt from a completely NEW IP for same username -> 429
-      const userBlockedRes = await userTightApp.request('/api/auth/login', {
+      // 3rd attempt from the SAME attacker IP 203.0.113.10 -> 429
+      const attackerBlockedRes = await userTightApp.request('/api/auth/login', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'X-Forwarded-For': '192.0.2.200',
+          'X-Forwarded-For': '203.0.113.10',
         },
         body: JSON.stringify({ username: 'bruteforce_target', password: 'WrongPassword!' }),
       })
-      expect(userBlockedRes.status).toBe(429)
-      const blockedBody = await userBlockedRes.json()
+      expect(attackerBlockedRes.status).toBe(429)
+      const blockedBody = await attackerBlockedRes.json()
       expect(blockedBody.error).toBe('rate_limited')
+
+      // Legitimate login for bruteforce_target from a DIFFERENT IP 198.51.100.77 STILL succeeds (200)
+      const legitRes = await userTightApp.request('/api/auth/login', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Forwarded-For': '198.51.100.77',
+        },
+        body: JSON.stringify({ username: 'bruteforce_target', password: 'Password123!' }),
+      })
+      expect(legitRes.status).toBe(200)
     })
 
-    it('5. PUT /api/admin/settings/:key and DB manager reject reserved keys with 400', async () => {
+    it('5. GET/PUT /api/admin/settings/:key and DB manager reject reserved keys with 400 and accurate action message', async () => {
       const memDb = createDb('pglite:memory')
       await runMigrations(memDb)
       const cfg = makeTestConfig({ authAdapter: 'local' })
@@ -1679,15 +1690,34 @@ describe('WP-2: Backend Authentication, Cookies, Passkeys, Hybrid, Me & Admin', 
       })
       const cookie = extractCookie(bRes).value!
 
+      const getAiToolsRes = await app.request('/api/admin/settings/ai_tools', {
+        headers: { Cookie: `lec_session=${cookie}` },
+      })
+      expect(getAiToolsRes.status).toBe(400)
+      const getAiToolsBody = (await getAiToolsRes.json()) as { error: string; message: string }
+      expect(getAiToolsBody.error).toBe('reserved_setting_key')
+      expect(getAiToolsBody.message).toMatch(/read/i)
+      expect(getAiToolsBody.message).not.toMatch(/modify/i)
+
       for (const reserved of Array.from(RESERVED_DOMAIN_SETTING_KEYS)) {
+        const getRes = await app.request(`/api/admin/settings/${reserved}`, {
+          headers: { Cookie: `lec_session=${cookie}` },
+        })
+        expect(getRes.status).toBe(400)
+        const getBody = (await getRes.json()) as { error: string; message: string }
+        expect(getBody.error).toBe('reserved_setting_key')
+        expect(getBody.message).toMatch(/read/i)
+        expect(getBody.message).not.toMatch(/modify/i)
+
         const putRes = await app.request(`/api/admin/settings/${reserved}`, {
           method: 'PUT',
           headers: { Cookie: `lec_session=${cookie}`, 'Content-Type': 'application/json' },
           body: JSON.stringify({ value: { injected: true } }),
         })
         expect(putRes.status).toBe(400)
-        const putBody = await putRes.json()
+        const putBody = (await putRes.json()) as { error: string; message: string }
         expect(putBody.error).toBe('reserved_setting_key')
+        expect(putBody.message).toMatch(/modify/i)
 
         const patchRes = await app.request(`/api/admin/db/tables/site_settings/rows/${reserved}`, {
           method: 'PATCH',
@@ -2044,6 +2074,70 @@ describe('WP-2: Backend Authentication, Cookies, Passkeys, Hybrid, Me & Admin', 
         body: JSON.stringify({ username: 'attacker', password: 'Password123!' }),
       })
       expect(unauthBoot.status).toBe(403)
+    })
+
+    it('12. enforces CSRF Origin and Sec-Fetch-Site checks on gateway-authenticated mutations', async () => {
+      const memDb = createDb('pglite:memory')
+      await runMigrations(memDb)
+      const gwApp = createApp(makeTestConfig({ authAdapter: 'hybrid', webauthnOrigin: '' }), memDb)
+
+      const payload = JSON.stringify({
+        username: 'csrf_gw_created',
+        password: 'Password123!',
+        roles: ['admin'],
+      })
+
+      // 1. Cross-origin Origin with text/plain JSON body -> 403
+      const badOriginRes = await gwApp.request('https://app.example.com/api/admin/users', {
+        method: 'POST',
+        headers: {
+          'Remote-User': 'gw-admin',
+          'Remote-Groups': 'admins',
+          'Content-Type': 'text/plain',
+          Origin: 'https://evil.example.com',
+        },
+        body: payload,
+      })
+      expect(badOriginRes.status).toBe(403)
+
+      // 2. Sec-Fetch-Site: cross-site -> 403
+      const crossSiteRes = await gwApp.request('https://app.example.com/api/admin/users', {
+        method: 'POST',
+        headers: {
+          'Remote-User': 'gw-admin',
+          'Remote-Groups': 'admins',
+          'Content-Type': 'text/plain',
+          'Sec-Fetch-Site': 'cross-site',
+        },
+        body: payload,
+      })
+      expect(crossSiteRes.status).toBe(403)
+
+      // 3. Sec-Fetch-Site: same-site without Origin or Referer -> 403
+      const sameSiteNoOriginRes = await gwApp.request('https://app.example.com/api/admin/users', {
+        method: 'POST',
+        headers: {
+          'Remote-User': 'gw-admin',
+          'Remote-Groups': 'admins',
+          'Content-Type': 'text/plain',
+          'Sec-Fetch-Site': 'same-site',
+        },
+        body: payload,
+      })
+      expect(sameSiteNoOriginRes.status).toBe(403)
+
+      // 4. Same-origin Origin matching request URL -> 201
+      const sameOriginRes = await gwApp.request('https://app.example.com/api/admin/users', {
+        method: 'POST',
+        headers: {
+          'Remote-User': 'gw-admin',
+          'Remote-Groups': 'admins',
+          'Content-Type': 'text/plain',
+          Origin: 'https://app.example.com',
+        },
+        body: payload,
+      })
+      expect(sameOriginRes.status).toBe(201)
     })
   })
 })

@@ -12,7 +12,7 @@ import {
   type DbManager,
 } from '../../db/index.js'
 import { getMigrationStatus, runMigrations } from '../../db/migrate.js'
-import type { Db } from '../../db/types.js'
+import type { Db, DbClient } from '../../db/types.js'
 import { serverLogBuffer } from '../../http/logBuffer.js'
 import { RESERVED_DOMAIN_SETTING_KEYS } from '../../repo/siteSettings.js'
 import {
@@ -635,9 +635,51 @@ function formatCrudColumnsSql(columns: readonly string[]): string {
   return columns.map((col) => `"${col}"`).join(', ')
 }
 
-export function createAdminDbRouter(dbManager: DbManager): Hono<AppEnv> {
+export class TransferTimeoutError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'TransferTimeoutError'
+  }
+}
+
+function isTransferTimeoutError(err: unknown): boolean {
+  if (err instanceof TransferTimeoutError) return true
+  if (err instanceof Error && err.name === 'TransferTimeoutError') return true
+  return getPgErrorCode(err) === '57014'
+}
+
+function makeDeadlineGuard(timeoutMs: number, phase: string): () => number {
+  const deadlineMs = Date.now() + timeoutMs
+  return () => {
+    const rem = deadlineMs - Date.now()
+    if (rem <= 0) {
+      throw new TransferTimeoutError(`${phase} timed out after ${timeoutMs}ms`)
+    }
+    return rem
+  }
+}
+
+async function applyPgStatementTimeout(
+  txClient: DbClient,
+  kind: Db['kind'],
+  remMs: number,
+): Promise<void> {
+  if (kind !== 'pg') return
+  const boundedMs = Math.max(1, Math.min(Math.floor(remMs), 2147483647))
+  await txClient.query(`SET LOCAL statement_timeout = ${boundedMs}`)
+}
+
+export interface AdminDbRouterOptions {
+  transferWriteTimeoutMs?: number
+}
+
+export function createAdminDbRouter(
+  dbManager: DbManager,
+  options?: AdminDbRouterOptions,
+): Hono<AppEnv> {
   const router = new Hono<AppEnv>()
   const activeDb = dbManager.asDb()
+  const transferWriteTimeoutMs = options?.transferWriteTimeoutMs ?? MIGRATION_TIMEOUT_MS * 2
 
   // 1. GET /config — inspect current DB engine config, migrations, and table counts
   router.get('/config', async (c) => {
@@ -1285,90 +1327,112 @@ export function createAdminDbRouter(dbManager: DbManager): Hono<AppEnv> {
         // Snapshot all source tables inside a consistent read transaction before writing destination.
         const sourceKind = sourceDb.kind
         const sourceSnapshots = new Map<string, Record<string, unknown>[]>()
-        await withTimeout(
-          sourceDb.tx(async (srcTx) => {
-            if (sourceKind === 'pg') {
-              await srcTx.query('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY')
+        await sourceDb.tx(async (srcTx) => {
+          const assertSourceDeadline = makeDeadlineGuard(
+            MIGRATION_TIMEOUT_MS,
+            'Transfer source snapshot',
+          )
+          if (sourceKind === 'pg') {
+            await srcTx.query('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY')
+          }
+          for (const table of TRANSFER_TABLES) {
+            let rem = assertSourceDeadline()
+            await applyPgStatementTimeout(srcTx, sourceKind, rem)
+            const existRes = await srcTx.query<{ reg: string | null }>(
+              `SELECT to_regclass($1) AS reg`,
+              [`public.${table.name}`],
+            )
+            if (!existRes.rows[0]?.reg) {
+              sourceSnapshots.set(table.name, [])
+              continue
             }
-            for (const table of TRANSFER_TABLES) {
-              const existRes = await srcTx.query<{ reg: string | null }>(
-                `SELECT to_regclass($1) AS reg`,
-                [`public.${table.name}`],
-              )
-              if (!existRes.rows[0]?.reg) {
-                sourceSnapshots.set(table.name, [])
-                continue
-              }
-              const colsSql = table.columns.map((col) => `"${col.name}"`).join(', ')
-              const orderBySql = table.pkColumns.map((pk) => `"${pk}" ASC`).join(', ')
-              const rowsRes = await srcTx.query<Record<string, unknown>>(
-                `SELECT ${colsSql} FROM "${table.name}" ORDER BY ${orderBySql}`,
-              )
-              sourceSnapshots.set(table.name, rowsRes.rows)
-            }
-          }),
-          MIGRATION_TIMEOUT_MS,
-          'Transfer source snapshot',
-        )
+            rem = assertSourceDeadline()
+            await applyPgStatementTimeout(srcTx, sourceKind, rem)
+            const colsSql = table.columns.map((col) => `"${col.name}"`).join(', ')
+            const orderBySql = table.pkColumns.map((pk) => `"${pk}" ASC`).join(', ')
+            const rowsRes = await srcTx.query<Record<string, unknown>>(
+              `SELECT ${colsSql} FROM "${table.name}" ORDER BY ${orderBySql}`,
+            )
+            sourceSnapshots.set(table.name, rowsRes.rows)
+          }
+          assertSourceDeadline()
+        })
 
+        const destKind = destDb.kind
         const transferredCounts = new Map<string, number>()
 
         try {
-          await withTimeout(
-            destDb.tx(async (txClient) => {
-              for (const table of TRANSFER_TABLES) {
-                const rows = sourceSnapshots.get(table.name) ?? []
-                if (rows.length === 0) {
-                  transferredCounts.set(table.name, 0)
-                  continue
-                }
-
-                const colNamesSql = table.columns.map((col) => `"${col.name}"`).join(', ')
-                const pkSql = table.pkColumns.map((pk) => `"${pk}"`).join(', ')
-                const pkSet = new Set(table.pkColumns)
-                const nonPkCols = table.columns.filter((col) => !pkSet.has(col.name))
-                const conflictTargetSql =
-                  conflictStrategy === 'skip' || nonPkCols.length === 0
-                    ? 'ON CONFLICT DO NOTHING'
-                    : `ON CONFLICT (${pkSql}) DO UPDATE SET ${nonPkCols.map((col) => `"${col.name}" = EXCLUDED."${col.name}"`).join(', ')}`
-
-                let tableTransferred = 0
-                for (let offset = 0; offset < rows.length; offset += TRANSFER_BATCH_SIZE) {
-                  const batch = rows.slice(offset, offset + TRANSFER_BATCH_SIZE)
-                  const params: unknown[] = []
-                  const valueTuples: string[] = []
-
-                  for (const row of batch) {
-                    const placeholders: string[] = []
-                    for (const col of table.columns) {
-                      params.push(serializeColumnValue(row[col.name], col.kind))
-                      placeholders.push(placeholderForColumn(params.length, col.kind))
-                    }
-                    valueTuples.push(`(${placeholders.join(', ')})`)
-                  }
-
-                  const sql = `INSERT INTO "${table.name}" (${colNamesSql}) VALUES ${valueTuples.join(', ')} ${conflictTargetSql}`
-                  const insertRes = await txClient.query(sql, params)
-                  tableTransferred += insertRes.rowCount
-                }
-
-                if (table.name === 'site_settings_history') {
-                  await txClient.query(
-                    `SELECT setval(
-                      pg_get_serial_sequence('site_settings_history', 'id'),
-                      GREATEST(COALESCE((SELECT MAX(id) FROM site_settings_history), 1), 1),
-                      true
-                    )`,
-                  )
-                }
-
-                transferredCounts.set(table.name, tableTransferred)
+          await destDb.tx(async (txClient) => {
+            const assertWriteDeadline = makeDeadlineGuard(
+              transferWriteTimeoutMs,
+              'Transfer write',
+            )
+            for (const table of TRANSFER_TABLES) {
+              assertWriteDeadline()
+              const rows = sourceSnapshots.get(table.name) ?? []
+              if (rows.length === 0) {
+                transferredCounts.set(table.name, 0)
+                continue
               }
-            }),
-            MIGRATION_TIMEOUT_MS * 2,
-            'Transfer write',
-          )
+
+              const colNamesSql = table.columns.map((col) => `"${col.name}"`).join(', ')
+              const pkSql = table.pkColumns.map((pk) => `"${pk}"`).join(', ')
+              const pkSet = new Set(table.pkColumns)
+              const nonPkCols = table.columns.filter((col) => !pkSet.has(col.name))
+              const conflictTargetSql =
+                conflictStrategy === 'skip' || nonPkCols.length === 0
+                  ? 'ON CONFLICT DO NOTHING'
+                  : `ON CONFLICT (${pkSql}) DO UPDATE SET ${nonPkCols.map((col) => `"${col.name}" = EXCLUDED."${col.name}"`).join(', ')}`
+
+              let tableTransferred = 0
+              for (let offset = 0; offset < rows.length; offset += TRANSFER_BATCH_SIZE) {
+                const rem = assertWriteDeadline()
+                await applyPgStatementTimeout(txClient, destKind, rem)
+                const batch = rows.slice(offset, offset + TRANSFER_BATCH_SIZE)
+                const params: unknown[] = []
+                const valueTuples: string[] = []
+
+                for (const row of batch) {
+                  const placeholders: string[] = []
+                  for (const col of table.columns) {
+                    params.push(serializeColumnValue(row[col.name], col.kind))
+                    placeholders.push(placeholderForColumn(params.length, col.kind))
+                  }
+                  valueTuples.push(`(${placeholders.join(', ')})`)
+                }
+
+                const sql = `INSERT INTO "${table.name}" (${colNamesSql}) VALUES ${valueTuples.join(', ')} ${conflictTargetSql}`
+                const insertRes = await txClient.query(sql, params)
+                tableTransferred += insertRes.rowCount
+              }
+
+              if (table.name === 'site_settings_history') {
+                const rem = assertWriteDeadline()
+                await applyPgStatementTimeout(txClient, destKind, rem)
+                await txClient.query(
+                  `SELECT setval(
+                    pg_get_serial_sequence('site_settings_history', 'id'),
+                    GREATEST(COALESCE((SELECT MAX(id) FROM site_settings_history), 1), 1),
+                    true
+                  )`,
+                )
+              }
+
+              transferredCounts.set(table.name, tableTransferred)
+            }
+            assertWriteDeadline()
+          })
         } catch (writeErr) {
+          if (isTransferTimeoutError(writeErr)) {
+            return c.json(
+              {
+                ok: false,
+                error: 'transfer_timeout',
+                message: scrubErrorMessage(writeErr, targetUrl, targetDirectUrl),
+              },
+              504,
+            )
+          }
           if (isUniqueViolation(writeErr)) {
             return c.json(
               {
@@ -1418,6 +1482,16 @@ export function createAdminDbRouter(dbManager: DbManager): Hono<AppEnv> {
           200,
         )
       } catch (err) {
+        if (isTransferTimeoutError(err)) {
+          return c.json(
+            {
+              ok: false,
+              error: 'transfer_timeout',
+              message: scrubErrorMessage(err, targetUrl, targetDirectUrl),
+            },
+            504,
+          )
+        }
         return c.json(
           {
             ok: false,

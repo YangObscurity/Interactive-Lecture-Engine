@@ -85,10 +85,10 @@ export function createAuthMiddleware(
     const getHeader: HeaderGetter = (name: string) => c.req.header(name)
     const auth = await adapter.authenticate(getHeader, c.req.url)
 
-    // Enforce Origin / Referer / Sec-Fetch-Site CSRF validation on cookie-authenticated mutations
-    // and auth session-establishing endpoints (login / bootstrap / passkey login / logout).
+    // Enforce Origin / Referer / Sec-Fetch-Site CSRF validation on cookie- and gateway-authenticated
+    // mutations and auth session-establishing endpoints (login / bootstrap / passkey login / logout).
     const isAuthMutationRoute = c.req.path.startsWith('/api/auth/')
-    if (auth.authSource === 'cookie' || isAuthMutationRoute) {
+    if (auth.authSource === 'cookie' || auth.authSource === 'gateway' || isAuthMutationRoute) {
       const method = c.req.method.toUpperCase()
       if (method === 'POST' || method === 'PUT' || method === 'PATCH' || method === 'DELETE') {
         const secFetchSite = c.req.header('sec-fetch-site')?.trim().toLowerCase()

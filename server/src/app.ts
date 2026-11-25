@@ -301,7 +301,7 @@ export function createApp(config: AppConfig, db: Db, options: AppOptions = {}): 
         // Let endpoint handle malformed JSON
       }
       if (normUser) {
-        const userDecision = authLimiter.check(`auth:user:${normUser}`)
+        const userDecision = authLimiter.check(`auth:ip-user:${clientIp || 'direct'}:${normUser}`)
         if (!userDecision.ok) {
           throw rateLimited(userDecision.kind ?? 'auth_rate', userDecision.retryAfterSec)
         }

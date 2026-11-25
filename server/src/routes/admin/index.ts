@@ -1,4 +1,4 @@
-import { Hono, type MiddlewareHandler } from 'hono'
+import { Hono, type Context, type MiddlewareHandler } from 'hono'
 import type { AppEnv } from '../../app.js'
 import type { AppConfig } from '../../config/schema.js'
 import { createDbManager, type DbManager } from '../../db/manager.js'
@@ -88,6 +88,19 @@ export function createAdminRouter(
   router.use('/db/*', requireStrictAdmin)
   router.route('/db', createAdminDbRouter(effectiveDbManager))
 
+  const reservedSettingResponse = (
+    c: Context<AppEnv>,
+    key: string,
+    action: 'read' | 'modify',
+  ) =>
+    c.json(
+      {
+        error: 'reserved_setting_key',
+        message: `Cannot ${action} reserved domain setting key "${key}" via generic settings endpoint. Use the dedicated domain API.`,
+      },
+      400,
+    )
+
   router.use('/settings', requireStrictAdmin)
   router.use('/settings/*', requireStrictAdmin)
   router.get('/settings/:key', async (c) => {
@@ -96,13 +109,7 @@ export function createAdminRouter(
       return c.json({ error: 'invalid_setting_key', message: 'Invalid setting key' }, 400)
     }
     if (RESERVED_DOMAIN_SETTING_KEYS.has(key)) {
-      return c.json(
-        {
-          error: 'reserved_setting_key',
-          message: `Cannot modify reserved domain setting key "${key}" via generic settings endpoint. Use the dedicated domain API.`,
-        },
-        400,
-      )
+      return reservedSettingResponse(c, key, 'read')
     }
     const val = await getSetting(db, key)
     return c.json({ ok: true, key, value: val }, 200)
@@ -113,13 +120,7 @@ export function createAdminRouter(
       return c.json({ error: 'invalid_setting_key', message: 'Invalid setting key' }, 400)
     }
     if (RESERVED_DOMAIN_SETTING_KEYS.has(key)) {
-      return c.json(
-        {
-          error: 'reserved_setting_key',
-          message: `Cannot modify reserved domain setting key "${key}" via generic settings endpoint. Use the dedicated domain API.`,
-        },
-        400,
-      )
+      return reservedSettingResponse(c, key, 'modify')
     }
     let body: unknown
     try {

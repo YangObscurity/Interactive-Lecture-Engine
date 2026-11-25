@@ -246,24 +246,26 @@ export const dashboardClient = {
     }
   },
 
-  async fetchSetting<T = unknown>(key: string): Promise<{ ok: boolean; value?: T; error?: string }> {
+  async fetchSetting<T = unknown>(key: string): Promise<{ ok: boolean; value?: T; code?: string; error?: string }> {
     const res = await fetchOnlineSetting<T>(key)
     if (isAdminOk(res)) {
       return { ok: true, value: res.data.value }
     }
     return {
       ok: false,
+      code: isAdminError(res) ? res.error.code : undefined,
       error: isAdminError(res) ? formatAdminError(res.error) : 'request_failed',
     }
   },
 
-  async saveSetting<T = unknown>(key: string, value: T): Promise<{ ok: boolean; value?: T; error?: string }> {
+  async saveSetting<T = unknown>(key: string, value: T): Promise<{ ok: boolean; value?: T; code?: string; error?: string }> {
     const res = await saveOnlineSetting<T>(key, value)
     if (isAdminOk(res)) {
       return { ok: true, value: res.data.value }
     }
     return {
       ok: false,
+      code: isAdminError(res) ? res.error.code : undefined,
       error: isAdminError(res) ? formatAdminError(res.error) : 'request_failed',
     }
   },
