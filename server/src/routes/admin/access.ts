@@ -88,12 +88,13 @@ function detectManifestRestrictions(config: AppConfig): boolean {
       resolve(config.siteDistDir, '.lecture-build/access-manifest.json'),
       resolve(config.siteDistDir, 'access-manifest.json'),
     )
+  } else {
+    candidatePaths.push(
+      resolve(process.cwd(), '../site/.lecture-build/access-manifest.json'),
+      resolve(process.cwd(), 'site/.lecture-build/access-manifest.json'),
+      resolve(process.cwd(), '.lecture-build/access-manifest.json'),
+    )
   }
-  candidatePaths.push(
-    resolve(process.cwd(), '../site/.lecture-build/access-manifest.json'),
-    resolve(process.cwd(), 'site/.lecture-build/access-manifest.json'),
-    resolve(process.cwd(), '.lecture-build/access-manifest.json'),
-  )
   for (const p of candidatePaths) {
     if (existsSync(p)) {
       try {

@@ -305,8 +305,8 @@ async function onRevokeSession(s: MyAuthSession): Promise<void> {
             <tr>
               <th>{{ t('dsh.acct.colLabel') }}</th>
               <th>{{ t('dsh.acct.colAlg') }}</th>
-              <th>{{ t('dsh.acct.colCreated') }}</th>
-              <th>{{ t('dsh.acct.colLastUsed') }}</th>
+              <th class="db-nw">{{ t('dsh.acct.colCreated') }}</th>
+              <th class="db-nw">{{ t('dsh.acct.colLastUsed') }}</th>
               <th>{{ t('dsh.me.colActions') }}</th>
             </tr>
           </thead>
@@ -318,8 +318,8 @@ async function onRevokeSession(s: MyAuthSession): Promise<void> {
               <td :data-l="t('dsh.acct.colAlg')">
                 <span class="db-tag db-mono">{{ algName(c.algorithm) }}</span>
               </td>
-              <td :data-l="t('dsh.acct.colCreated')" class="db-mono">{{ shortDateTime(c.created_at) }}</td>
-              <td :data-l="t('dsh.acct.colLastUsed')" class="db-mono">
+              <td :data-l="t('dsh.acct.colCreated')" class="db-mono db-nw">{{ shortDateTime(c.created_at) }}</td>
+              <td :data-l="t('dsh.acct.colLastUsed')" class="db-mono db-nw">
                 {{ c.last_used_at ? shortDateTime(c.last_used_at) : t('dsh.acct.neverUsed') }}
               </td>
               <td :data-l="t('dsh.me.colActions')">
@@ -378,8 +378,8 @@ async function onRevokeSession(s: MyAuthSession): Promise<void> {
               <th>{{ t('dsh.acct.colMethod') }}</th>
               <th>{{ t('dsh.acct.colPersistence') }}</th>
               <th>{{ t('dsh.acct.colAgent') }}</th>
-              <th>{{ t('dsh.acct.colLastSeen') }}</th>
-              <th>{{ t('dsh.acct.colExpires') }}</th>
+              <th class="db-nw">{{ t('dsh.acct.colLastSeen') }}</th>
+              <th class="db-nw">{{ t('dsh.acct.colExpires') }}</th>
               <th>{{ t('dsh.me.colActions') }}</th>
             </tr>
           </thead>
@@ -402,8 +402,8 @@ async function onRevokeSession(s: MyAuthSession): Promise<void> {
               <td :data-l="t('dsh.acct.colAgent')" class="db-clip db-small db-muted">
                 {{ s.user_agent || '—' }}
               </td>
-              <td :data-l="t('dsh.acct.colLastSeen')" class="db-mono">{{ shortDateTime(s.last_seen_at) }}</td>
-              <td :data-l="t('dsh.acct.colExpires')" class="db-mono">{{ shortDateTime(s.expires_at) }}</td>
+              <td :data-l="t('dsh.acct.colLastSeen')" class="db-mono db-nw">{{ shortDateTime(s.last_seen_at) }}</td>
+              <td :data-l="t('dsh.acct.colExpires')" class="db-mono db-nw">{{ shortDateTime(s.expires_at) }}</td>
               <td :data-l="t('dsh.me.colActions')">
                 <template v-if="pendingRevokeSessionId === s.id">
                   <div class="db-btns">

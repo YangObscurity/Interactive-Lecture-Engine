@@ -837,6 +837,9 @@ describe('WP-4 PageMyLearning.vue & PageAccount.vue', () => {
 
     expect(wrapper.find('[data-acct-cred="cred-1"]').exists()).toBe(true)
     expect(wrapper.find('[data-acct-session="s-other"]').exists()).toBe(true)
+    expect(wrapper.findAll('[data-acct-cred="cred-1"] td.db-nw').length).toBe(2)
+    expect(wrapper.findAll('[data-acct-session="s-other"] td.db-nw').length).toBe(2)
+    expect(wrapper.findAll('[data-acct-sessions-panel] thead th.db-nw').length).toBe(2)
 
     // 2-step session revoke with cancel & confirm
     await wrapper.get('[data-acct-revoke-session="s-other"]').trigger('click')

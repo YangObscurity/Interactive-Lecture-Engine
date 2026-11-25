@@ -165,7 +165,7 @@ describe('WP-2: Backend Authentication, Cookies, Passkeys, Hybrid, Me & Admin', 
 
     db = createDb('pglite:memory')
     await runMigrations(db)
-    const config = makeTestConfig()
+    const config = makeTestConfig({ siteDistDir: join(testContentDir, 'empty-dist') })
     app = createApp(config, db)
   })
 
