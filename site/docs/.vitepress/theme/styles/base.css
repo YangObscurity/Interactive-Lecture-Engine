@@ -757,6 +757,18 @@ html.dark .lec-xref-peek__thumb {
   opacity: 0.4;
   cursor: not-allowed;
 }
+.pswp.chart-modal .pswp__zoom-wrap:has(.chart-modal__slot) {
+  transform: translate3d(0, 44px, 0) !important;
+  width: 100%;
+  height: calc(100% - 44px);
+}
+.pswp.chart-modal .pswp__content:has(.chart-modal__slot) {
+  width: 100% !important;
+  height: 100% !important;
+  max-width: none;
+  display: flex;
+  overflow: visible;
+}
 .pswp.chart-modal .pswp__content {
   width: 100%;
   height: 100%;
@@ -766,9 +778,52 @@ html.dark .lec-xref-peek__thumb {
 }
 .pswp.chart-modal .chart-modal__slot,
 .pswp.chart-modal .chart-modal__stage {
+  position: relative;
   width: 100%;
   height: 100%;
   flex: 1 1 auto;
-  overflow: auto;
-  display: flex;
+  overflow: hidden;
+  display: block;
+  padding: 0;
+  touch-action: none;
+  user-select: none;
+  cursor: grab;
+}
+.pswp.chart-modal .chart-modal__stage.grabbing {
+  cursor: grabbing;
+}
+.pswp.chart-modal .chart-modal__canvas {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: auto !important;
+  height: auto !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  transform-origin: 0 0;
+  will-change: transform;
+}
+.pswp.chart-modal .chart-modal__vec-host {
+  padding: var(--lec-space-2) !important;
+  background: var(--lec-bg) !important;
+  border: var(--lec-line-hair) solid var(--lec-border) !important;
+  border-radius: var(--lec-radius-1) !important;
+  line-height: 0;
+}
+html.dark .pswp.chart-modal .chart-modal__vec-host {
+  background: var(--lec-text) !important;
+}
+.pswp.chart-modal figure.chart--modal .chart-body {
+  width: auto;
+  height: auto;
+  max-height: none;
+  overflow: visible;
+  cursor: inherit;
+}
+.pswp.chart-modal .chart-modal__svg-fallback {
+  display: block;
+  max-width: none;
 }

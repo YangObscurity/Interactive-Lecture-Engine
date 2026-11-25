@@ -27,9 +27,13 @@ import {
   annotateChartFigureTag,
   formatFigureNumberLabel,
   hasFigureMarkup,
+  isInlineMermaidInfo,
   lectureNoOfPage,
+  renderInlineMermaidMetaTag,
   scanFigureMarkup,
+  type InlineMermaidMode,
 } from './numbering.ts'
+import { CHART_INLINE_MERMAID } from '../site.config.mts'
 import type {
   FigureBacklink,
   FigureEntry,
@@ -60,14 +64,23 @@ export interface FiguresMarkdownOptions {
   localeKeys: readonly string[]
   accessPlan: AccessPlan
   isBuild: boolean
+  /** How fenced mermaid blocks participate in per-page figure numbering (default matches CHART_INLINE_MERMAID). */
+  inlineMermaid?: InlineMermaidMode
   /** Optional sink collecting warnings across compiled pages (e.g., unused figures). */
   onWarning?: (msg: string) => void
+}
+
+function defaultInlineMermaidMode(): InlineMermaidMode {
+  if (!CHART_INLINE_MERMAID.enabled) return 'none'
+  const sels = CHART_INLINE_MERMAID.selectors as readonly string[]
+  return sels.some((s) => s.includes('language-mermaid') && !s.includes(':chart')) ? 'all' : 'chart-only'
 }
 
 interface MarkdownItTokenLike {
   type: string
   tag: string
   nesting: number
+  info?: string
   content: string
   children?: MarkdownItTokenLike[] | null
   attrGet(name: string): string | number | null
@@ -291,9 +304,12 @@ export function createFiguresMarkdownPlugin(opts: FiguresMarkdownOptions) {
         }
       }
       // cross-references in order; a cited figure that is not mounted on this page is numbered after the mounted ones
+      const inlineMermaidMode = opts.inlineMermaid ?? defaultInlineMermaidMode()
       const xrefTargets: Array<{ group: string; entry: FigureEntry; targetTier: string }> = []
       for (const tok of state.tokens) {
-        if ((tok.type === 'html_block' || tok.type === 'html_inline') && hasFigureMarkup(tok.content)) {
+        if (tok.type === 'fence' && tok.content.trim() && isInlineMermaidInfo(tok.info ?? '', inlineMermaidMode)) {
+          chartNumbers.push(numbering.next('figure'))
+        } else if ((tok.type === 'html_block' || tok.type === 'html_inline') && hasFigureMarkup(tok.content)) {
           scanMounts(tok.content)
         } else if (tok.type === 'inline' && tok.children) {
           for (let i = 0; i < tok.children.length; i++) {
@@ -398,9 +414,23 @@ export function createFiguresMarkdownPlugin(opts: FiguresMarkdownOptions) {
         return out + html.slice(last)
       }
 
-      // Pass 2: rewrite `<LectureFigure>` tags, chart figures and `[...](fig:id)` / `[...](tab:id)` links.
+      // Pass 2: rewrite `<LectureFigure>` tags, chart figures, inline mermaid blocks and `[...](fig:id)` / `[...](tab:id)` links.
       const seenOccurrence = new Map<string, number>()
+      const nextTokens: MarkdownItTokenLike[] = []
+      let touchedTokens = false
       for (const tok of state.tokens) {
+        if (tok.type === 'fence' && tok.content.trim() && isInlineMermaidInfo(tok.info ?? '', inlineMermaidMode)) {
+          const num = chartNumbers[chartCursor++] ?? 0
+          if (num > 0) {
+            const metaTok = new state.Token('html_block', '', 0)
+            metaTok.content = `${renderInlineMermaidMetaTag(num, numbering.lectureNo, numbering.label('figure', num))}\n`
+            nextTokens.push(metaTok)
+            touchedTokens = true
+          }
+          nextTokens.push(tok)
+          continue
+        }
+        nextTokens.push(tok)
         if ((tok.type === 'html_block' || tok.type === 'html_inline') && hasFigureMarkup(tok.content)) {
           tok.content = rewriteFigureHtml(tok.content)
         } else if (tok.type === 'inline' && tok.children) {
@@ -456,6 +486,7 @@ export function createFiguresMarkdownPlugin(opts: FiguresMarkdownOptions) {
           tok.children = nextChildren
         }
       }
+      if (touchedTokens) state.tokens = nextTokens
     })
   }
 }

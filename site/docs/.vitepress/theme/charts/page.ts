@@ -22,6 +22,7 @@ import { ChartRegistry } from './registry'
 import type { Renderer } from './renderers/types'
 import type { InlineMermaidConfig } from './scan'
 import { INLINE_SOURCE, claimInlineMermaidBlocks, claimSidecarFigures, removeStaleInlineFigures } from './scan'
+import { INLINE_MERMAID_META_CLASS } from '../../figures/numbering.ts'
 import { chartSourceOf, type SidecarData } from './sidecar'
 import { bumpSeq } from './state'
 import type { Disposer } from './state'
@@ -242,10 +243,20 @@ export class PageCharts {
         block.style.display = ''
         continue
       }
+      const prevMeta = block.previousElementSibling as HTMLElement | null
+      if (prevMeta?.classList?.contains(INLINE_MERMAID_META_CLASS)) {
+        if (prevMeta.dataset.figNo) block.dataset.figNo = prevMeta.dataset.figNo
+        if (prevMeta.dataset.figLec) block.dataset.figLec = prevMeta.dataset.figLec
+        if (prevMeta.dataset.figLabel) block.dataset.figLabel = prevMeta.dataset.figLabel
+        prevMeta.remove()
+      }
       const fig = document.createElement('figure')
       fig.className = 'chart ' + this.inline.className
       fig.dataset.type = 'mermaid'
       fig.dataset.id = 'inline_' + bumpSeq()
+      if (block.dataset.figNo) fig.dataset.figNo = block.dataset.figNo
+      if (block.dataset.figLec) fig.dataset.figLec = block.dataset.figLec
+      if (block.dataset.figLabel) fig.dataset.figLabel = block.dataset.figLabel
       // contract (V1 5c6e5a18): inline figures never carry data-lecture (check_figs2.py 1:1 gate)
       fig.dataset.source = INLINE_SOURCE
       block.parentNode?.insertBefore(fig, block)

@@ -11,7 +11,8 @@ import { fromMarkdown } from 'mdast-util-from-markdown'
 import { visit } from 'unist-util-visit'
 import { resolveContent } from '../content/paths.mts'
 import { parseLectureFigureTagAttrs, splitFigureTarget } from '../figures/markdown.ts'
-import { FigureNumbering, lectureNoOfPage, scanFigureMarkup } from '../figures/numbering.ts'
+import { FigureNumbering, isInlineMermaidInfo, lectureNoOfPage, scanFigureMarkup, type InlineMermaidMode } from '../figures/numbering.ts'
+import { CHART_INLINE_MERMAID } from '../site.config.mts'
 import { loadGroupRegistry, type LoadedGroupRegistry } from '../figures/registry.ts'
 import type { FigureKind } from '../figures/types.ts'
 
@@ -65,11 +66,21 @@ interface XrefHit {
 export function resolveFigureXrefsForSearch(md: string, opts: ResolveFigureXrefsOptions): string {
   if (!md.includes('](fig:') && !md.includes('](tab:')) return md
   const numbering = new FigureNumbering(lectureNoOfPage(opts.relPath), opts.localeKey)
+  const inlineMode: InlineMermaidMode = !CHART_INLINE_MERMAID.enabled
+    ? 'none'
+    : (CHART_INLINE_MERMAID.selectors as readonly string[]).some((s) => s.includes('language-mermaid') && !s.includes(':chart'))
+      ? 'all'
+      : 'chart-only'
   const group = opts.pageGroup ?? ''
   const xrefs: XrefHit[] = []
   const tree = fromMarkdown(md)
   visit(tree, (node) => {
-    if (node.type === 'html') {
+    if (node.type === 'code') {
+      const info = [node.lang, node.meta].filter(Boolean).join(' ')
+      if ((node.value || '').trim() && isInlineMermaidInfo(info, inlineMode)) {
+        numbering.next('figure')
+      }
+    } else if (node.type === 'html') {
       for (const hit of scanFigureMarkup(node.value)) {
         if (hit.type === 'chart') {
           numbering.next('figure')

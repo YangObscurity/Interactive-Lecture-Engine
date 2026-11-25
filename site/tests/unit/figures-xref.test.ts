@@ -336,4 +336,68 @@ describe('figures/numbering (one sequence for charts and figures, tables apart)'
     // anything the builder could not number is still never shown raw
     expect(cleanProseSegment('如 [](fig:unknown) 所示')).toBe('如 所示')
   })
+
+  it('counts fenced ```mermaid blocks alongside <LectureFigure> and <figure class="chart"> without duplicate numbers', () => {
+    const { md, figuresDir } = makeFixture()
+    const kindOf = createFigureKindLookup(figuresDir)
+    const src = [
+      '先看图：',
+      '',
+      '```mermaid',
+      'flowchart TD; A-->B',
+      '```',
+      '',
+      '系统架构见 [](fig:alpha) 与下方图表：',
+      '',
+      '<LectureFigure id="alpha" />',
+      '',
+      '<figure class="chart" data-lecture="G01-L30" data-id="c1" data-type="mermaid"></figure>',
+    ].join('\n')
+
+    const html = md.render(src, { relativePath: 'g01/L30.md' })
+    // Inline mermaid block gets #1 (meta anchor right before block), <LectureFigure id="alpha"> gets #2, sidecar c1 gets #3
+    expect(html).toContain('class="lec-mermaid-num" data-fig-no="1" data-fig-lec="30" data-fig-label="图 30-1"')
+    expect(html).toMatch(/data-xref-id="alpha"[^>]*>图 30-2<\/a>/)
+    expect(chartAttrs(html)).toEqual([{ id: 'c1', no: '3', lec: '30', label: '图 30-3' }])
+    const mounts = [...html.matchAll(/<LectureFigure\s+encoded="([^"]+)"\s*\/>/g)].map((m) =>
+      decodeFigurePayload<ResolvedFigureMountProps>(m[1] ?? ''),
+    )
+    expect(mounts[0]?.items[0]?.label).toBe('图 30-2')
+
+    const resolved = resolveFigureXrefsForSearch(src, { relPath: 'g01/L30.md', pageGroup: 'g01', localeKey: '', kindOf })
+    expect(resolved).toContain('系统架构见 图 30-2 与下方图表')
+  })
+
+  it('handles mermaid modifiers (:line-numbers / {lines}) and skips empty or uppercase MERMAID fences', () => {
+    const { md, figuresDir } = makeFixture()
+    const kindOf = createFigureKindLookup(figuresDir)
+    const src = [
+      '```mermaid:line-numbers',
+      'flowchart LR; A-->B',
+      '```',
+      '',
+      '```mermaid',
+      '   ',
+      '```',
+      '',
+      '```MERMAID',
+      'flowchart TD; X-->Y',
+      '```',
+      '',
+      '```mermaid {1-2}',
+      'flowchart TD; C-->D',
+      '```',
+      '',
+      '<LectureFigure id="alpha" />',
+      '',
+      '引用 [](fig:alpha)。',
+    ].join('\n')
+
+    const html = md.render(src, { relativePath: 'g01/L30.md' })
+    expect(html).toContain('class="lec-mermaid-num" data-fig-no="1" data-fig-lec="30" data-fig-label="图 30-1"')
+    expect(html).toContain('class="lec-mermaid-num" data-fig-no="2" data-fig-lec="30" data-fig-label="图 30-2"')
+    expect(html).not.toContain('data-fig-no="4"')
+    expect(html).toMatch(/data-xref-id="alpha"[^>]*>图 30-3<\/a>/)
+    expect(resolveFigureXrefsForSearch(src, { relPath: 'g01/L30.md', pageGroup: 'g01', localeKey: '', kindOf })).toContain('引用 图 30-3。')
+  })
 })
