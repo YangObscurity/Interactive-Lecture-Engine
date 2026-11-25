@@ -1,6 +1,7 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto'
 import type { AuthCookieSecure, Role } from '../config/schema.js'
 import type { DbClient } from '../db/types.js'
+import { parseStoredRoles } from '../services/usersService.js'
 
 export interface ActiveSessionUser {
   id: string
@@ -97,6 +98,8 @@ export async function createSessionRow(
   db: DbClient,
   opts: CreateSessionOptions,
 ): Promise<{ id: string; rawToken: string; expiresAt: Date; rememberMe: boolean }> {
+  await db.query('DELETE FROM auth_sessions WHERE expires_at < NOW()')
+
   const rawToken = randomBytes(32).toString('base64url')
   const tokenHash = createHash('sha256').update(rawToken).digest('hex')
   const id = randomUUID()
@@ -157,21 +160,7 @@ export async function getSessionByRawToken(
   const row = res.rows[0]
   if (row.u_disabled) return null
 
-  let roles: Role[]
-  if (Array.isArray(row.u_roles)) {
-    roles = row.u_roles as Role[]
-  } else if (typeof row.u_roles === 'string') {
-    try {
-      roles = JSON.parse(row.u_roles) as Role[]
-    } catch {
-      roles = ['reader']
-    }
-  } else {
-    roles = ['reader']
-  }
-  if (!roles.includes('reader')) {
-    roles = ['reader', ...roles]
-  }
+  const roles = parseStoredRoles(row.u_roles)
 
   // Update last_seen_at
   db.query(`UPDATE auth_sessions SET last_seen_at = NOW() WHERE id = $1`, [row.id]).catch(() => {})

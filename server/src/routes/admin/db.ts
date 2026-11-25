@@ -899,67 +899,69 @@ export function createAdminDbRouter(
       }
     }
 
-    const effectiveMigrateUrl =
-      targetDirectUrl ??
-      targetUrl ??
-      (activeDb.kind === 'pg' ? dbManager.getCurrentDirectUrl() : null)
-    const reuseActive =
-      effectiveMigrateUrl === null ||
-      (targetUrl === null && effectiveMigrateUrl === dbManager.getCurrentUrl()) ||
-      isActiveFilesystemPglite(effectiveMigrateUrl, dbManager.getCurrentUrl())
-    const virtualDryRun =
-      dryRun &&
-      !reuseActive &&
-      effectiveMigrateUrl !== null &&
-      isUncreatedFilesystemPglite(effectiveMigrateUrl)
-    let tempDb: Db | null = null
+    return dbManager.runExclusive(async () => {
+      const effectiveMigrateUrl =
+        targetDirectUrl ??
+        targetUrl ??
+        (activeDb.kind === 'pg' ? dbManager.getCurrentDirectUrl() : null)
+      const reuseActive =
+        effectiveMigrateUrl === null ||
+        (targetUrl === null && effectiveMigrateUrl === dbManager.getCurrentUrl()) ||
+        isActiveFilesystemPglite(effectiveMigrateUrl, dbManager.getCurrentUrl())
+      const virtualDryRun =
+        dryRun &&
+        !reuseActive &&
+        effectiveMigrateUrl !== null &&
+        isUncreatedFilesystemPglite(effectiveMigrateUrl)
+      let tempDb: Db | null = null
 
-    try {
-      if (virtualDryRun && effectiveMigrateUrl) {
-        assertWritablePgliteParent(effectiveMigrateUrl)
-      }
-      const targetDb = reuseActive
-        ? activeDb
-        : (tempDb = createProbeDb(virtualDryRun ? 'pglite:memory://' : effectiveMigrateUrl!))
-      const result = await withTimeout(
-        runMigrations(targetDb, { dryRun, log: () => {} }),
-        MIGRATION_TIMEOUT_MS,
-        'Database migration',
-      )
-      const status = await getMigrationStatus(targetDb)
+      try {
+        if (virtualDryRun && effectiveMigrateUrl) {
+          assertWritablePgliteParent(effectiveMigrateUrl)
+        }
+        const targetDb = reuseActive
+          ? activeDb
+          : (tempDb = createProbeDb(virtualDryRun ? 'pglite:memory://' : effectiveMigrateUrl!))
+        const result = await withTimeout(
+          runMigrations(targetDb, { dryRun, log: () => {} }),
+          MIGRATION_TIMEOUT_MS,
+          'Database migration',
+        )
+        const status = await getMigrationStatus(targetDb)
 
-      if (!dryRun && result.applied.length > 0) {
-        serverLogBuffer.add({
-          level: 'info',
-          category: 'admin',
-          message: `Applied ${result.applied.length} migration(s) on ${targetDb.kind}: ${result.applied.join(', ')}`,
-        })
-      }
+        if (!dryRun && result.applied.length > 0) {
+          serverLogBuffer.add({
+            level: 'info',
+            category: 'admin',
+            message: `Applied ${result.applied.length} migration(s) on ${targetDb.kind}: ${result.applied.join(', ')}`,
+          })
+        }
 
-      return c.json(
-        {
-          ok: true,
-          dryRun,
-          applied: result.applied,
-          pending: status.pending.map((m) => m.filename),
-          dryRunSql: result.dryRunSql ?? '',
-        },
-        200,
-      )
-    } catch (err) {
-      return c.json(
-        {
-          ok: false,
-          error: 'migration_failed',
-          message: scrubErrorMessage(err, targetUrl, targetDirectUrl),
-        },
-        502,
-      )
-    } finally {
-      if (tempDb) {
-        await tempDb.close().catch(() => {})
+        return c.json(
+          {
+            ok: true,
+            dryRun,
+            applied: result.applied,
+            pending: status.pending.map((m) => m.filename),
+            dryRunSql: result.dryRunSql ?? '',
+          },
+          200,
+        )
+      } catch (err) {
+        return c.json(
+          {
+            ok: false,
+            error: 'migration_failed',
+            message: scrubErrorMessage(err, targetUrl, targetDirectUrl),
+          },
+          502,
+        )
+      } finally {
+        if (tempDb) {
+          await tempDb.close().catch(() => {})
+        }
       }
-    }
+    })
   }
 
   router.post('/init', (c) => handleMigrate(c))
@@ -1027,6 +1029,26 @@ export function createAdminDbRouter(
         (canonicalDbTarget(targetUrl) === canonicalDbTarget(dbManager.getCurrentUrl()) &&
           targetDirectUrl === dbManager.getCurrentDirectUrl())
 
+      if (sameTarget) {
+        return c.json(
+          {
+            error: 'same_database_target',
+            message: 'Target database is already the active database',
+          },
+          400,
+        )
+      }
+
+      if (!dryRun && canonicalDbTarget(targetUrl) === 'pglite:memory://') {
+        return c.json(
+          {
+            error: 'invalid_database_url',
+            message: 'In-memory database (pglite:memory) is not supported for persistent database switch',
+          },
+          400,
+        )
+      }
+
       if (dryRun) {
         const virtualDryRun = !sameFsPglite && isUncreatedFilesystemPglite(targetUrl)
         let tempDb: Db | null = null
@@ -1093,13 +1115,14 @@ export function createAdminDbRouter(
         )
       }
 
-      let candidateDb: Db | null = null
+      let probeDb: Db | null = null
+      let runtimeDb: Db | null = null
       let migrationsApplied: string[] = []
       let swapped = false
 
       try {
-        candidateDb = createProbeDb(targetUrl)
-        await withTimeout(candidateDb.query('SELECT 1'), CONNECTION_TIMEOUT_MS, 'Switch probe')
+        probeDb = createProbeDb(targetUrl)
+        await withTimeout(probeDb.query('SELECT 1'), CONNECTION_TIMEOUT_MS, 'Switch probe')
 
         if (autoMigrate) {
           if (
@@ -1119,7 +1142,7 @@ export function createAdminDbRouter(
             }
           } else {
             const migRes = await withTimeout(
-              runMigrations(candidateDb, { log: () => {} }),
+              runMigrations(probeDb, { log: () => {} }),
               MIGRATION_TIMEOUT_MS,
               'Switch migration',
             )
@@ -1127,8 +1150,17 @@ export function createAdminDbRouter(
           }
         }
 
+        if (isPgUrl(targetUrl)) {
+          await probeDb.close().catch(() => {})
+          probeDb = null
+          runtimeDb = createDb(targetUrl)
+        } else {
+          runtimeDb = probeDb
+          probeDb = null
+        }
+
         const swapRes = await dbManager.swapTo(
-          candidateDb,
+          runtimeDb,
           {
             databaseUrl: targetUrl,
             databaseUrlDirect: targetDirectUrl,
@@ -1156,8 +1188,8 @@ export function createAdminDbRouter(
           200,
         )
       } catch (err) {
-        if (candidateDb && !swapped) {
-          await candidateDb.close().catch(() => {})
+        if (runtimeDb && !swapped) {
+          await runtimeDb.close().catch(() => {})
         }
         return c.json(
           {
@@ -1167,6 +1199,10 @@ export function createAdminDbRouter(
           },
           502,
         )
+      } finally {
+        if (probeDb) {
+          await probeDb.close().catch(() => {})
+        }
       }
     })
   })
@@ -1249,6 +1285,16 @@ export function createAdminDbRouter(
           {
             error: 'same_database_target',
             message: 'Transfer target cannot be identical to the active database',
+          },
+          400,
+        )
+      }
+
+      if (!dryRun && canonicalDbTarget(targetUrl) === 'pglite:memory://') {
+        return c.json(
+          {
+            error: 'invalid_database_url',
+            message: 'In-memory database (pglite:memory) is not supported for persistent database transfer',
           },
           400,
         )
@@ -1566,16 +1612,29 @@ export function createAdminDbRouter(
       orderDir = rawOrder === 'asc' ? 'ASC' : 'DESC'
     }
 
-    const q = c.req.query('q')?.trim() ?? ''
+    const whereClauses: string[] = []
     const params: unknown[] = []
-    let whereSql = ''
+
+    if (spec.name === 'site_settings' && RESERVED_DOMAIN_SETTING_KEYS.size > 0) {
+      const reservedList = Array.from(RESERVED_DOMAIN_SETTING_KEYS)
+      const reservedPlaceholders = reservedList.map((k) => {
+        params.push(k)
+        return `$${params.length}`
+      })
+      whereClauses.push(`"key" NOT IN (${reservedPlaceholders.join(', ')})`)
+    }
+
+    const q = c.req.query('q')?.trim() ?? ''
     if (q !== '' && spec.searchableColumns.length > 0) {
       params.push(`%${escapeLikePattern(q)}%`)
+      const qParamIdx = params.length
       const clauses = spec.searchableColumns.map(
-        (col) => `CAST("${col}" AS TEXT) ILIKE $1 ESCAPE '\\'`,
+        (col) => `CAST("${col}" AS TEXT) ILIKE $${qParamIdx} ESCAPE '\\'`,
       )
-      whereSql = `WHERE (${clauses.join(' OR ')})`
+      whereClauses.push(`(${clauses.join(' OR ')})`)
     }
+
+    const whereSql = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : ''
 
     const countRes = await activeDb.query<{ cnt: string | number }>(
       `SELECT COUNT(*)::int AS cnt FROM "${spec.name}" ${whereSql}`,

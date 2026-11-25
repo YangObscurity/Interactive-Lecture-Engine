@@ -25,6 +25,7 @@ import { rateLimited } from '../http/errors.js'
 import { type Clock, FailedLoginBackoff } from '../http/rateLimit.js'
 import type { AppConfig, Role } from '../config/schema.js'
 import type { Db } from '../db/types.js'
+import { parseStoredRoles } from '../services/usersService.js'
 import { randomUUID, timingSafeEqual } from 'node:crypto'
 import {
   hasSeenGatewayAuthInMemory,
@@ -489,21 +490,7 @@ export function createAuthRouter(
     })
     c.header('Set-Cookie', cookie)
 
-    let roles: Role[]
-    if (Array.isArray(user.roles)) {
-      roles = user.roles as Role[]
-    } else if (typeof user.roles === 'string') {
-      try {
-        roles = JSON.parse(user.roles) as Role[]
-      } catch {
-        roles = ['reader']
-      }
-    } else {
-      roles = ['reader']
-    }
-    if (!roles.includes('reader')) {
-      roles = ['reader', ...roles]
-    }
+    const roles = parseStoredRoles(user.roles)
 
     const canAccessAdmin = roles.includes('admin')
     const canAccessAuthor = canAccessAdmin || roles.includes('author')

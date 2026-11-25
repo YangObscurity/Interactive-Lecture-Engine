@@ -18,6 +18,7 @@ import {
 } from '../auth/sessions.js'
 import type { AppConfig, Role } from '../config/schema.js'
 import type { Db } from '../db/types.js'
+import { isPgUniqueViolation } from '../services/usersService.js'
 
 function getRequestUserId(c: Context<AppEnv>): string | null {
   const userId = c.get('userId') ?? c.get('effectiveUserId') ?? c.get('user')?.id
@@ -443,6 +444,15 @@ export function createMeRouter(config: AppConfig, db: Db): Hono<AppEnv> {
       )
       return c.json(result, 201)
     } catch (err) {
+      if (isPgUniqueViolation(err)) {
+        return c.json(
+          {
+            error: 'credential_already_registered',
+            message: 'This passkey credential is already registered',
+          },
+          409,
+        )
+      }
       return c.json(
         { error: 'passkey_verification_failed', message: err instanceof Error ? err.message : String(err) },
         400,

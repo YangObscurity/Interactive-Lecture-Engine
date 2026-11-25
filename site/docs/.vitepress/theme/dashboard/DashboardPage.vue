@@ -445,6 +445,7 @@ async function handleLoggedOut(logoutUrl?: string | null): Promise<void> {
 }
 
 async function onLogout(): Promise<void> {
+  if (!(await confirmLeave(dashboardState.page))) return
   if (authStatus.value?.authSource && authStatus.value.authSource !== 'gateway') {
     publishSession({ status: 'anonymous', source: 'server' })
   }

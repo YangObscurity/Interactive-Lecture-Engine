@@ -47,10 +47,10 @@ test.describe('P6.5 Lecture Dashboard (/dashboard)', () => {
         })
       }
       if (p.endsWith('/credentials')) {
-        return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true, credentials: [] }) })
+        return route.fulfill({ status: 200, contentType: 'application/json', body: '[]' })
       }
       if (p.endsWith('/sessions')) {
-        return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true, sessions: [] }) })
+        return route.fulfill({ status: 200, contentType: 'application/json', body: '[]' })
       }
       return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true }) })
     })

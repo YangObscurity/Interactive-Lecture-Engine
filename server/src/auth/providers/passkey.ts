@@ -7,6 +7,7 @@ import {
 } from 'node:crypto'
 import type { AppConfig, Role } from '../../config/schema.js'
 import type { Db } from '../../db/types.js'
+import { parseStoredRoles } from '../../services/usersService.js'
 import { cborDecode } from './cbor.js'
 
 export interface RequestContext {
@@ -62,6 +63,7 @@ export async function createRegistrationOptions(
     userVerification: 'preferred'
   }
 }> {
+  await db.query('DELETE FROM auth_challenges WHERE expires_at < NOW()')
   const challenge = randomBytes(32).toString('base64url')
   const expiresAt = new Date(Date.now() + 5 * 60 * 1000) // 5 minutes
   const rpId = resolveRpId(cfg, reqCtx.host)
@@ -323,6 +325,7 @@ export async function createAuthenticationOptions(
   userVerification: 'preferred'
   allowCredentials: Array<{ id: string; type: 'public-key'; transports?: string[] }>
 }> {
+  await db.query('DELETE FROM auth_challenges WHERE expires_at < NOW()')
   const challenge = randomBytes(32).toString('base64url')
   const expiresAt = new Date(Date.now() + 5 * 60 * 1000) // 5 minutes
   const rpId = resolveRpId(cfg, reqCtx.host)
@@ -541,21 +544,7 @@ export async function verifyAuthenticationResponse(
       cred.user_id,
     ])
 
-    let roles: Role[]
-    if (Array.isArray(cred.u_roles)) {
-      roles = cred.u_roles as Role[]
-    } else if (typeof cred.u_roles === 'string') {
-      try {
-        roles = JSON.parse(cred.u_roles) as Role[]
-      } catch {
-        roles = ['reader']
-      }
-    } else {
-      roles = ['reader']
-    }
-    if (!roles.includes('reader')) {
-      roles = ['reader', ...roles]
-    }
+    const roles = parseStoredRoles(cred.u_roles)
 
     authenticatedUser = {
       id: cred.u_id,

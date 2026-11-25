@@ -28,8 +28,6 @@ import {
   type PreviewConfirmResponse,
 } from '../components/ai/conceptAuthorClient'
 
-import { dashboardClient } from './dashboardClient'
-
 const props = withDefaults(
   defineProps<{
     isDevMode: boolean
@@ -116,9 +114,6 @@ async function refreshList(): Promise<void> {
         }))
       } else {
         items.value = []
-      }
-      if (props.canWrite) {
-        await dashboardClient.fetchOnlineFigures().catch(() => null)
       }
     }
     if (items.value.length > 0 && !items.value.some((i) => itemKeyOf(i) === selectedKey.value)) {

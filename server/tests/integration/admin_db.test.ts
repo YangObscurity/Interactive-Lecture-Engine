@@ -4,11 +4,12 @@ import { Hono } from 'hono'
 import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { createApp, type AppEnv } from '../../src/app.js'
 import { verifyPassword } from '../../src/auth/password.js'
 import { parseEnv } from '../../src/config/env.js'
 import type { AppConfig } from '../../src/config/schema.js'
+import * as dbModule from '../../src/db/index.js'
 import { createDb, createDbManager, type DbManager } from '../../src/db/index.js'
 import { getMigrationStatus, runMigrations } from '../../src/db/migrate.js'
 import type { Db, DbClient } from '../../src/db/types.js'
@@ -951,6 +952,9 @@ describe('WP-3: Admin DB Selector, Hot-Swap, Transfer & Whitelisted 6-Table CRUD
         ).toBe(1)
 
         // Hot-swap active engine to PgDb over TCP wire protocol
+        const createDbSpy = vi.spyOn(dbModule, 'createDb')
+        const swapToSpy = vi.spyOn(dbManager, 'swapTo')
+
         const swapRes = await app.request('/api/admin/db/switch', {
           method: 'POST',
           headers: { ...ADMIN_HEADERS, 'Content-Type': 'application/json' },
@@ -962,6 +966,17 @@ describe('WP-3: Admin DB Selector, Hot-Swap, Transfer & Whitelisted 6-Table CRUD
         expect(swapData.previousKind).toBe('pglite')
         expect(swapData.currentKind).toBe('pg')
         expect(JSON.stringify(swapData)).not.toContain('wireSecretPwd')
+
+        // REV2-2: verify probe used statementTimeoutMs: 30000, while switched runtime pool createDb contract
+        // used standard pool options (no statementTimeoutMs: 30000)
+        expect(swapToSpy).toHaveBeenCalledTimes(1)
+        const createDbCallsForPg = createDbSpy.mock.calls.filter((call) => call[0] === pgUrl)
+        expect(createDbCallsForPg.length).toBeGreaterThanOrEqual(2)
+        // Probe call carries probe timeouts
+        expect(createDbCallsForPg[0]![1]?.pg?.statementTimeoutMs).toBe(30000)
+        expect(createDbCallsForPg[0]![1]?.pg?.connectionTimeoutMillis).toBe(8000)
+        // Switched runtime pool call does NOT get pinned to probe options
+        expect(createDbCallsForPg[1]![1]).toBeUndefined()
 
         // Live CRUD query on swapped PgDb
         const rowsRes = await app.request('/api/admin/db/tables/site_settings/rows', {
@@ -1214,6 +1229,111 @@ describe('WP-3: Admin DB Selector, Hot-Swap, Transfer & Whitelisted 6-Table CRUD
           'SELECT COUNT(*)::int AS cnt FROM progress',
         )
         expect(countRes.rows[0]?.cnt).toBe(0)
+      } finally {
+        await dbManager.close()
+      }
+    })
+
+    it('enforces REV2-7(a), REV2-6, and REV2-5: rejects pglite:memory when dryRun is false, serializes /migrate with runExclusive, and excludes reserved domain setting keys in row listing', async () => {
+      const dbDir = join(tempRoot, 'rev-fixes-db')
+      const mainDb = createDb(`pglite:${dbDir}`)
+      await runMigrations(mainDb)
+
+      const dbManager = createDbManager(mainDb, { databaseUrl: `pglite:${dbDir}` })
+      const app = createApp(makeTestConfig({ databaseUrl: `pglite:${dbDir}` }), dbManager.asDb(), {
+        dbManager,
+      })
+
+      try {
+        // 1. REV2-7(a): Reject pglite:memory on /switch when dryRun is false
+        const switchMemRes = await app.request('/api/admin/db/switch', {
+          method: 'POST',
+          headers: { ...ADMIN_HEADERS, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ targetUrl: 'pglite:memory', dryRun: false }),
+        })
+        expect(switchMemRes.status).toBe(400)
+        expect((await switchMemRes.json()).error).toBe('invalid_database_url')
+
+        // Omitting dryRun defaults to false
+        const switchMemOmitDry = await app.request('/api/admin/db/switch', {
+          method: 'POST',
+          headers: { ...ADMIN_HEADERS, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ targetUrl: 'pglite:memory://' }),
+        })
+        expect(switchMemOmitDry.status).toBe(400)
+        expect((await switchMemOmitDry.json()).error).toBe('invalid_database_url')
+
+        // Reject pglite:memory on /transfer when dryRun is false
+        const transferMemRes = await app.request('/api/admin/db/transfer', {
+          method: 'POST',
+          headers: { ...ADMIN_HEADERS, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ targetUrl: 'pglite:memory', dryRun: false }),
+        })
+        expect(transferMemRes.status).toBe(400)
+        expect((await transferMemRes.json()).error).toBe('invalid_database_url')
+
+        // dryRun: true on /transfer remains supported
+        const transferMemDry = await app.request('/api/admin/db/transfer', {
+          method: 'POST',
+          headers: { ...ADMIN_HEADERS, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ targetUrl: 'pglite:memory', dryRun: true }),
+        })
+        expect(transferMemDry.status).toBe(200)
+
+        // 2. REV2-6: /migrate is serialized via dbManager.runExclusive
+        const runExclusiveSpy = vi.spyOn(dbManager, 'runExclusive')
+        const migRes = await app.request('/api/admin/db/migrate', {
+          method: 'POST',
+          headers: { ...ADMIN_HEADERS, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ dryRun: true }),
+        })
+        expect(migRes.status).toBe(200)
+        expect(runExclusiveSpy).toHaveBeenCalled()
+
+        // 3. REV2-5: Exclude RESERVED_DOMAIN_SETTING_KEYS from GET /tables/site_settings/rows
+        // Seed reserved settings and regular custom settings directly
+        await mainDb.query(
+          `INSERT INTO site_settings (key, value, updated_by, updated_at) VALUES
+           ('access', '{"default":"public"}'::jsonb, 'admin', NOW()),
+           ('texts', '{"title":"Test"}'::jsonb, 'admin', NOW()),
+           ('custom_visible_setting', '{"enabled":true}'::jsonb, 'admin', NOW())`,
+        )
+
+        const rowsRes = await app.request('/api/admin/db/tables/site_settings/rows', {
+          headers: ADMIN_HEADERS,
+        })
+        expect(rowsRes.status).toBe(200)
+        const rowsData = (await rowsRes.json()) as { ok: boolean; total: number; rows: Array<{ key: string }> }
+        expect(rowsData.ok).toBe(true)
+        expect(rowsData.total).toBe(1)
+        expect(rowsData.rows).toHaveLength(1)
+        expect(rowsData.rows[0]?.key).toBe('custom_visible_setting')
+        expect(rowsData.rows.some((r) => r.key === 'access')).toBe(false)
+        expect(rowsData.rows.some((r) => r.key === 'texts')).toBe(false)
+
+        // Writes to reserved keys are still rejected with reserved_setting_key
+        const postReserved = await app.request('/api/admin/db/tables/site_settings/rows', {
+          method: 'POST',
+          headers: { ...ADMIN_HEADERS, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ key: 'access', value: { default: 'public' } }),
+        })
+        expect(postReserved.status).toBe(400)
+        expect((await postReserved.json()).error).toBe('reserved_setting_key')
+
+        const patchReserved = await app.request('/api/admin/db/tables/site_settings/rows/access', {
+          method: 'PATCH',
+          headers: { ...ADMIN_HEADERS, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ data: { value: { default: 'login' } } }),
+        })
+        expect(patchReserved.status).toBe(400)
+        expect((await patchReserved.json()).error).toBe('reserved_setting_key')
+
+        const delReserved = await app.request('/api/admin/db/tables/site_settings/rows/access', {
+          method: 'DELETE',
+          headers: ADMIN_HEADERS,
+        })
+        expect(delReserved.status).toBe(400)
+        expect((await delReserved.json()).error).toBe('reserved_setting_key')
       } finally {
         await dbManager.close()
       }

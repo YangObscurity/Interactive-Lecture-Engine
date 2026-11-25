@@ -76,6 +76,7 @@ import PageTexts from '../../docs/.vitepress/theme/dashboard/pages/PageTexts.vue
 import {
   clearRebuildRequired,
   dashboardState,
+  registerModel,
   resetAuthState,
 } from '../../docs/.vitepress/theme/dashboard/useDashboard'
 
@@ -1374,5 +1375,66 @@ describe('WP-5 RBAC Online Dashboard Suite', () => {
       zh: { name: 'Site ZH', shortName: 'Site', navText: 'Nav ZH', tagline: 'New Single Tagline', description: 'Desc {lectures}' },
       en: { name: 'Site EN', shortName: 'Site', navText: 'Nav EN', tagline: 'Tag EN', description: 'Desc {lectures}' },
     })
+  })
+
+  it('confirms unsaved edits before logout and aborts logout when stay is selected (REV3-1)', async () => {
+    currentAuthStatus = {
+      authAdapter: 'password',
+      authenticated: true,
+      needsBootstrap: false,
+      authSource: 'cookie',
+      authMethod: 'password',
+      rememberMe: false,
+      user: { id: 'alice', name: 'Alice User', email: 'alice@example.com' },
+      roles: ['reader'],
+      groups: [],
+      canAccessAdmin: false,
+      canAccessAuthor: false,
+      visibleSections: [],
+    }
+
+    const wrapper = mount(DashboardPage)
+    await flushPromises()
+
+    expect(wrapper.find('[data-dashboard-logout]').exists()).toBe(true)
+    expect((await getSession()).status).toBe('authenticated')
+
+    // Register a dirty model on the current page
+    let isDirty = true
+    const unregister = registerModel('test-dirty-account', {
+      page: dashboardState.page,
+      dirty: () => isDirty,
+      save: async () => {
+        isDirty = false
+        return true
+      },
+      discard: () => {
+        isDirty = false
+      },
+    })
+
+    try {
+      const logoutBtn = wrapper.find('[data-dashboard-logout]')
+      await logoutBtn.trigger('click')
+      await flushPromises()
+
+      // The ask dialog is now open with leave confirmation
+      const askDialog = wrapper.find<HTMLDialogElement>('dialog.db-dlg')
+      expect(askDialog.exists()).toBe(true)
+
+      // Click the "stay" button
+      const stayButton = wrapper.find('[data-dlg-btn="stay"]')
+      expect(stayButton.exists()).toBe(true)
+      await stayButton.trigger('click')
+      await flushPromises()
+
+      // Logout was aborted: session remains authenticated, login screen is NOT shown
+      expect((await getSession()).status).toBe('authenticated')
+      expect(wrapper.findComponent(DashboardLogin).exists()).toBe(false)
+      const logoutFetch = fetchCalls.find((c) => c.url.includes('/api/auth/logout'))
+      expect(logoutFetch).toBeUndefined()
+    } finally {
+      unregister()
+    }
   })
 })

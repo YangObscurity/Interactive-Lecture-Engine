@@ -466,6 +466,45 @@ describe('WP-2: Backend Authentication, Cookies, Passkeys, Hybrid, Me & Admin', 
         [challenge],
       )
       expect(checkChallenge.rows.length).toBe(0)
+
+      // REV1-6: Registering the same passkey credential twice returns HTTP 409
+      const optRes2 = await app.request('/api/me/passkeys/register/start', {
+        method: 'POST',
+        headers: { Cookie: `lec_session=${adminCookie}` },
+      })
+      expect(optRes2.status).toBe(200)
+      const { challenge: challenge2 } = (await optRes2.json()) as { challenge: string }
+
+      const clientDataJSON2 = Buffer.from(
+        JSON.stringify({
+          type: 'webauthn.create',
+          challenge: challenge2,
+          origin: 'http://localhost:8100',
+        }),
+        'utf8',
+      )
+
+      const dupVerifyRes = await app.request('/api/me/passkeys/register/finish', {
+        method: 'POST',
+        headers: {
+          Cookie: `lec_session=${adminCookie}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          id: credentialId.toString('base64url'),
+          rawId: credentialId.toString('base64url'),
+          response: {
+            clientDataJSON: clientDataJSON2.toString('base64url'),
+            attestationObject: attestationObject.toString('base64url'),
+          },
+          type: 'public-key',
+        }),
+      })
+
+      expect(dupVerifyRes.status).toBe(409)
+      const dupBody = (await dupVerifyRes.json()) as { error: string; message: string }
+      expect(dupBody.error).toBe('credential_already_registered')
+      expect(dupBody.message).toBe('This passkey credential is already registered')
     })
 
     it('authenticates with P-256 passkey signature and enforces anti-replay sign_count', async () => {
@@ -2290,6 +2329,64 @@ describe('WP-2: Backend Authentication, Cookies, Passkeys, Hybrid, Me & Admin', 
       const errBody = (await del2.json()) as { error: string; message: string }
       expect(errBody.error).toBe('cannot_remove_last_login_method')
       expect(errBody.message).toMatch(/disabled/i)
+    })
+
+    it('REV1-5: opportunistically prunes expired auth_challenges and auth_sessions on creation', async () => {
+      const memDb = createDb('pglite:memory')
+      await runMigrations(memDb)
+      const cfg = makeTestConfig({ authAdapter: 'local', authMethodsEnabled: 'password,passkey' })
+      const app = createApp(cfg, memDb)
+
+      const userId = 'u-prune-test'
+      await memDb.query(
+        `INSERT INTO auth_users (id, username, email, display_name, password_hash, roles)
+         VALUES ($1, 'prune_user', 'prune@example.com', 'Prune User', 'hash', '["reader"]'::jsonb)`,
+        [userId],
+      )
+
+      const sess = await createSessionRow(memDb, {
+        userId,
+        authMethod: 'password',
+        rememberMe: false,
+        sessionTtlHours: 1,
+        rememberMeDays: 1,
+      })
+
+      // Seed expired challenge and expired session
+      await memDb.query(
+        `INSERT INTO auth_challenges (challenge, kind, method, user_id, expires_at)
+         VALUES ('expired-ch-1', 'register', 'passkey', $1, NOW() - INTERVAL '1 hour')`,
+        [userId],
+      )
+      await memDb.query(
+        `INSERT INTO auth_sessions (id, user_id, token_hash, auth_method, remember_me, expires_at)
+         VALUES ('expired-sess-1', $1, 'expiredhash123', 'password', false, NOW() - INTERVAL '1 hour')`,
+        [userId],
+      )
+
+      const expChBefore = await memDb.query('SELECT challenge FROM auth_challenges WHERE challenge = $1', ['expired-ch-1'])
+      expect(expChBefore.rows).toHaveLength(1)
+      const expSessBefore = await memDb.query('SELECT id FROM auth_sessions WHERE id = $1', ['expired-sess-1'])
+      expect(expSessBefore.rows).toHaveLength(1)
+
+      // Creating new registration options prunes expired challenges
+      await app.request('/api/me/passkeys/register/start', {
+        method: 'POST',
+        headers: { Cookie: `lec_session=${sess.rawToken}` },
+      })
+      const expChAfter = await memDb.query('SELECT challenge FROM auth_challenges WHERE challenge = $1', ['expired-ch-1'])
+      expect(expChAfter.rows).toHaveLength(0)
+
+      // Creating a new session prunes expired sessions
+      await createSessionRow(memDb, {
+        userId,
+        authMethod: 'password',
+        rememberMe: false,
+        sessionTtlHours: 1,
+        rememberMeDays: 1,
+      })
+      const expSessAfter = await memDb.query('SELECT id FROM auth_sessions WHERE id = $1', ['expired-sess-1'])
+      expect(expSessAfter.rows).toHaveLength(0)
     })
   })
 })

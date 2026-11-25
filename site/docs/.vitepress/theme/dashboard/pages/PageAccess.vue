@@ -379,7 +379,7 @@ async function save(): Promise<boolean> {
       touchModels()
       return true
     }
-    feedback.value = res.error || 'Failed to save access tiers'
+    feedback.value = res.error || t('dsh.ac.saveFailed')
     feedbackError.value = true
     return false
   } finally {

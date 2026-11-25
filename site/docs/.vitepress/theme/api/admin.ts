@@ -351,6 +351,7 @@ export function isAdminError<T>(res: AdminApiResult<T>): res is { ok: false; err
 
 export const DEFAULT_ADMIN_TIMEOUT_MS = 30_000
 export const DB_ADMIN_TIMEOUT_MS = 65_000
+export const SWITCH_ADMIN_TIMEOUT_MS = 95_000
 export const TRANSFER_ADMIN_TIMEOUT_MS = 130_000
 
 export function formatAdminError(err: AdminApiError | unknown): string {
@@ -1007,7 +1008,7 @@ export function switchDb(
   },
   fetchImpl?: typeof fetch,
 ): Promise<AdminApiResult<DbSwitchResponse>> {
-  return adminFetch<DbSwitchResponse>('POST', '/api/admin/db/switch', payload, fetchImpl, 95_000)
+  return adminFetch<DbSwitchResponse>('POST', '/api/admin/db/switch', payload, fetchImpl, SWITCH_ADMIN_TIMEOUT_MS)
 }
 
 export function transferDb(
