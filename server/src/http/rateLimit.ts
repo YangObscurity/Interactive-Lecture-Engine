@@ -271,7 +271,11 @@ export class FailedLoginBackoff {
   recordFailure(key: string): void {
     const t = this.now()
     let entry = this.entries.get(key)
-    if (!entry || t - entry.lastFailAt >= this.resetAfterMs) {
+    if (entry && t - entry.lastFailAt >= this.resetAfterMs) {
+      this.entries.delete(key)
+      entry = undefined
+    }
+    if (!entry) {
       if (this.entries.size >= this.maxEntries) {
         const oldest = this.entries.keys().next().value
         if (oldest !== undefined) this.entries.delete(oldest)

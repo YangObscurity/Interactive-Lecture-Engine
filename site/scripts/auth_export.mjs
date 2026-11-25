@@ -33,6 +33,7 @@ function usage() {
     '  --format authelia|nginx     Output format (default: authelia)',
     '  --domain <host>             Domain for the Authelia rules (REQUIRED for authelia: rules without domain are rejected)',
     '  --admin-groups <a,b>        Comma-separated gateway admin groups (default: admins,admin)',
+    '  --author-groups <a,b>       Comma-separated gateway author groups (default: authors,author)',
     '  --factor one_factor|two_factor  Authentication level for non-public rules (default: two_factor)',
     '  --access-json <json>        Override lecture.config access block (or LECTURE_ACCESS_JSON)',
     '  --build-groups <ids>        Limit groups (or LECTURE_BUILD_GROUPS)',
@@ -69,6 +70,7 @@ export async function generateAuthExport(opts = {}, env = process.env) {
     groups,
     localeKeys,
     ...(opts.adminGroups ? { adminGroups: opts.adminGroups } : {}),
+    ...(opts.authorGroups ? { authorGroups: opts.authorGroups } : {}),
     ...(opts.domain ? { domain: opts.domain } : {}),
     ...(opts.factor ? { factor: opts.factor } : {}),
   }

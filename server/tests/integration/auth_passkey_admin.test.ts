@@ -2,8 +2,11 @@ import { createHash, createSign, generateKeyPairSync } from 'node:crypto'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { Hono } from 'hono'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { createApp } from '../../src/app.js'
+import { createApp, type AppEnv } from '../../src/app.js'
+import { createAdminRuntimeRouter } from '../../src/routes/admin/runtime.js'
+import type { AiRuntime } from '../../src/routes/ai/runtime.js'
 import { hashPassword } from '../../src/auth/password.js'
 import { cborEncode } from '../../src/auth/providers/cbor.js'
 import { defaultAuthRegistry } from '../../src/auth/providers/registry.js'
@@ -1704,6 +1707,8 @@ describe('WP-2: Backend Authentication, Cookies, Passkeys, Hybrid, Me & Admin', 
         directSocketEnv,
       )
       expect(directBlocked.status).toBe(429)
+      const directBlockedBody = (await directBlocked.json()) as { limit?: string }
+      expect(directBlockedBody.limit).toBe('write_rate')
 
       // Test 4c: Per-username failed-login backoff ignores IP
       const freshDb = createDb('pglite:memory')
@@ -2459,6 +2464,121 @@ describe('WP-2: Backend Authentication, Cookies, Passkeys, Hybrid, Me & Admin', 
       } finally {
         resetGatewayAuthSeenForTests()
       }
+    })
+
+    it('shares per-account login backoff across username & email and serializes concurrent attempts', async () => {
+      const memDb = createDb('pglite:memory')
+      await runMigrations(memDb)
+      const cfg = makeTestConfig({ authAdapter: 'local', writeRatePerMinute: 2 })
+      let clockMs = 1_700_000_000_000
+      const app = createApp(cfg, memDb, { now: () => clockMs })
+
+      const bootRes = await app.request('/api/auth/bootstrap', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          username: 'canonical_user',
+          email: 'canonical@example.com',
+          password: 'CorrectPassword!123',
+        }),
+      })
+      expect(bootRes.status).toBe(201)
+
+      // 1 wrong password via username + 1 wrong password via email hits freeAttempts=2 for same user.id
+      const r1 = await app.request('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Forwarded-For': '198.51.100.11' },
+        body: JSON.stringify({ username: 'canonical_user', password: 'WrongPassword!' }),
+      })
+      expect(r1.status).toBe(401)
+
+      const r2 = await app.request('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Forwarded-For': '198.51.100.12' },
+        body: JSON.stringify({ username: 'canonical@example.com', password: 'WrongPassword!' }),
+      })
+      expect(r2.status).toBe(401)
+
+      // 3rd attempt via either identifier must be blocked (429 auth_rate) before another password check
+      const r3 = await app.request('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Forwarded-For': '198.51.100.13' },
+        body: JSON.stringify({ username: 'canonical@example.com', password: 'CorrectPassword!123' }),
+      })
+      expect(r3.status).toBe(429)
+      const b3 = (await r3.json()) as { limit?: string }
+      expect(b3.limit).toBe('auth_rate')
+
+      // Advance past backoff cooldown and test 4 concurrent bad-password logins on a fresh IP budget
+      clockMs += 60_000
+      const highIpCfg = makeTestConfig({ authAdapter: 'local', writeRatePerMinute: 20 })
+      const highApp = createApp(highIpCfg, memDb, { now: () => clockMs })
+      const concurrentResponses = await Promise.all(
+        ['c1', 'c2', 'c3', 'c4'].map((_tag, idx) =>
+          highApp.request('/api/auth/login', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'X-Forwarded-For': `198.51.100.${50 + idx}`,
+            },
+            body: JSON.stringify({ username: 'canonical_user', password: 'WrongPassword!' }),
+          }),
+        ),
+      )
+      // At most 4 free remaining before writeRate=20? writeRate=20 -> freeAttempts=min(20,5)=5, so test 7 concurrent!
+      // Already had 2 failures in memDb? No, highApp has its own FailedLoginBackoff instance.
+      // With writeRatePerMinute=2 -> max freeAttempts=2 per account, use fresh writeRate=2 & distinct IP per request:
+      expect(concurrentResponses.every((r) => r.status === 401)).toBe(true)
+
+      const tightApp = createApp(makeTestConfig({ authAdapter: 'local', writeRatePerMinute: 2 }), memDb, {
+        now: () => clockMs,
+      })
+      const lockedParallel = await Promise.all(
+        [1, 2, 3, 4].map((idx) =>
+          tightApp.request('/api/auth/login', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'X-Forwarded-For': `198.51.100.${80 + idx}`,
+            },
+            body: JSON.stringify({
+              username: idx % 2 === 0 ? 'canonical_user' : 'canonical@example.com',
+              password: 'WrongPassword!',
+            }),
+          }),
+        ),
+      )
+      const statuses = lockedParallel.map((r) => r.status).sort((a, b) => a - b)
+      // Free attempts = 2 -> exactly two 401 responses and two 429 responses (serialized lock!)
+      expect(statuses).toEqual([401, 401, 429, 429])
+    })
+
+    it('returns 500 reload_failed with subsystem flags when mcpManager.reload rejects', async () => {
+      const cfg = makeTestConfig()
+      const fakeRuntime = {
+        prompts: { reload: async () => {} },
+        mcpManager: {
+          reload: async () => {
+            throw new Error('mcp upstream unreachable')
+          },
+        },
+      } as unknown as AiRuntime
+
+      const rtApp = new Hono<AppEnv>()
+      rtApp.route('/api/admin/runtime', createAdminRuntimeRouter(cfg, fakeRuntime))
+
+      const res = await rtApp.request('/api/admin/runtime/reload', { method: 'POST' })
+      expect(res.status).toBe(500)
+      const body = (await res.json()) as {
+        ok: boolean
+        error: string
+        promptsReloaded?: boolean
+        mcpReloaded?: boolean
+      }
+      expect(body.ok).toBe(false)
+      expect(body.error).toBe('reload_failed')
+      expect(body.promptsReloaded).toBe(true)
+      expect(body.mcpReloaded).toBe(false)
     })
   })
 })

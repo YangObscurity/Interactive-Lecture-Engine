@@ -158,7 +158,7 @@ DATABASE_URL=pglite:./data/pglite-db DB_AUTO_MIGRATE=true npm run dev
 3. **公开与透传接口清空身份头**：
    - 对于不走认证网关的公开接口（如 `/api/health`），或 `hybrid` 模式下直接透传给内置账号登录使用的接口，Nginx 必须显式将所有身份头设置为空串（如 `proxy_set_header Remote-User "";`），阻断非法身份注入。
 
-参考部署模板位于 `server/deploy/nginx-locations.conf`（覆盖 `/api/db`、`/api/admin`、`/api/auth/session`、`/api/health`、`/api/ai`、`/api/tools`、`/api/mcp`、`/api/progress`、`/api/notion`、`/api/tool`，由 `tests/unit/nginx-template.test.ts` 约束）与 `server/deploy/lecture-api.service`。使用 `local` / `hybrid` 在线登录时，请同步转发 `/api/auth/` 与 `/api/me/` 并按网关策略覆盖或清空身份请求头。完整拓扑、方案 B 切换步骤与回滚见 `docs-dev/GATEWAY.md`；上线后用 `node scripts/check_header_spoof.mjs <站点URL>` 验证身份头无法伪造。
+参考部署模板位于 `server/deploy/nginx-locations.conf`（覆盖 `/api/db`、`/api/admin`、`/api/auth/session`、`/api/auth/`、`/api/me/`、`/api/health`、`/api/ai`、`/api/tools`、`/api/mcp`、`/api/progress`、`/api/notion`、`/api/tool`，由 `tests/unit/nginx-template.test.ts` 约束）与 `server/deploy/lecture-api.service`。使用 `local` / `hybrid` 在线登录时，请同步转发 `/api/auth/` 与 `/api/me/` 并按网关策略覆盖或清空身份请求头。完整拓扑、方案 B 切换步骤与回滚见 `docs-dev/GATEWAY.md`；上线后用 `node scripts/check_header_spoof.mjs <站点URL>` 验证身份头无法伪造。
 
 ---
 

@@ -262,4 +262,34 @@ describe('Server companion prompt validation & assembly (WP-F7)', () => {
     )
     expect(store.require().version).toBe(5)
   })
+
+  it('discards stale dbLoader result when reload() advances generation mid-flight', async () => {
+    const promptsA: CompanionPromptsFile = {
+      ...VALID_PROMPTS,
+      version: 10,
+      system: { zh: '旧数据库 A', en: 'Stale DB A' },
+    }
+    const promptsB: CompanionPromptsFile = {
+      ...VALID_PROMPTS,
+      version: 11,
+      system: { zh: '最新 B', en: 'Fresh B' },
+    }
+
+    let releaseDbLoad!: (value: CompanionPromptsFile | null) => void
+    const store = createServerPromptStore({ aiProvider: 'dify', aiPromptsFile: '/nonexistent-prompts.json' })
+    store.setDbLoader(
+      () =>
+        new Promise<CompanionPromptsFile | null>((resolve) => {
+          releaseDbLoad = resolve
+        }),
+    )
+
+    const pendingLoad = store.load()
+    await store.reload(promptsB)
+    releaseDbLoad(promptsA)
+
+    const loaded = await pendingLoad
+    expect(loaded).toEqual(promptsB)
+    expect(store.require()).toEqual(promptsB)
+  })
 })

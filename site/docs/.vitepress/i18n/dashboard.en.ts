@@ -917,6 +917,7 @@ export const dashboardEn: Record<keyof typeof dashboardZhCN, string> = {
   'dsh.db.errInvalidJson': 'Column {col} must be valid JSON',
   'dsh.db.errInvalidInt': 'Column {col} must be a valid integer (and cannot be blank)',
   'dsh.db.errTargetUrlRequired': 'Target DATABASE_URL is required',
+  'dsh.db.errSwitchUnknownOutcome': 'Database switch did not return confirmation ({error}); refreshed current engine status above — verify the active database before retrying.',
   'dsh.login.passwordDisabledHint': 'Local password sign-in is disabled by server configuration. Use Passkey or gateway SSO instead.',
   'dsh.me.methodPassword': 'Local password',
   'dsh.me.methodPasskey': 'Passkey',

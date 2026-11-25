@@ -648,10 +648,14 @@ function isTransferTimeoutError(err: unknown): boolean {
   return getPgErrorCode(err) === '57014'
 }
 
-function makeDeadlineGuard(timeoutMs: number, phase: string): () => number {
-  const deadlineMs = Date.now() + timeoutMs
+function makeDeadlineGuard(
+  timeoutMs: number,
+  phase: string,
+  now: () => number = Date.now,
+): () => number {
+  const deadlineMs = now() + timeoutMs
   return () => {
-    const rem = deadlineMs - Date.now()
+    const rem = deadlineMs - now()
     if (rem <= 0) {
       throw new TransferTimeoutError(`${phase} timed out after ${timeoutMs}ms`)
     }
@@ -671,6 +675,7 @@ async function applyPgStatementTimeout(
 
 export interface AdminDbRouterOptions {
   transferWriteTimeoutMs?: number
+  now?: () => number
   onActiveDataMutated?: () => Promise<void> | void
 }
 
@@ -681,6 +686,7 @@ export function createAdminDbRouter(
   const router = new Hono<AppEnv>()
   const activeDb = dbManager.asDb()
   const transferWriteTimeoutMs = options?.transferWriteTimeoutMs ?? MIGRATION_TIMEOUT_MS * 2
+  const now = options?.now ?? Date.now
 
   // 1. GET /config — inspect current DB engine config, migrations, and table counts
   router.get('/config', async (c) => {
@@ -1139,6 +1145,35 @@ export function createAdminDbRouter(
             )
             migrationsApplied = migRes.applied
           }
+        } else {
+          const checkDb =
+            targetDirectUrl !== null &&
+            canonicalDbTarget(targetDirectUrl) !== canonicalDbTarget(targetUrl)
+              ? createProbeDb(targetDirectUrl)
+              : null
+          try {
+            const migStatus = await withTimeout(
+              getMigrationStatus(checkDb ?? probeDb),
+              CONNECTION_TIMEOUT_MS,
+              'Switch migration check',
+            )
+            if (migStatus.applied.length === 0 || migStatus.pending.length > 0) {
+              return c.json(
+                {
+                  ok: false,
+                  error: 'target_not_migrated',
+                  message: `Target database is missing required schema migrations (${migStatus.pending.length} pending)`,
+                  migrationsApplied: migStatus.applied.length,
+                  migrationsPending: migStatus.pending.map((m) => m.filename),
+                },
+                409,
+              )
+            }
+          } finally {
+            if (checkDb) {
+              await checkDb.close().catch(() => {})
+            }
+          }
         }
 
         if (isPgUrl(targetUrl)) {
@@ -1368,6 +1403,7 @@ export function createAdminDbRouter(
           const assertSourceDeadline = makeDeadlineGuard(
             MIGRATION_TIMEOUT_MS,
             'Transfer source snapshot',
+            now,
           )
           if (sourceKind === 'pg') {
             await srcTx.query('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY')
@@ -1405,6 +1441,7 @@ export function createAdminDbRouter(
             const assertWriteDeadline = makeDeadlineGuard(
               transferWriteTimeoutMs,
               'Transfer write',
+              now,
             )
             for (const table of TRANSFER_TABLES) {
               assertWriteDeadline()

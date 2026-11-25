@@ -1670,4 +1670,52 @@ describe('WP-4 PageDatabase.vue', () => {
 
     wrapper.unmount()
   })
+
+  it('refreshes current database status and warns when live switch request fails or times out', async () => {
+    let configCalls = 0
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = typeof input === 'string' ? input : input.toString()
+        const method = (init?.method ?? 'GET').toUpperCase()
+        if (url === '/api/admin/db/config' && method === 'GET') {
+          configCalls += 1
+          return jsonRes({
+            ok: true,
+            kind: configCalls >= 2 ? 'pg' : 'pglite',
+            databaseUrl: configCalls >= 2 ? 'postgres://user:***@db.example/prod' : 'pglite:./data/pglite',
+            databaseUrlDirect: null,
+            pgliteDir: './data/pglite',
+            envFilePath: 'server/.env',
+            envWritable: true,
+            migrations: { applied: 4, pending: 0, total: 4 },
+            tableCounts: { progress: configCalls >= 2 ? 12 : 3 },
+          })
+        }
+        if (url === '/api/admin/db/tables' && method === 'GET') {
+          return jsonRes({ ok: true, tables: [] })
+        }
+        if (url === '/api/admin/db/switch' && method === 'POST') {
+          return jsonRes({ ok: false, error: 'timeout', message: 'Request timed out' }, 504)
+        }
+        return jsonRes({ ok: false, error: 'unexpected_url' }, 404)
+      }),
+    )
+
+    const wrapper = mount(PageDatabase)
+    await flushPromises()
+    expect(wrapper.text()).toContain('pglite')
+
+    await wrapper.get('[data-db-preset-neon]').trigger('click')
+    await wrapper.get('[data-db-target-url]').setValue('postgres://user:pass@db.example/prod')
+    await wrapper.get('[data-db-switch-btn]').trigger('click')
+    await wrapper.get('[data-db-confirm-switch]').trigger('click')
+    await flushPromises()
+
+    expect(configCalls).toBe(2)
+    expect(wrapper.text()).toContain('postgres://user:***@db.example/prod')
+    expect(wrapper.find('[data-db-error]').exists()).toBe(true)
+
+    wrapper.unmount()
+  })
 })

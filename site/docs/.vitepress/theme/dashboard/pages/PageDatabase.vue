@@ -343,7 +343,13 @@ async function onSwitchCheck(dryRun: boolean): Promise<void> {
   engineBusy.value = false
   pendingSwitchConfirm.value = false
   if (!isAdminOk(res)) {
-    errorMessage.value = isAdminError(res) ? mapDbError(res.error) : 'unknown_error'
+    const errText = isAdminError(res) ? mapDbError(res.error) : 'unknown_error'
+    if (!dryRun) {
+      await loadInitial()
+      errorMessage.value = t('dsh.db.errSwitchUnknownOutcome', { error: errText })
+    } else {
+      errorMessage.value = errText
+    }
     return
   }
   const sw = res.data

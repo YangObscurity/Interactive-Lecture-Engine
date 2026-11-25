@@ -570,7 +570,14 @@ export function createProgressStore(deps: ProgressStoreDeps): ProgressStore {
     for (const op of due) inflight.add(op.id)
     sync = 'sending'
     notifySync()
+    if (epoch !== myEpoch || flushToken !== myFlushToken) {
+      for (const op of due) inflight.delete(op.id)
+      scheduleRetry()
+      settleSyncState(null)
+      return
+    }
 
+    const sentOwner = state.owner
     const ac = new AbortController()
     activeControllers.add(ac)
     let result: Awaited<ReturnType<ProgressBackend['send']>>
@@ -588,7 +595,13 @@ export function createProgressStore(deps: ProgressStoreDeps): ProgressStore {
     }
 
     for (const op of due) inflight.delete(op.id)
-    if (refresh()) emit({ kind: 'reset' })
+    if (refresh()) {
+      if (state.owner !== sentOwner) {
+        handleCrossTabOwnerChange()
+        return
+      }
+      emit({ kind: 'reset' })
+    }
 
     const sentIds = new Set(due.map((op) => op.id))
     if (result.ok) {
@@ -844,6 +857,20 @@ export function createProgressStore(deps: ProgressStoreDeps): ProgressStore {
     notifySync()
   }
 
+  function handleCrossTabOwnerChange(): void {
+    const wasReady = ready
+    resetBoundary({ established: state.owner !== null ? `user:${state.owner}` : 'anon' })
+    if (!wasReady) {
+      loading = doLoad()
+    }
+    if (
+      latestSubSession?.status === 'authenticated' &&
+      latestSubSession.user.id === state.owner
+    ) {
+      scheduleRetry()
+    }
+  }
+
   function onSessionChange(s: SessionState): void {
     if (s.status !== 'authenticated' && !(s.status === 'anonymous' && s.source === 'server')) {
       return
@@ -903,7 +930,7 @@ export function createProgressStore(deps: ProgressStoreDeps): ProgressStore {
       const prevOwner = state.owner
       if (refresh()) {
         if (state.owner !== prevOwner) {
-          resetBoundary({ established: state.owner !== null ? `user:${state.owner}` : 'anon' })
+          handleCrossTabOwnerChange()
         } else {
           emit({ kind: 'reset' })
           notifySync()

@@ -219,6 +219,29 @@ export function createAuthRouter(
 ): Hono<AppEnv> {
   const router = new Hono<AppEnv>()
   const failedUserBackoff = new FailedLoginBackoff(Math.min(config.writeRatePerMinute, 5), now)
+  const loginLocks = new Map<string, Promise<void>>()
+
+  async function withLoginLock<T>(lockKey: string, fn: () => Promise<T>): Promise<T> {
+    const prev = loginLocks.get(lockKey) ?? Promise.resolve()
+    let release!: () => void
+    const current = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const tail = prev.then(
+      () => current,
+      () => current,
+    )
+    loginLocks.set(lockKey, tail)
+    try {
+      await prev
+      return await fn()
+    } finally {
+      release()
+      if (loginLocks.get(lockKey) === tail) {
+        loginLocks.delete(lockKey)
+      }
+    }
+  }
 
   // 1. GET /status — extended session status
   router.get('/status', async (c) => {
@@ -425,11 +448,6 @@ export function createAuthRouter(
     }
 
     const normUser = username.toLowerCase().slice(0, 64)
-    const backoff = failedUserBackoff.check(normUser)
-    if (!backoff.ok) {
-      throw rateLimited('auth_rate', backoff.retryAfterSec)
-    }
-
     const userRes = await db.query<{
       id: string
       username: string
@@ -447,35 +465,50 @@ export function createAuthRouter(
       [username],
     )
 
-    if (userRes.rowCount === 0 || !userRes.rows[0]) {
-      await dummyVerifyPassword()
-      failedUserBackoff.recordFailure(normUser)
+    const user = userRes.rowCount > 0 ? userRes.rows[0] : undefined
+    const backoffKey = user ? `user:${user.id}` : `ident:${normUser}`
+
+    const authOutcome = await withLoginLock(backoffKey, async () => {
+      const backoff = failedUserBackoff.check(backoffKey)
+      if (!backoff.ok) {
+        throw rateLimited('auth_rate', backoff.retryAfterSec)
+      }
+
+      if (!user) {
+        await dummyVerifyPassword()
+        failedUserBackoff.recordFailure(backoffKey)
+        return { ok: false as const, reason: 'invalid' as const }
+      }
+
+      const valid = await verifyPassword(password, user.password_hash)
+      if (!valid) {
+        failedUserBackoff.recordFailure(backoffKey)
+        return { ok: false as const, reason: 'invalid' as const }
+      }
+
+      if (user.disabled) {
+        return { ok: false as const, reason: 'disabled' as const }
+      }
+
+      failedUserBackoff.reset(backoffKey)
+      return { ok: true as const, user }
+    })
+
+    if (!authOutcome.ok) {
+      if (authOutcome.reason === 'disabled') {
+        return c.json({ error: 'account_disabled', message: 'Account has been disabled' }, 403)
+      }
       return c.json(
         { error: 'invalid_credentials', message: 'Invalid username or password' },
         401,
       )
     }
 
-    const user = userRes.rows[0]
-    const valid = await verifyPassword(password, user.password_hash)
-    if (!valid) {
-      failedUserBackoff.recordFailure(normUser)
-      return c.json(
-        { error: 'invalid_credentials', message: 'Invalid username or password' },
-        401,
-      )
-    }
-
-    if (user.disabled) {
-      return c.json({ error: 'account_disabled', message: 'Account has been disabled' }, 403)
-    }
-
-    failedUserBackoff.reset(normUser)
-
-    await db.query(`UPDATE auth_users SET last_login_at = NOW() WHERE id = $1`, [user.id])
+    const authenticatedUser = authOutcome.user
+    await db.query(`UPDATE auth_users SET last_login_at = NOW() WHERE id = $1`, [authenticatedUser.id])
 
     const sess = await createSessionRow(db, {
-      userId: user.id,
+      userId: authenticatedUser.id,
       authMethod: 'password',
       rememberMe,
       userAgent: c.req.header('user-agent'),
@@ -492,7 +525,7 @@ export function createAuthRouter(
     })
     c.header('Set-Cookie', cookie)
 
-    const roles = parseStoredRoles(user.roles)
+    const roles = parseStoredRoles(authenticatedUser.roles)
 
     const canAccessAdmin = roles.includes('admin')
     const canAccessAuthor = canAccessAdmin || roles.includes('author')
@@ -502,10 +535,10 @@ export function createAuthRouter(
         ok: true,
         authenticated: true,
         user: {
-          id: user.id,
-          username: user.username,
-          name: user.display_name || user.username,
-          email: user.email,
+          id: authenticatedUser.id,
+          username: authenticatedUser.username,
+          name: authenticatedUser.display_name || authenticatedUser.username,
+          email: authenticatedUser.email,
         },
         roles,
         groups: [],

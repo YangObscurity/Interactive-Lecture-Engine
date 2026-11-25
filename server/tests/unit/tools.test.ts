@@ -13,6 +13,8 @@ import {
   resolveReadableTiers,
   verifyToolTicket,
 } from '../../src/tools/index.js'
+import { ExternalMcpManager } from '../../src/tools/mcpClients.js'
+import type { MCPClient } from '@ai-sdk/mcp'
 import type {
   ConceptGraphResult,
   ConceptRecord,
@@ -378,5 +380,87 @@ describe('Tools engine module (WP-K2 Item 1)', () => {
 
     const explicit = await resolveAiToolsFilePath('/tmp/custom-ai-tools.json')
     expect(explicit).toBe('/tmp/custom-ai-tools.json')
+  })
+
+  it('guards ExternalMcpManager against stale DB loads and mismatched in-flight connections on reload', async () => {
+    const engine = makeEngine()
+    const makeCfg = (url: string, enabled: boolean) => ({
+      version: 1 as const,
+      engineTools: {},
+      mcpServers: [
+        {
+          id: 'srv1',
+          name: 'Server 1',
+          enabled,
+          transport: 'http' as const,
+          url,
+          headerEnv: {},
+          tools: { ping: { enabled: true } },
+        },
+      ],
+    })
+
+    let releaseOldConnect!: () => void
+    const closedUrls: string[] = []
+    const connectCalls: string[] = []
+
+    const mgr = new ExternalMcpManager(
+      { aiToolsFile: null, aiToolTimeoutMs: 5000 },
+      engine,
+      {
+        createClient: async (srv) => {
+          connectCalls.push(srv.url)
+          if (srv.url === 'https://old.example.com/mcp') {
+            await new Promise<void>((r) => {
+              releaseOldConnect = r
+            })
+          }
+          return {
+            tools: async () => ({
+              ping: {
+                description: `ping from ${srv.url}`,
+                parameters: {},
+                execute: async () => ({ ok: true, from: srv.url }),
+              },
+            }),
+            close: async () => {
+              closedUrls.push(srv.url)
+            },
+          } as unknown as MCPClient
+        },
+      },
+    )
+
+    // 1. Stale DB load cannot overwrite a newer explicit config override
+    let releaseStaleDb!: (cfg: ReturnType<typeof makeCfg> | null) => void
+    mgr.setDbConfigLoader(
+      () =>
+        new Promise((resolve) => {
+          releaseStaleDb = resolve
+        }),
+    )
+    const pendingDbLoad = mgr.loadConfig()
+    await mgr.applyConfigOverride(makeCfg('https://fresh.example.com/mcp', false))
+    releaseStaleDb(makeCfg('https://old.example.com/mcp', true))
+    const resolvedCfg = await pendingDbLoad
+    expect(resolvedCfg.mcpServers[0]?.enabled).toBe(false)
+    expect(resolvedCfg.mcpServers[0]?.url).toBe('https://fresh.example.com/mcp')
+
+    // 2. Signature mismatch during in-flight connection waits & never leaks old client tools
+    await mgr.applyConfigOverride(makeCfg('https://old.example.com/mcp', true))
+    const oldToolsPromise = mgr.getEnabledSdkTools('u1', 'native')
+    await new Promise((r) => setTimeout(r, 10))
+    expect(connectCalls).toEqual(['https://old.example.com/mcp'])
+
+    await mgr.applyConfigOverride(makeCfg('https://new.example.com/mcp', true))
+    const newToolsPromise = mgr.getEnabledSdkTools('u1', 'native')
+    releaseOldConnect()
+
+    const [oldTools, newTools] = await Promise.all([oldToolsPromise, newToolsPromise])
+    expect(Object.keys(oldTools)).toEqual([])
+    expect(Object.keys(newTools)).toEqual(['ping'])
+    expect(newTools.ping?.description).toBe('ping from https://new.example.com/mcp')
+    expect(closedUrls).toContain('https://old.example.com/mcp')
+    await mgr.closeAll()
   })
 })

@@ -1067,3 +1067,96 @@ describe('completedAtOf', () => {
     expect(r.store.completedAtOf('g01-l07')).toBeNull()
   })
 })
+
+describe('concurrency and cross-tab boundaries', () => {
+  it('aborts dispatch before calling backend.send if a sync listener resets inside notifySync', async () => {
+    const r = rig()
+    await r.store.load()
+    r.store.set('g01-l01', 'completed')
+    const off = r.store.subscribeSync(() => {
+      if (r.store.syncState() === 'sending') {
+        r.store.reset()
+      }
+    })
+    await r.store.flush()
+    off()
+    expect(r.backend.sent).toHaveLength(0)
+    expect(r.store.pending()).toBe(0)
+  })
+
+  it('drops in-flight send result when another tab switched storage owner before response arrived', async () => {
+    const dSend = deferred<SendResult>()
+    const r = rig({ backend: new ScriptedBackend('rest', undefined) })
+    r.backend.fetchAllResults.push({ ok: true, records: [], serverDate: null, unfilteredGet: true })
+    await r.store.load()
+    r.publishSession({
+      status: 'authenticated',
+      user: { id: 'alice', name: 'Alice', email: null },
+      roles: ['reader'],
+      groups: [],
+      logoutUrl: null,
+    })
+    await settle(5)
+
+    r.backend.sendResults.push(dSend.promise)
+    r.store.set('g01-l01', 'completed')
+    const fl = r.store.flush()
+    await settle(5)
+
+    // Tab B writes Bob's state to storage before Tab A receives storage event
+    persisted(r.storage, {
+      owner: 'bob',
+      server: serverOf(rec('g01-l09', 'completed')),
+      outbox: [op('g01-l02', 'in_progress', r.clock.t, { nextAt: r.clock.t + 60_000 })],
+    })
+
+    dSend.resolve({
+      ok: true,
+      records: [rec('g01-l01', 'completed', { completedAt: '2026-11-25T00:00:00.000Z' })],
+      serverDate: null,
+    })
+    await fl
+
+    expect(r.store.snapshot().owner).toBe('bob')
+    expect(r.store.statusOf('g01-l01')).toBe('not_started')
+    expect(r.store.statusOf('g01-l09')).toBe('completed')
+  })
+
+  it('onStorage owner change restarts unfinished initial load and schedules retry for matching authenticated session', async () => {
+    const sessionGate = deferred<SessionState>()
+    const bob: SessionState = {
+      status: 'authenticated',
+      user: { id: 'bob', name: 'Bob', email: null },
+      roles: ['reader'],
+      groups: [],
+      logoutUrl: null,
+    }
+    const r = rig({
+      getSession: () => sessionGate.promise,
+    })
+    persisted(r.storage, { owner: 'alice' })
+    r.backend.fetchAllResults.push({ ok: true, records: [rec('g01-l09', 'completed')], serverDate: null, unfilteredGet: true })
+    r.backend.fetchAllResults.push({ ok: true, records: [rec('g01-l09', 'completed')], serverDate: null, unfilteredGet: true })
+
+    const loadP = r.store.load()
+    r.publishSession(bob)
+    await settle(5)
+    expect(r.store.isReady()).toBe(false)
+
+    // Another tab updates storage to owner bob with a delayed outbox op before first load finishes
+    persisted(r.storage, {
+      owner: 'bob',
+      outbox: [op('g01-l02', 'completed', r.clock.t, { nextAt: r.clock.t + 60_000 })],
+    })
+    r.target.dispatchEvent(Object.assign(new Event('storage'), { key: KEY }))
+
+    expect(r.scheduler.timers.length).toBeGreaterThanOrEqual(1)
+    sessionGate.resolve(bob)
+    await settle(5)
+    await r.store.load()
+    await loadP
+
+    expect(r.store.isReady()).toBe(true)
+    expect(r.store.statusOf('g01-l09')).toBe('completed')
+  })
+})

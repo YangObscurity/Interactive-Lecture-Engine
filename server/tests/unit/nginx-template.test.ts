@@ -50,10 +50,12 @@ describe('server/deploy/nginx-locations.conf', () => {
 
   it('parses a plausible set of locations', () => {
     const heads = locations.map((l) => l.head)
-    for (const h of ['/api/db/', '/api/admin/', '= /api/auth/session', '= /api/health', '/api/ai/', '/api/tools/', '= /api/mcp', '/api/progress/', '/api/notion/', '/api/tool/']) {
+    for (const h of ['/api/db/', '/api/admin/', '= /api/auth/session', '/api/auth/', '/api/me/', '= /api/health', '/api/ai/', '/api/tools/', '= /api/mcp', '/api/progress/', '/api/notion/', '/api/tool/']) {
       expect(heads, h).toContain(h)
     }
-    expect(proxying.length).toBeGreaterThanOrEqual(10)
+    const adminLoc = locations.find((l) => l.head === '/api/admin/')
+    expect(adminLoc?.body).toMatch(/client_max_body_size\s+256k/)
+    expect(proxying.length).toBeGreaterThanOrEqual(12)
   })
 
   it('overrides all four Remote-* headers in every location that proxies to 8100 or 8099', () => {

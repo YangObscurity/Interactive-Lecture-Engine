@@ -538,6 +538,7 @@ export function createServerPromptStore(
   let cachedPrompts: CompanionPromptsFile | null = null
   let overridePrompts: CompanionPromptsFile | null = null
   let dbLoader: (() => Promise<CompanionPromptsFile | null>) | null = null
+  let cacheGeneration = 0
 
   const refreshIfNeeded = (): CompanionPromptsFile | null => {
     if (overridePrompts !== null) {
@@ -576,15 +577,20 @@ export function createServerPromptStore(
       return overridePrompts
     }
     if (dbLoader) {
+      const generation = cacheGeneration
+      let loadedFromDb: CompanionPromptsFile | null = null
       try {
-        const loadedFromDb = await dbLoader()
-        if (loadedFromDb) {
-          overridePrompts = loadedFromDb
-          cachedPrompts = loadedFromDb
-          return loadedFromDb
-        }
+        loadedFromDb = await dbLoader()
       } catch {
         // ignore and fall back
+      }
+      if (generation !== cacheGeneration) {
+        return load()
+      }
+      if (loadedFromDb) {
+        overridePrompts = loadedFromDb
+        cachedPrompts = loadedFromDb
+        return loadedFromDb
       }
     }
     return refreshIfNeeded()
@@ -611,6 +617,7 @@ export function createServerPromptStore(
     },
     load,
     async reload(prompts?: CompanionPromptsFile | null) {
+      cacheGeneration += 1
       if (prompts !== undefined && prompts !== null) {
         overridePrompts = prompts
         cachedPrompts = prompts

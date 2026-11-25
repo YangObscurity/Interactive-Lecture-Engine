@@ -24,17 +24,30 @@ export function createAdminRuntimeRouter(config: AppConfig, aiRuntime?: AiRuntim
 
   router.post('/reload', async (c) => {
     c.header('Cache-Control', 'no-store')
+    let promptsReloaded = false
+    let mcpReloaded = false
     try {
       await aiRuntime?.prompts?.reload()
-      await aiRuntime?.mcpManager?.reload().catch(() => {})
+      promptsReloaded = true
+      await aiRuntime?.mcpManager?.reload()
+      mcpReloaded = true
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
       serverLogBuffer.add({
         level: 'error',
         category: 'error',
-        message: `Runtime reload failed: ${msg}`,
+        message: `Runtime reload failed (promptsReloaded=${String(promptsReloaded)}, mcpReloaded=${String(mcpReloaded)}): ${msg}`,
       })
-      return c.json({ ok: false, error: 'reload_failed', message: msg }, 500)
+      return c.json(
+        {
+          ok: false,
+          error: 'reload_failed',
+          message: msg,
+          promptsReloaded,
+          mcpReloaded,
+        },
+        500,
+      )
     }
 
     serverLogBuffer.add({

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { configureSession, createSessionClient, currentSession, getSession, parseSession, resetSession, subscribeSession } from '../../docs/.vitepress/theme/auth/session'
+import { configureSession, createSessionClient, currentSession, getSession, parseSession, publishSession, resetSession, subscribeSession } from '../../docs/.vitepress/theme/auth/session'
 import type { SessionState } from '../../docs/.vitepress/theme/auth/session'
 import type { HttpResult } from '../../docs/.vitepress/theme/api/http'
 import { fakeFetch } from './progress-helpers'
@@ -104,5 +104,62 @@ describe('site session (singleton)', () => {
   it('SSR: a configured adapter without fetch resolves to unavailable/network, never throws', async () => {
     configureSession({ adapter: 'trusted-header', sessionEndpoint: '/api/auth/session' })
     expect(await getSession()).toEqual({ status: 'unavailable', reason: 'network' })
+  })
+
+  it('ignores an in-flight getSession() response after publishSession() or resetSession()', async () => {
+    let releaseFetch!: (res: Response) => void
+    let fetchCount = 0
+    const origFetch = globalThis.fetch
+    const hadWindow = 'window' in globalThis
+    const origWindow = (globalThis as { window?: unknown }).window
+    ;(globalThis as { window?: unknown }).window = globalThis
+    globalThis.fetch = (async () => {
+      fetchCount += 1
+      if (fetchCount === 1) {
+        return new Promise<Response>((resolve) => {
+          releaseFetch = resolve
+        })
+      }
+      return new Response(JSON.stringify(anonymous), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      })
+    }) as typeof fetch
+
+    try {
+      configureSession({ adapter: 'local', sessionEndpoint: '/api/auth/session' })
+      const seen: SessionState[] = []
+      const off = subscribeSession((s) => seen.push(s))
+
+      const pendingGet = getSession()
+      publishSession({ status: 'anonymous', source: 'server' })
+      expect(seen).toEqual([{ status: 'anonymous', source: 'server' }])
+
+      releaseFetch(
+        new Response(JSON.stringify(alice), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        }),
+      )
+
+      const resolved = await pendingGet
+      expect(resolved).toEqual({ status: 'anonymous', source: 'server' })
+      expect(currentSession()).toEqual({ status: 'anonymous', source: 'server' })
+      expect(seen).toEqual([{ status: 'anonymous', source: 'server' }])
+
+      // Fresh post-logout getSession() re-fetches normally
+      resetSession()
+      const fresh = await getSession()
+      expect(fresh).toEqual({ status: 'anonymous', source: 'server' })
+      expect(fetchCount).toBe(2)
+      off()
+    } finally {
+      globalThis.fetch = origFetch
+      if (hadWindow) {
+        ;(globalThis as { window?: unknown }).window = origWindow
+      } else {
+        delete (globalThis as { window?: unknown }).window
+      }
+    }
   })
 })

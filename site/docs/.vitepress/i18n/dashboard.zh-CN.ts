@@ -922,6 +922,7 @@ export const dashboardZhCN = {
   'dsh.db.errInvalidJson': '列 {col} 必须是合法的 JSON 值',
   'dsh.db.errInvalidInt': '列 {col} 必须是有效的整数（且不可为空）',
   'dsh.db.errTargetUrlRequired': '请填写目标 DATABASE_URL',
+  'dsh.db.errSwitchUnknownOutcome': '切换请求未返回成功确认（{error}）；已重新刷新当前数据库状态，请以页面上方展示的引擎为准。',
   'dsh.login.passwordDisabledHint': '本地密码登录已由服务端配置禁用，请使用 Passkey 或前置网关登录。',
   'dsh.me.methodPassword': '本地密码',
   'dsh.me.methodPasskey': 'Passkey 通行密钥',

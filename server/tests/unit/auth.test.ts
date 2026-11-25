@@ -5,10 +5,15 @@ import {
   createAuthAdapter,
   createNoneAuthAdapter,
   createTrustedHeaderAuthAdapter,
+  hasSeenGatewayAuthInMemory,
+  markGatewayAuthSeen,
+  resetGatewayAuthSeen,
   resolveRoles,
   resolveTrustedHeaderAuth,
 } from '../../src/auth/index.js'
 import type { AppConfig } from '../../src/config/schema.js'
+import type { Db } from '../../src/db/types.js'
+import { FailedLoginBackoff } from '../../src/http/rateLimit.js'
 
 function makeMockConfig<T extends Partial<AppConfig>>(overrides: T = {} as T): AppConfig & T {
   return {
@@ -290,5 +295,66 @@ describe('auth/trustedHeader', () => {
       expect(adapter.authenticate(getHeader)).toEqual(ANONYMOUS_AUTH_RESULT)
       expect(resolveTrustedHeaderAuth(getHeader, cfg).session.authenticated).toBe(false)
     })
+
+    it('retries persisting gateway_auth_seen after transient setSetting failure while keeping in-memory guard', async () => {
+      let txCalls = 0
+      const mockDb: Db = {
+        kind: 'pglite',
+        query: async () => ({ rows: [], rowCount: 0 }),
+        exec: async () => {},
+        close: async () => {},
+        tx: async (fn) => {
+          txCalls += 1
+          if (txCalls === 1) throw new Error('transient db outage')
+          return fn({
+            query: async () => ({ rows: [], rowCount: 1 }),
+            exec: async () => {},
+          })
+        },
+      }
+      resetGatewayAuthSeen(mockDb)
+      markGatewayAuthSeen(mockDb)
+      expect(hasSeenGatewayAuthInMemory(mockDb)).toBe(true)
+      await new Promise((r) => setTimeout(r, 10))
+      expect(txCalls).toBe(1)
+
+      // Next request retries persistence since the first attempt failed
+      markGatewayAuthSeen(mockDb)
+      await new Promise((r) => setTimeout(r, 10))
+      expect(txCalls).toBe(2)
+
+      // Once persisted successfully, subsequent calls do not rewrite DB
+      markGatewayAuthSeen(mockDb)
+      await new Promise((r) => setTimeout(r, 10))
+      expect(txCalls).toBe(2)
+      resetGatewayAuthSeen(mockDb)
+    })
+  })
+})
+
+describe('http/rateLimit FailedLoginBackoff', () => {
+  it('replaces an expired key without evicting other active blocked accounts when full', () => {
+    let nowMs = 1_000_000
+    const backoff = new FailedLoginBackoff(2, () => nowMs, {
+      baseMs: 40_000,
+      maxMs: 40_000,
+      resetAfterMs: 60_000,
+      maxEntries: 2,
+    })
+
+    // Fill capacity with keyA (will expire at t0+60s) and keyB (blocked until t0+80s)
+    backoff.recordFailure('keyA')
+    nowMs += 40_000
+    backoff.recordFailure('keyB')
+    backoff.recordFailure('keyB')
+    expect(backoff.check('keyB').ok).toBe(false)
+
+    // keyA expires at t0+60s while keyB is still actively blocked for 20s more
+    nowMs += 20_000
+    backoff.recordFailure('keyA')
+
+    // Replacing expired keyA must NOT have evicted active keyB
+    expect(backoff.check('keyB').ok).toBe(false)
+    expect(backoff.check('keyA').ok).toBe(true)
   })
 })

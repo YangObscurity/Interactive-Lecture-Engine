@@ -1184,6 +1184,7 @@ describe('WP-3: Admin DB Selector, Hot-Swap, Transfer & Whitelisted 6-Table CRUD
       const realDestDb = createDb(`pglite:${destDir}`)
       await runMigrations(realDestDb)
 
+      let fakeNowMs = 1_700_000_000_000
       let insertBatchesExecuted = 0
       const slowDestDb: Db = {
         kind: realDestDb.kind,
@@ -1197,7 +1198,7 @@ describe('WP-3: Admin DB Selector, Hot-Swap, Transfer & Whitelisted 6-Table CRUD
                 const res = await txClient.query<T>(sql, params)
                 if (sql.startsWith('INSERT INTO "progress"')) {
                   insertBatchesExecuted += 1
-                  await new Promise((r) => setTimeout(r, 30))
+                  fakeNowMs += 30
                 }
                 return res
               },
@@ -1209,7 +1210,7 @@ describe('WP-3: Admin DB Selector, Hot-Swap, Transfer & Whitelisted 6-Table CRUD
 
       const dbManager = createDbManager(slowDestDb, { databaseUrl: `pglite:${destDir}` })
       const testApp = new Hono<AppEnv>()
-      testApp.route('/api/admin/db', createAdminDbRouter(dbManager, { transferWriteTimeoutMs: 15 }))
+      testApp.route('/api/admin/db', createAdminDbRouter(dbManager, { transferWriteTimeoutMs: 15, now: () => fakeNowMs }))
 
       try {
         const res = await testApp.request('/api/admin/db/transfer', {
@@ -1892,6 +1893,36 @@ describe('WP-3: Admin DB Selector, Hot-Swap, Transfer & Whitelisted 6-Table CRUD
         await dbManager.close().catch(() => {})
         await socketServer.stop()
         await pglite.close()
+      }
+    })
+
+    it('rejects /switch with autoMigrate: false when target database has not been migrated (409 target_not_migrated)', async () => {
+      const dbDirA = join(tempRoot, 'nomig-a')
+      const dbDirB = join(tempRoot, 'nomig-b')
+      const dbA = createDb(`pglite:${dbDirA}`)
+      await runMigrations(dbA)
+      // Touch dbDirB as a raw unmigrated PGlite database (empty schema)
+      const rawB = createDb(`pglite:${dbDirB}`)
+      await rawB.query('SELECT 1')
+      await rawB.close()
+
+      const mgr = createDbManager(dbA, { databaseUrl: `pglite:${dbDirA}` })
+      const app = new Hono<AppEnv>()
+      app.route('/api/admin/db', createAdminDbRouter(mgr))
+
+      try {
+        const res = await app.request('/api/admin/db/switch', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ targetUrl: `pglite:${dbDirB}`, autoMigrate: false, updateEnv: false }),
+        })
+        expect(res.status).toBe(409)
+        const body = (await res.json()) as { ok: boolean; error: string }
+        expect(body.ok).toBe(false)
+        expect(body.error).toBe('target_not_migrated')
+        expect(mgr.getCurrentUrl()).toBe(`pglite:${dbDirA}`)
+      } finally {
+        await mgr.close()
       }
     })
   })

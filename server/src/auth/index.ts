@@ -22,21 +22,37 @@ export * from './password.js'
 export * from './sessions.js'
 
 let gatewaySeenGeneration = 1
-const gatewaySeenGenByDb = new WeakMap<Db, number>()
+const gatewayObservedGenByDb = new WeakMap<Db, number>()
+const gatewayPersistedGenByDb = new WeakMap<Db, number>()
+const gatewayPersistInFlight = new WeakSet<Db>()
 
 export function hasSeenGatewayAuthInMemory(db: Db): boolean {
-  return gatewaySeenGenByDb.get(db) === gatewaySeenGeneration
+  return gatewayObservedGenByDb.get(db) === gatewaySeenGeneration
 }
 
 export function markGatewayAuthSeen(db: Db): void {
-  if (gatewaySeenGenByDb.get(db) === gatewaySeenGeneration) return
-  gatewaySeenGenByDb.set(db, gatewaySeenGeneration)
-  void setSetting(db, 'gateway_auth_seen', { seen: true }, 'gateway').catch(() => {})
+  const gen = gatewaySeenGeneration
+  gatewayObservedGenByDb.set(db, gen)
+  if (gatewayPersistedGenByDb.get(db) === gen || gatewayPersistInFlight.has(db)) return
+  gatewayPersistInFlight.add(db)
+  void setSetting(db, 'gateway_auth_seen', { seen: true }, 'gateway')
+    .then(() => {
+      if (gatewaySeenGeneration === gen && gatewayObservedGenByDb.get(db) === gen) {
+        gatewayPersistedGenByDb.set(db, gen)
+      }
+    })
+    .catch(() => {
+      // keep in-memory guard active and allow subsequent gateway requests to retry persistence
+    })
+    .finally(() => {
+      gatewayPersistInFlight.delete(db)
+    })
 }
 
 export function resetGatewayAuthSeen(db?: Db): void {
   if (db) {
-    gatewaySeenGenByDb.delete(db)
+    gatewayObservedGenByDb.delete(db)
+    gatewayPersistedGenByDb.delete(db)
   } else {
     gatewaySeenGeneration += 1
   }
