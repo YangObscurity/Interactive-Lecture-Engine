@@ -76,41 +76,70 @@ export function createAdminBackupsRouter(db: Db): Hono<AppEnv> {
     const dir = getBackupDir()
     mkdirSync(dir, { recursive: true })
 
-    const settings = (await db.query('SELECT key, value, updated_by, updated_at FROM site_settings')).rows
-    const history = (
-      await db.query(
-        'SELECT id, setting_key, previous_value, new_value, updated_by, updated_at FROM site_settings_history ORDER BY id ASC',
-      )
-    ).rows
-    const progress = (
-      await db.query(
-        'SELECT user_id, lecture_id, group_id, status, completed_at, updated_at, notion_node_id, notion_page_id FROM progress',
-      )
-    ).rows
-    const aiSessions = (
-      await db.query(
-        'SELECT id, user_id, lecture_id, group_id, title, is_archived, created_at, updated_at FROM ai_sessions',
-      )
-    ).rows
-    const aiMessages = (
-      await db.query(
-        'SELECT id, user_id, session_id, role, content, selected_context, model, prompt_tokens, completion_tokens, created_at FROM ai_messages',
-      )
-    ).rows
-    const aiReviewChecklists = (
-      await db.query(
-        'SELECT id, user_id, lecture_id, group_id, topic_title, section_anchor, is_completed, pptx_source, priority, created_at, updated_at FROM ai_review_checklists',
-      )
-    ).rows
-    const users = (
-      await db.query(
-        'SELECT id, username, email, display_name, roles, disabled, last_login_at, created_at, updated_at FROM auth_users',
-      )
-    ).rows
+    const {
+      dialect,
+      settings,
+      history,
+      progress,
+      aiSessions,
+      aiMessages,
+      aiReviewChecklists,
+      users,
+    } = await db.tx(async (tx) => {
+      const txDialect = db.kind
+      if (txDialect === 'pg') {
+        await tx.query('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY')
+      }
+
+      const settingsRows = (
+        await tx.query('SELECT key, value, updated_by, updated_at FROM site_settings')
+      ).rows
+      const historyRows = (
+        await tx.query(
+          'SELECT id, setting_key, previous_value, new_value, updated_by, updated_at FROM site_settings_history ORDER BY id ASC',
+        )
+      ).rows
+      const progressRows = (
+        await tx.query(
+          'SELECT user_id, lecture_id, group_id, status, completed_at, updated_at, notion_node_id, notion_page_id FROM progress',
+        )
+      ).rows
+      const aiSessionsRows = (
+        await tx.query(
+          'SELECT id, user_id, lecture_id, group_id, title, is_archived, created_at, updated_at FROM ai_sessions',
+        )
+      ).rows
+      const aiMessagesRows = (
+        await tx.query(
+          'SELECT id, user_id, session_id, role, content, selected_context, model, prompt_tokens, completion_tokens, created_at FROM ai_messages',
+        )
+      ).rows
+      const aiReviewChecklistsRows = (
+        await tx.query(
+          'SELECT id, user_id, lecture_id, group_id, topic_title, section_anchor, is_completed, pptx_source, priority, created_at, updated_at FROM ai_review_checklists',
+        )
+      ).rows
+      const usersRows = (
+        await tx.query(
+          'SELECT id, username, email, display_name, roles, disabled, last_login_at, created_at, updated_at FROM auth_users',
+        )
+      ).rows
+
+      return {
+        dialect: txDialect,
+        settings: settingsRows,
+        history: historyRows,
+        progress: progressRows,
+        aiSessions: aiSessionsRows,
+        aiMessages: aiMessagesRows,
+        aiReviewChecklists: aiReviewChecklistsRows,
+        users: usersRows,
+      }
+    })
 
     const snapshotPayload = {
       format: 'lecture-api-logical-backup-v1',
-      dialect: db.kind,
+      dialect,
       createdAt: new Date().toISOString(),
       tables: {
         site_settings: settings,

@@ -4,6 +4,7 @@ import { Hono } from 'hono'
 import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { gunzipSync } from 'node:zlib'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { createApp, type AppEnv } from '../../src/app.js'
 import { verifyPassword } from '../../src/auth/password.js'
@@ -1525,6 +1526,258 @@ describe('WP-3: Admin DB Selector, Hot-Swap, Transfer & Whitelisted 6-Table CRUD
         expect(patchBody.row.value).toBeNull()
       } finally {
         await dbManager.close()
+      }
+    })
+
+    it('pins auth and handler operations to one DB per request and drains whole request on swapTo', async () => {
+      const dirA = join(tempRoot, 'pin-drain-a')
+      const dirB = join(tempRoot, 'pin-drain-b')
+      const rawDbA = createDb(`pglite:${dirA}`)
+      const dbB = createDb(`pglite:${dirB}`)
+      await runMigrations(rawDbA)
+      await runMigrations(dbB)
+
+      const events: string[] = []
+      let afterBootstrap = false
+      let swapStarted = false
+      let releaseSwapTrigger!: () => void
+      const swapTriggerReady = new Promise<void>((resolve) => {
+        releaseSwapTrigger = resolve
+      })
+
+      const instrumentedDbA: Db = {
+        kind: rawDbA.kind,
+        async query<T = Record<string, unknown>>(sql: string, params?: unknown[]) {
+          if (afterBootstrap && sql.includes('auth_sessions') && !swapStarted) {
+            swapStarted = true
+            const res = await rawDbA.query<T>(sql, params)
+            events.push('auth_session_verified_on_dbA')
+            releaseSwapTrigger()
+            return res
+          }
+          if (afterBootstrap && sql.includes('INSERT INTO auth_users')) {
+            // Yield so swapTo enters drainDb(dbA) BEFORE this handler writes the row
+            await new Promise((r) => setTimeout(r, 30))
+            events.push('user_insert_on_dbA')
+          }
+          return rawDbA.query<T>(sql, params)
+        },
+        exec: (sql) => rawDbA.exec(sql),
+        tx: (fn) => rawDbA.tx(fn),
+        close: async () => {
+          events.push('dbA_closed')
+          await rawDbA.close()
+        },
+        withSession: rawDbA.withSession?.bind(rawDbA),
+      }
+
+      const dbManager = createDbManager(instrumentedDbA, { databaseUrl: `pglite:${dirA}` })
+      const app = createApp(
+        makeTestConfig({ authAdapter: 'local', databaseUrl: `pglite:${dirA}` }),
+        dbManager.asDb(),
+        { dbManager },
+      )
+
+      try {
+        // Bootstrap admin user in dbA ONLY (dbB has empty auth_users/auth_sessions)
+        const bootRes = await app.request('/api/auth/bootstrap', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            username: 'admin_a',
+            password: 'AdminPassword!123',
+            displayName: 'Admin A',
+          }),
+        })
+        expect(bootRes.status).toBe(201)
+        const setCookie = bootRes.headers.get('set-cookie') ?? ''
+        const cookiePair = setCookie.split(';')[0] ?? ''
+        expect(cookiePair).toContain('lec_session=')
+
+        afterBootstrap = true
+
+        // Fire POST /api/admin/users authorized against dbA
+        const userReqPromise = Promise.resolve(
+          app.request('/api/admin/users', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Cookie: cookiePair,
+            },
+            body: JSON.stringify({
+              username: 'pinned_user',
+              password: 'PinnedUser!123',
+              displayName: 'Pinned User',
+              roles: ['reader'],
+            }),
+          }),
+        ).then((res) => {
+          events.push(`user_req_done:${res.status}`)
+          return res
+        })
+
+        await swapTriggerReady
+        const swapStart = Date.now()
+        let swapDurationMs = -1
+        const swapPromise = dbManager
+          .swapTo(dbB, { databaseUrl: `pglite:${dirB}` }, { updateEnv: false })
+          .then((r) => {
+            swapDurationMs = Date.now() - swapStart
+            events.push('swap_done')
+            return r
+          })
+
+        const [userRes] = await Promise.all([userReqPromise, swapPromise])
+        expect(userRes.status).toBe(201)
+
+        // Whole request finished inserting on dbA BEFORE swapTo closed dbA, waking drainDb without hitting 5s timeout
+        expect(swapDurationMs).toBeGreaterThanOrEqual(0)
+        expect(swapDurationMs).toBeLessThan(2500)
+        const insertIdx = events.indexOf('user_insert_on_dbA')
+        const closeIdx = events.indexOf('dbA_closed')
+        const swapDoneIdx = events.indexOf('swap_done')
+        expect(insertIdx).toBeGreaterThan(-1)
+        expect(closeIdx).toBeGreaterThan(insertIdx)
+        expect(swapDoneIdx).toBeGreaterThan(closeIdx)
+
+        // Request authorized on dbA must NOT insert into dbB
+        const dbBUsers = await dbB.query<{ username: string }>('SELECT username FROM auth_users')
+        expect(dbBUsers.rows).toEqual([])
+
+        // Verify pinned_user actually landed in dbA
+        const reopenedA = createDb(`pglite:${dirA}`)
+        try {
+          const dbAUsers = await reopenedA.query<{ username: string }>(
+            'SELECT username FROM auth_users WHERE username = $1',
+            ['pinned_user'],
+          )
+          expect(dbAUsers.rows).toHaveLength(1)
+        } finally {
+          await reopenedA.close()
+        }
+      } finally {
+        await dbManager.close().catch(() => {})
+      }
+    })
+
+    it('reads all logical backup tables inside a single REPEATABLE READ READ ONLY Pg transaction', async () => {
+      const pgDir = join(tempRoot, 'backup-snapshot-pgdata')
+      const backupDir = join(tempRoot, 'backup-snapshot-archives')
+      const pglite = await PGlite.create({ dataDir: pgDir })
+      const socketServer = new PGLiteSocketServer({
+        db: pglite,
+        port: 0,
+        host: '127.0.0.1',
+        maxConnections: 20,
+      })
+      await socketServer.start()
+      const pgUrl = `postgresql://postgres:postgres@${socketServer.getServerConn()}/postgres?sslmode=disable`
+
+      const pgDb = createDb(pgUrl)
+      await runMigrations(pgDb)
+
+      // Seed initial related session + message
+      await pgDb.query(
+        `INSERT INTO ai_sessions (id, user_id, lecture_id, group_id, title)
+         VALUES ('sess-initial', 'reader-1', 'g01/L01', 'g01', 'Initial Session')`,
+      )
+      await pgDb.query(
+        `INSERT INTO ai_messages (id, user_id, session_id, role, content)
+         VALUES ('msg-initial', 'reader-1', 'sess-initial', 'user', 'Hello initial')`,
+      )
+
+      let observingBackup = false
+      let txCount = 0
+      const outerQueries: string[] = []
+      const txQueries: string[] = []
+
+      const instrumentedPgDb: Db = {
+        kind: pgDb.kind,
+        query<T = Record<string, unknown>>(sql: string, params?: unknown[]) {
+          if (observingBackup) outerQueries.push(sql)
+          return pgDb.query<T>(sql, params)
+        },
+        exec: (sql) => pgDb.exec(sql),
+        close: () => pgDb.close(),
+        tx<R>(fn: (txClient: DbClient) => Promise<R>): Promise<R> {
+          if (observingBackup) txCount++
+          return pgDb.tx(async (innerTx) => {
+            const wrappedTx: DbClient = {
+              query<T = Record<string, unknown>>(sql: string, params?: unknown[]) {
+                if (observingBackup) txQueries.push(sql)
+                return innerTx.query<T>(sql, params)
+              },
+              exec: (sql) => innerTx.exec(sql),
+            }
+            return fn(wrappedTx)
+          })
+        },
+      }
+
+      const dbManager = createDbManager(instrumentedPgDb, { databaseUrl: pgUrl })
+      const app = createApp(makeTestConfig({ databaseUrl: pgUrl }), dbManager.asDb(), { dbManager })
+      const prevBackupDir = process.env.BACKUP_DIR
+      process.env.BACKUP_DIR = backupDir
+
+      try {
+        observingBackup = true
+        const res = await app.request('/api/admin/backups', {
+          method: 'POST',
+          headers: ADMIN_HEADERS,
+        })
+        observingBackup = false
+        expect(res.status).toBe(201)
+
+        const body = (await res.json()) as {
+          ok: boolean
+          snapshot: { filename: string; tableCounts: { ai_sessions: number; ai_messages: number } }
+        }
+        expect(body.ok).toBe(true)
+        expect(txCount).toBe(1)
+        expect(outerQueries).toEqual([])
+        expect(txQueries[0]).toBe('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY')
+        expect(txQueries.slice(1).map((q) => q.match(/FROM\s+(\w+)/)?.[1])).toEqual([
+          'site_settings',
+          'site_settings_history',
+          'progress',
+          'ai_sessions',
+          'ai_messages',
+          'ai_review_checklists',
+          'auth_users',
+        ])
+        expect(body.snapshot.tableCounts.ai_sessions).toBe(1)
+        expect(body.snapshot.tableCounts.ai_messages).toBe(1)
+
+        const rawJson = gunzipSync(readFileSync(join(backupDir, body.snapshot.filename))).toString('utf8')
+        const parsed = JSON.parse(rawJson) as {
+          dialect: string
+          tables: {
+            ai_sessions: Array<{ id: string }>
+            ai_messages: Array<{ id: string; session_id: string }>
+          }
+        }
+        expect(parsed.dialect).toBe('pg')
+        const sessionIds = new Set(parsed.tables.ai_sessions.map((s) => s.id))
+        expect([...sessionIds]).toEqual(['sess-initial'])
+        expect(parsed.tables.ai_messages.every((m) => sessionIds.has(m.session_id))).toBe(true)
+
+        // Verify created archive also passes read-only restore integrity check
+        const verifyRes = await app.request('/api/admin/backups/restore', {
+          method: 'POST',
+          headers: { ...ADMIN_HEADERS, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ filename: body.snapshot.filename, dryRun: false }),
+        })
+        expect(verifyRes.status).toBe(200)
+        expect((await verifyRes.json()).ok).toBe(true)
+      } finally {
+        if (prevBackupDir === undefined) {
+          delete process.env.BACKUP_DIR
+        } else {
+          process.env.BACKUP_DIR = prevBackupDir
+        }
+        await dbManager.close().catch(() => {})
+        await socketServer.stop()
+        await pglite.close()
       }
     })
   })

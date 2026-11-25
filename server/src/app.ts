@@ -219,7 +219,12 @@ export function createApp(config: AppConfig, db: Db, options: AppOptions = {}): 
     return standardLimitMiddleware(c, next)
   })
 
-  // 3. Auth context extraction
+  // 3. Pin a single active database backend across auth and route handlers for each HTTP request
+  if (dbManager.runWithRequestDb) {
+    app.use('*', (_c, next) => dbManager.runWithRequestDb!(() => next()))
+  }
+
+  // 4. Auth context extraction
   app.use('*', createAuthMiddleware(config, effectiveDb))
 
   // 4. Route Tier Access Guards

@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from 'node:async_hooks'
 import { randomBytes } from 'node:crypto'
 import {
   accessSync,
@@ -170,6 +171,7 @@ export interface DbManager {
   getMeta(): DbManagerPublicMeta
   getCurrentUrl(): string
   getCurrentDirectUrl(): string | null
+  runWithRequestDb?<T>(fn: () => Promise<T>): Promise<T>
   runExclusive<T>(fn: () => Promise<T>): Promise<T>
   swapTo(
     nextDb: Db,
@@ -192,6 +194,13 @@ export function createDbManager(
   const operationMutex = new AsyncMutex()
   const swapListeners = new Set<() => void | Promise<void>>()
 
+  interface RequestPin {
+    db: Db
+    released: boolean
+    activeInTracker: boolean
+  }
+
+  const requestStore = new AsyncLocalStorage<RequestPin>()
   const inflight = new WeakMap<Db, { count: number; waiters: Array<() => void> }>()
 
   function getTracker(db: Db): { count: number; waiters: Array<() => void> } {
@@ -203,17 +212,43 @@ export function createDbManager(
     return t
   }
 
+  function decrementTracker(tracker: { count: number; waiters: Array<() => void> }): void {
+    tracker.count = Math.max(0, tracker.count - 1)
+    if (tracker.count === 0 && tracker.waiters.length > 0) {
+      const waiters = tracker.waiters.splice(0, tracker.waiters.length)
+      for (const wake of waiters) wake()
+    }
+  }
+
+  function acquirePinTracker(pin: RequestPin): void {
+    if (!pin.activeInTracker && !pin.released) {
+      pin.activeInTracker = true
+      getTracker(pin.db).count++
+    }
+  }
+
+  function releasePinTracker(pin: RequestPin): void {
+    if (pin.activeInTracker) {
+      pin.activeInTracker = false
+      decrementTracker(getTracker(pin.db))
+    }
+  }
+
+  function resolveTargetDb(): Db {
+    const pin = requestStore.getStore()
+    if (pin && !pin.released) {
+      return pin.db
+    }
+    return currentDb
+  }
+
   async function trackOperation<T>(db: Db, fn: () => Promise<T>): Promise<T> {
     const tracker = getTracker(db)
     tracker.count++
     try {
       return await fn()
     } finally {
-      tracker.count = Math.max(0, tracker.count - 1)
-      if (tracker.count === 0 && tracker.waiters.length > 0) {
-        const waiters = tracker.waiters.splice(0, tracker.waiters.length)
-        for (const wake of waiters) wake()
-      }
+      decrementTracker(tracker)
     }
   }
 
@@ -233,28 +268,28 @@ export function createDbManager(
 
   const proxyDb: Db = {
     get kind(): 'pg' | 'pglite' {
-      return currentDb.kind
+      return resolveTargetDb().kind
     },
     query<T = Record<string, unknown>>(
       sql: string,
       params?: unknown[],
     ): Promise<DbQueryResult<T>> {
-      const target = currentDb
+      const target = resolveTargetDb()
       return trackOperation(target, () => target.query<T>(sql, params))
     },
     exec(sql: string): Promise<void> {
-      const target = currentDb
+      const target = resolveTargetDb()
       return trackOperation(target, () => target.exec(sql))
     },
     tx<R>(fn: (client: DbClient) => Promise<R>): Promise<R> {
-      const target = currentDb
+      const target = resolveTargetDb()
       return trackOperation(target, () => target.tx(fn))
     },
     close(): Promise<void> {
       return currentDb.close()
     },
     withSession<R>(fn: (sessionDb: Db) => Promise<R>): Promise<R> {
-      const target = currentDb
+      const target = resolveTargetDb()
       return trackOperation(target, () => {
         if (target.withSession) {
           return target.withSession(fn)
@@ -377,7 +412,36 @@ export function createDbManager(
       return currentDatabaseUrlDirect
     },
 
+    async runWithRequestDb<T>(fn: () => Promise<T>): Promise<T> {
+      const existing = requestStore.getStore()
+      if (existing && !existing.released) {
+        return fn()
+      }
+      const pin: RequestPin = {
+        db: currentDb,
+        released: false,
+        activeInTracker: false,
+      }
+      acquirePinTracker(pin)
+      try {
+        return await requestStore.run(pin, fn)
+      } finally {
+        pin.released = true
+        releasePinTracker(pin)
+      }
+    },
+
     runExclusive<T>(fn: () => Promise<T>): Promise<T> {
+      const pin = requestStore.getStore()
+      if (pin && !pin.released) {
+        releasePinTracker(pin)
+        return operationMutex.run(async () => {
+          if (!pin.released && pin.db === currentDb) {
+            acquirePinTracker(pin)
+          }
+          return await fn()
+        })
+      }
       return operationMutex.run(fn)
     },
 
@@ -393,6 +457,11 @@ export function createDbManager(
       return swapMutex.run(async () => {
         const previousDb = currentDb
         const previousKind = previousDb.kind
+        const callerPin = requestStore.getStore()
+        if (callerPin && !callerPin.released && callerPin.db === previousDb) {
+          callerPin.released = true
+          releasePinTracker(callerPin)
+        }
 
         currentDb = nextDb
         currentDatabaseUrl = nextMeta.databaseUrl
