@@ -1226,89 +1226,91 @@ describe('WP-5 RBAC Online Dashboard Suite', () => {
       subscribeSession: (l) => subscribeSession(l),
     })
 
-    await pStore.load()
-    await pStore.flush()
-    expect(pStore.statusOf('g01-l01')).toBe('completed')
-    expect(pStore.statusOf('g01-l02')).toBe('completed')
-    expect(pStore.pending()).toBe(1)
-    expect(scheduler.timers.length).toBeGreaterThan(0)
+    try {
+      await pStore.load()
+      await pStore.flush()
+      expect(pStore.statusOf('g01-l01')).toBe('completed')
+      expect(pStore.statusOf('g01-l02')).toBe('completed')
+      expect(pStore.pending()).toBe(1)
+      expect(scheduler.timers.length).toBeGreaterThan(0)
 
-    // 3. User A clicks [data-dashboard-logout] in DashboardPage
-    currentAuthStatus = {
-      authAdapter: 'hybrid',
-      authenticated: false,
-      needsBootstrap: false,
-      authSource: 'none',
-      authMethod: 'none',
-      rememberMe: false,
-      user: null,
-      roles: [],
-      groups: [],
-      canAccessAdmin: false,
-      canAccessAuthor: false,
-      visibleSections: [],
-    }
-
-    const logoutBtn = wrapper.find('[data-dashboard-logout]')
-    expect(logoutBtn.exists()).toBe(true)
-    await logoutBtn.trigger('click')
-    await flushPromises()
-
-    // Dashboard shows login
-    expect(wrapper.findComponent(DashboardLogin).exists()).toBe(true)
-
-    // progressStore immediately clears A's records & outbox, cancels timer, persists owner: null
-    expect(pStore.pending()).toBe(0)
-    expect(pStore.statusOf('g01-l01')).toBe('not_started')
-    expect(pStore.statusOf('g01-l02')).toBe('not_started')
-    expect(scheduler.timers).toHaveLength(0)
-    expect(pStore.snapshot().owner).toBeNull()
-    const storedAfterLogout = JSON.parse(storage.map.get(STORAGE_KEYS.progressV2) ?? '{}')
-    expect(storedAfterLogout.owner).toBeNull()
-
-    // 4. User B (bob) logs in (DashboardLogin @authenticated) without reloading page
-    backend.fetchAllResult = {
-      ok: true,
-      records: [rec('g01-l03', 'completed')],
-      serverDate: null,
-      unfilteredGet: true,
-    }
-    currentAuthStatus = {
-      authAdapter: 'hybrid',
-      authenticated: true,
-      needsBootstrap: false,
-      authSource: 'local',
-      authMethod: 'password',
-      rememberMe: false,
-      user: { id: 'bob', name: 'Bob User', email: 'bob@example.com' },
-      roles: ['reader'],
-      groups: [],
-      canAccessAdmin: false,
-      canAccessAuthor: false,
-      visibleSections: [],
-    }
-
-    wrapper.findComponent(DashboardLogin).vm.$emit('authenticated')
-    await flushPromises()
-
-    // progressStore reloads ONLY bob's server progress, owner === 'bob'
-    expect(pStore.snapshot().owner).toBe('bob')
-    expect(pStore.statusOf('g01-l03')).toBe('completed')
-    expect(pStore.statusOf('g01-l01')).toBe('not_started')
-    expect(pStore.statusOf('g01-l02')).toBe('not_started')
-
-    // 5. Advancing scheduler timers / flushing NEVER sends alice's queued write
-    clock.advance(120_000)
-    for (const t of [...scheduler.timers]) t.fn()
-    await pStore.flush({ force: true })
-    await flushPromises()
-
-    for (const batch of backend.sent) {
-      for (const sentOp of batch) {
-        expect(sentOp.lectureId).not.toBe('g01-l02')
+      // 3. User A clicks [data-dashboard-logout] in DashboardPage
+      currentAuthStatus = {
+        authAdapter: 'hybrid',
+        authenticated: false,
+        needsBootstrap: false,
+        authSource: 'none',
+        authMethod: 'none',
+        rememberMe: false,
+        user: null,
+        roles: [],
+        groups: [],
+        canAccessAdmin: false,
+        canAccessAuthor: false,
+        visibleSections: [],
       }
-    }
 
-    pStore.destroy()
+      const logoutBtn = wrapper.find('[data-dashboard-logout]')
+      expect(logoutBtn.exists()).toBe(true)
+      await logoutBtn.trigger('click')
+      await flushPromises()
+
+      // Dashboard shows login
+      expect(wrapper.findComponent(DashboardLogin).exists()).toBe(true)
+
+      // progressStore immediately clears A's records & outbox, cancels timer, persists owner: null
+      expect(pStore.pending()).toBe(0)
+      expect(pStore.statusOf('g01-l01')).toBe('not_started')
+      expect(pStore.statusOf('g01-l02')).toBe('not_started')
+      expect(scheduler.timers).toHaveLength(0)
+      expect(pStore.snapshot().owner).toBeNull()
+      const storedAfterLogout = JSON.parse(storage.map.get(STORAGE_KEYS.progressV2) ?? '{}')
+      expect(storedAfterLogout.owner).toBeNull()
+
+      // 4. User B (bob) logs in (DashboardLogin @authenticated) without reloading page
+      backend.fetchAllResult = {
+        ok: true,
+        records: [rec('g01-l03', 'completed')],
+        serverDate: null,
+        unfilteredGet: true,
+      }
+      currentAuthStatus = {
+        authAdapter: 'hybrid',
+        authenticated: true,
+        needsBootstrap: false,
+        authSource: 'local',
+        authMethod: 'password',
+        rememberMe: false,
+        user: { id: 'bob', name: 'Bob User', email: 'bob@example.com' },
+        roles: ['reader'],
+        groups: [],
+        canAccessAdmin: false,
+        canAccessAuthor: false,
+        visibleSections: [],
+      }
+
+      wrapper.findComponent(DashboardLogin).vm.$emit('authenticated')
+      await flushPromises()
+
+      // progressStore reloads ONLY bob's server progress, owner === 'bob'
+      expect(pStore.snapshot().owner).toBe('bob')
+      expect(pStore.statusOf('g01-l03')).toBe('completed')
+      expect(pStore.statusOf('g01-l01')).toBe('not_started')
+      expect(pStore.statusOf('g01-l02')).toBe('not_started')
+
+      // 5. Advancing scheduler timers / flushing NEVER sends alice's queued write
+      clock.advance(120_000)
+      for (const t of [...scheduler.timers]) t.fn()
+      await pStore.flush({ force: true })
+      await flushPromises()
+
+      for (const batch of backend.sent) {
+        for (const sentOp of batch) {
+          expect(sentOp.lectureId).not.toBe('g01-l02')
+        }
+      }
+    } finally {
+      pStore.destroy()
+    }
   })
 })

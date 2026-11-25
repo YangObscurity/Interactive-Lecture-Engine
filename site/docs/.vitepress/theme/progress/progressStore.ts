@@ -719,7 +719,7 @@ export function createProgressStore(deps: ProgressStoreDeps): ProgressStore {
     state.outbox = kept
   }
 
-  async function doLoad(): Promise<void> {
+  async function doLoad(overrideSession?: SessionState): Promise<void> {
     const myEpoch = epoch
     const myLoadSeq = ++loadSeq
     try {
@@ -751,9 +751,9 @@ export function createProgressStore(deps: ProgressStoreDeps): ProgressStore {
 
       baseSeedData = seedDataRes
       const effectiveSession =
-        !initialized && latestSubSeq !== subSeqBefore && latestSubSession
+        latestSubSeq !== subSeqBefore && latestSubSession
           ? latestSubSession
-          : (latestSubSession ?? sessionRes)
+          : (overrideSession ?? sessionRes)
 
       refresh()
       applyIdentity(effectiveSession)
@@ -845,7 +845,7 @@ export function createProgressStore(deps: ProgressStoreDeps): ProgressStore {
     notifySync()
 
     if (s.status === 'authenticated') {
-      void reload()
+      loading = doLoad(s)
     } else if (s.status === 'anonymous' && s.source === 'server') {
       loadSeq++
     }
@@ -882,6 +882,9 @@ export function createProgressStore(deps: ProgressStoreDeps): ProgressStore {
       if (refresh()) {
         if (state.owner !== prevOwner) {
           invalidatePendingWork()
+          loadSeq++
+          extraSeed.clear()
+          seed = baseSeedData ? seedIndex(baseSeedData) : new Map()
           unfilteredGet = null
           establishedIdentity = state.owner !== null ? `user:${state.owner}` : 'anon'
           emit({ kind: 'reset' })

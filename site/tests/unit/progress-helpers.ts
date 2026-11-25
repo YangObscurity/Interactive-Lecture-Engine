@@ -100,6 +100,8 @@ export class ScriptedBackend implements ProgressBackend {
   readonly sent: OutboxOp[][] = []
   fetchAllCalls = 0
   fetchAllResult: FetchAllResult = { ok: true, records: [], serverDate: null, unfilteredGet: true }
+  /** Optional scripted results for successive `fetchAll` calls; falls back to `fetchAllResult`. */
+  fetchAllResults: Array<FetchAllResult | Promise<FetchAllResult>> = []
   /** Results returned by successive `send` calls; when exhausted, `defaultSend` runs. */
   sendResults: Array<SendResult | Promise<SendResult>> = []
   readonly sendSignals: AbortSignal[] = []
@@ -118,7 +120,8 @@ export class ScriptedBackend implements ProgressBackend {
   async fetchAll(signal?: AbortSignal): Promise<FetchAllResult> {
     this.fetchAllCalls++
     if (signal) this.fetchSignals.push(signal)
-    return this.fetchAllResult
+    const next = this.fetchAllResults.shift()
+    return next ?? this.fetchAllResult
   }
   async send(ops: OutboxOp[], signal?: AbortSignal): Promise<SendResult> {
     this.sent.push(ops)

@@ -3,7 +3,7 @@ import { BACKOFF_MS, OUTBOX_LOCK_NAME, backoffMs, createProgressStore, parsePers
 import type { ProgressStore, ProgressStoreDeps } from '../../docs/.vitepress/theme/progress/progressStore'
 import type { SessionState } from '../../docs/.vitepress/theme/auth/session'
 import type { SeedData } from '../../docs/.vitepress/theme/progress/seed'
-import type { SendResult } from '../../docs/.vitepress/theme/api/progress'
+import type { FetchAllResult, SendResult } from '../../docs/.vitepress/theme/api/progress'
 import type { OutboxOp, ProgressEvent, ProgressRecord, ProgressStatus } from '../../docs/.vitepress/theme/progress/types'
 import { STORAGE_KEYS } from '../../docs/.vitepress/site.config.mts'
 import { groupOfDir } from '../../docs/.vitepress/theme/progress/types'
@@ -763,6 +763,60 @@ describe('reader identity', () => {
     await settle(5)
     expect(r.store.statusOf('g01-l01')).toBe('not_started')
     expect(r.store.statusOf('g01-l02')).toBe('not_started')
+  })
+
+  it('aborts in-flight fetchAll on identity switch and ignores late server response from prior account', async () => {
+    let activeSession: SessionState = alice
+    const delayedAliceFetch = deferred<FetchAllResult>()
+    const r = rig({
+      backend: new ScriptedBackend('rest'),
+      getSession: async () => activeSession,
+    })
+    r.backend.fetchAllResults.push(delayedAliceFetch.promise)
+
+    const initialLoad = r.store.load()
+    await settle(5)
+    expect(r.backend.lastFetchSignal?.aborted).toBe(false)
+
+    // Before Alice's fetchAll resolves, switch to Bob (Bob has g01-l09 only)
+    activeSession = bob
+    r.backend.fetchAllResults.push({
+      ok: true,
+      records: [rec('g01-l09', 'completed')],
+      serverDate: null,
+      unfilteredGet: true,
+    })
+    r.publishSession(bob)
+
+    expect(r.backend.fetchSignals[0]?.aborted).toBe(true)
+    await settle(5)
+
+    // Alice's delayed fetchAll resolves late with g01-l01 completed
+    delayedAliceFetch.resolve({
+      ok: true,
+      records: [rec('g01-l01', 'completed')],
+      serverDate: null,
+      unfilteredGet: true,
+    })
+    await initialLoad
+    await settle(5)
+
+    expect(r.store.snapshot().owner).toBe('bob')
+    expect(r.store.statusOf('g01-l01')).toBe('not_started')
+    expect(r.store.statusOf('g01-l09')).toBe('completed')
+
+    // Manual reload() without subscribeSession respects getSession switching cleanly without sticky latestSubSession
+    activeSession = alice
+    r.backend.fetchAllResults.push({
+      ok: true,
+      records: [rec('g01-l01', 'completed')],
+      serverDate: null,
+      unfilteredGet: true,
+    })
+    await r.store.reload()
+    expect(r.store.snapshot().owner).toBe('alice')
+    expect(r.store.statusOf('g01-l01')).toBe('completed')
+    expect(r.store.statusOf('g01-l09')).toBe('not_started')
   })
 })
 

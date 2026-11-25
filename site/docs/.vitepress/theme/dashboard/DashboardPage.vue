@@ -403,7 +403,11 @@ function isSafeRedirectUrl(raw: string): boolean {
 async function handleLoggedOut(logoutUrl?: string | null): Promise<void> {
   const prevAuthSource = authStatus.value?.authSource
   resetAuthState()
-  resetSession()
+  if (prevAuthSource === 'gateway') {
+    resetSession()
+  } else {
+    publishSession({ status: 'anonymous', source: 'server' })
+  }
   overview.value = null
   health.value = null
   healthError.value = ''
@@ -411,10 +415,6 @@ async function handleLoggedOut(logoutUrl?: string | null): Promise<void> {
   checkState.scope = ''
   checkState.error = ''
   session.value = { status: 'anonymous', source: 'server' }
-
-  if (prevAuthSource !== 'gateway') {
-    publishSession({ status: 'anonymous', source: 'server' })
-  }
 
   if (logoutUrl && isSafeRedirectUrl(logoutUrl) && typeof window !== 'undefined') {
     window.location.assign(logoutUrl)
