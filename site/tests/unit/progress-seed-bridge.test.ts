@@ -248,7 +248,34 @@ describe('site runtime settings', () => {
       groups: [{ dir: 'courses/G01' }, { dir: 'xr', id: 'XR', temp: true }, { id: 'no-dir' }, null],
     })
     expect(rt).toEqual({ adapter: 'rest', endpoint: '/svc', notionSync: true, authAdapter: 'trusted-header', sessionEndpoint: '/svc/session', groupIds: ['g01', 'xr'], tempGroupIds: ['xr'] })
-    expect(parseTempGroupIds({ groups: [{ id: 'TMP1', dir: 'courses/tmp-one', temp: true }, { id: 'G02', dir: 'g02' }] })).toEqual(['tmp1', 'tmp-one'])
+    expect(parseTempGroupIds({ groups: [{ id: 'TMP1', dir: 'courses/tmp-one', temp: true }, { id: 'G02', dir: 'g02' }, { id: 'NO_DIR', temp: true }] })).toEqual(['tmp-one', 'no_dir'])
+  })
+
+  it('keeps id and dir namespaces separate so temp id never blocks another permanent dir', async () => {
+    const clock = new FakeClock()
+    const store = createProgressStore({ backend: new ScriptedBackend('local'), storage: new MemoryStorage(), now: clock.now, locks: null, scheduler: new FakeScheduler(), target: null })
+    const single: Array<[string, string]> = []
+    const groups = [
+      { id: 'G01', dir: 'scratch', temp: true },
+      { id: 'G02', dir: 'g01' },
+    ]
+    configureProgress({ groups })
+    setTempGroupResolver((groupId, lectureId) => matchesTempGroupContext({ groupId, lectureId, groups }))
+    startNotionBridge({ store, sync: (id, status) => single.push([id, status]), batch: () => undefined })
+    await store.load()
+
+    store.set('scratch-l01', 'completed')
+    expect(single).toEqual([])
+
+    store.set('g01-l01', 'completed')
+    expect(single).toEqual([['g01-l01', W.completed]])
+
+    expect(isTempGroupId('G01')).toBe(true)
+    expect(isTempGroupId('g01', 'g01-l01')).toBe(false)
+    expect(isTempGroupId('scratch', 'scratch-l01')).toBe(true)
+
+    setTempGroupResolver(null)
+    configureProgress(undefined)
   })
 
   it('configureProgress sets the runtime the singleton uses', () => {

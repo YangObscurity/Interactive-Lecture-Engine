@@ -20,7 +20,7 @@ npm run new:group -- --id G01 --dir g01 --title "数字电路" --tagline "从门
 ```
 
 - 在 `groups.ts` 末尾追加一组（改完会重新加载一次，确认文件仍能读），并写组页 `lectures/g01/index.md`。
-- 带 `--temp`（即 `groups.ts` 中的 `temp: true`）会创建正式**临时组**：排在课程列表末尾、在卡片/导航/组页/Console 显示临时徽章、进度仅存入数据库（`rest`）或浏览器本地（`local`），**不会**触发 Notion 同步（也不会出现 Notion 未绑定报错）。
+- 带 `--temp`（即 `groups.ts` 中的 `temp: true`）会创建正式**临时组**：排在课程列表末尾、在卡片/导航/组页/Console 显示临时徽章；进度写入数据库（`rest`）或浏览器本地（`local`），`rest` 模式下仍会在浏览器 `localStorage` 持久化状态，但**不会**触发 Notion 同步（也不会出现 Notion 未绑定报错）。
 - `id` 用大写字母和数字（也是图表文件前缀），`dir` 用小写字母、数字、`-`；重复或占用引擎目录会被拒绝。
 - 检查：`npm run check:content`（新组没有讲义时给 WARN `group.no_lectures`；若 `groups.ts` 中 `temp` 字段不是布尔值，给 FAIL `group.invalid_temp`）。
 

@@ -1046,6 +1046,7 @@ const DEFAULT_RUNTIME: ProgressRuntime = {
 }
 
 let runtime: ProgressRuntime = DEFAULT_RUNTIME
+let runtimeTempIds: readonly string[] = []
 let runtimeBackend: ProgressBackend = createLocalBackend()
 let tempGroupResolver: ((groupId: string, lectureId?: string) => boolean) | null = null
 
@@ -1054,21 +1055,26 @@ export function setTempGroupResolver(resolver: ((groupId: string, lectureId?: st
   tempGroupResolver = resolver
 }
 
-/** Collect normalised group ids and dir slugs for every group marked `temp: true` in `themeConfig`. */
-export function parseTempGroupIds(theme: unknown): string[] {
-  const t = isObject(theme) ? theme : {}
-  const tempIds = new Set<string>()
-  if (Array.isArray(t.groups)) {
-    for (const g of t.groups) {
+function collectTempGroupSets(groups: unknown): { dirs: string[]; ids: string[] } {
+  const dirs = new Set<string>()
+  const ids = new Set<string>()
+  if (Array.isArray(groups)) {
+    for (const g of groups) {
       if (!isObject(g) || g.temp !== true) continue
-      if (typeof g.id === 'string' && g.id.trim()) tempIds.add(normaliseLectureId(g.id))
-      if (typeof g.dir === 'string' && g.dir.trim()) {
-        const dirGroup = groupOfDir(g.dir)
-        if (dirGroup) tempIds.add(dirGroup)
-      }
+      const dirSlug = typeof g.dir === 'string' && g.dir.trim() ? groupOfDir(g.dir) : ''
+      const idSlug = typeof g.id === 'string' && g.id.trim() ? normaliseLectureId(g.id) : ''
+      if (dirSlug) dirs.add(dirSlug)
+      else if (idSlug) dirs.add(idSlug)
+      if (idSlug) ids.add(idSlug)
     }
   }
-  return [...tempIds]
+  return { dirs: [...dirs], ids: [...ids] }
+}
+
+/** Collect normalised dir slugs (falling back to id only when dir is absent) for `temp: true` groups. */
+export function parseTempGroupIds(theme: unknown): string[] {
+  const t = isObject(theme) ? theme : {}
+  return collectTempGroupSets(t.groups).dirs
 }
 
 export interface TempGroupContextInput {
@@ -1082,38 +1088,45 @@ export interface TempGroupContextInput {
 /**
  * Resolve whether `(groupId, lectureId)` belongs to a temporary group using live runtime `groups` plus current
  * route frontmatter (`groupMeta` on restricted group index pages, `groupTemp` + `routeGroup` on restricted lectures).
+ * When `lectureId` is supplied, matching stays strictly in the directory/lecture-prefix namespace so a group's
+ * display `id` can never collide with a different permanent group's `dir`.
  */
 export function matchesTempGroupContext(input: TempGroupContextInput): boolean {
   const normGroup = normaliseLectureId(input.groupId)
   const normLecture = input.lectureId ? normaliseLectureId(input.lectureId) : ''
-  const targetKeys = new Set<string>()
-  if (normGroup) targetKeys.add(normGroup)
-  if (normLecture) {
-    const derived = groupOfLecture(normLecture)
-    if (derived) targetKeys.add(derived)
-  }
-  if (targetKeys.size === 0) return false
+  const lecturePrefix = normLecture ? groupOfLecture(normLecture) : ''
+  const targetDirs = new Set<string>()
+  if (lecturePrefix) targetDirs.add(lecturePrefix)
+  if (normGroup && (!normLecture || lecturePrefix === normGroup)) targetDirs.add(normGroup)
 
-  for (const key of parseTempGroupIds({ groups: input.groups })) {
-    if (targetKeys.has(key)) return true
+  const { dirs, ids } = collectTempGroupSets(input.groups)
+  for (const d of dirs) {
+    if (targetDirs.has(d) || (!normLecture && normGroup === d)) return true
+  }
+  if (!normLecture && normGroup) {
+    for (const id of ids) {
+      if (id === normGroup) return true
+    }
   }
 
   const fm = isObject(input.frontmatter) ? input.frontmatter : null
   if (fm && isObject(fm.groupMeta) && fm.groupMeta.temp === true) {
-    const fid = typeof fm.groupMeta.id === 'string' ? normaliseLectureId(fm.groupMeta.id) : ''
     const fdir = typeof fm.groupMeta.dir === 'string' ? groupOfDir(fm.groupMeta.dir) : ''
-    if ((fid && targetKeys.has(fid)) || (fdir && targetKeys.has(fdir))) return true
+    const fid = typeof fm.groupMeta.id === 'string' ? normaliseLectureId(fm.groupMeta.id) : ''
+    if (fdir && targetDirs.has(fdir)) return true
+    if (!fdir && fid && targetDirs.has(fid)) return true
+    if (!normLecture && normGroup && ((fdir && fdir === normGroup) || (fid && fid === normGroup))) return true
   }
 
   if (fm?.groupTemp === true && typeof input.routeGroup === 'string') {
     const routeKey = normaliseLectureId(input.routeGroup)
-    if (routeKey && targetKeys.has(routeKey)) return true
+    if (routeKey && (targetDirs.has(routeKey) || (!normLecture && normGroup === routeKey))) return true
   }
 
   return false
 }
 
-/** True when a group (by dir slug or id) or lecture belongs to a temporary group (`temp: true`). */
+/** True when a group (by dir slug or id when `lectureId` is omitted) or lecture belongs to a temporary group (`temp: true`). */
 export function isTempGroupId(groupId: string, lectureId?: string): boolean {
   const normGroup = normaliseLectureId(groupId)
   const normLecture = lectureId ? normaliseLectureId(lectureId) : undefined
@@ -1124,12 +1137,12 @@ export function isTempGroupId(groupId: string, lectureId?: string): boolean {
       // fall back to static runtime list
     }
   }
-  if (runtime.tempGroupIds.includes(normGroup)) return true
   if (normLecture) {
     const derived = groupOfLecture(normLecture)
     if (derived && runtime.tempGroupIds.includes(derived)) return true
+    return derived ? false : runtime.tempGroupIds.includes(normGroup)
   }
-  return false
+  return runtime.tempGroupIds.includes(normGroup) || runtimeTempIds.includes(normGroup)
 }
 
 /** Read the site settings out of `themeConfig` (`useData().theme.value`); anything missing keeps its default. */
@@ -1163,6 +1176,8 @@ export function parseProgressRuntime(theme: unknown): ProgressRuntime {
  */
 export function configureProgress(theme: unknown): ProgressRuntime {
   runtime = parseProgressRuntime(theme)
+  const t = isObject(theme) ? theme : {}
+  runtimeTempIds = collectTempGroupSets(t.groups).ids
   const { groupIds } = runtime
   runtimeBackend =
     runtime.adapter === 'rest' ? createRestBackend({ endpoint: runtime.endpoint, groupIds: () => groupIds }) : createLocalBackend()

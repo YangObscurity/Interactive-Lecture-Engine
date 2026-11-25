@@ -570,7 +570,7 @@ export const en: Messages = {
   'ai.notionSyncFailed': 'Notion sync failed ({detail})',
   'ai.lpcAdminFooterHint': 'Admin · Notion sync active',
   'ai.tempGroupBadge': 'Temp group',
-  'ai.tempGroupDbOnly': 'Temp group · Progress saved to DB only (no Notion sync)',
+  'ai.tempGroupDbOnly': 'Temp group · Saved to DB and local storage (no Notion sync)',
   'ai.tempGroupLocalOnly': 'Temp group · Progress saved locally only (no Notion sync)',
   'ai.uploadNoFile': 'No file selected',
   'ai.uploadEmptyFile': 'File is empty (0 bytes)',

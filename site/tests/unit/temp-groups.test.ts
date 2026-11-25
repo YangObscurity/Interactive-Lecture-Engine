@@ -289,7 +289,7 @@ describe('formal temporary group UI', () => {
 
     const wRest = await mountCard()
     expect(wRest.find('[data-lpc-temp-badge]').exists()).toBe(true)
-    expect(wRest.find('[data-lpc-temp-progress]').text()).toContain('仅记录在数据库')
+    expect(wRest.find('[data-lpc-temp-progress]').text()).toContain('存入数据库并缓存在本地')
     expect(wRest.find('[data-lpc-notion-control]').exists()).toBe(false)
 
     // Clicking progress triggers progressStore write cleanly without Notion controls appearing

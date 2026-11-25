@@ -127,11 +127,13 @@ export function useLectureContext() {
       candidateDir = stripped
     }
 
-    const matchedGroup = allGroups.find((g) => {
+    const cd = candidateDir.toLowerCase()
+    let matchedGroup: (typeof allGroups)[number] | undefined
+    for (const g of allGroups) {
       const gd = (g.dir || '').toLowerCase()
-      const cd = candidateDir.toLowerCase()
-      return gd !== '' && (gd === cd || cd.startsWith(`${gd}/`))
-    })
+      if (gd === '' || !(gd === cd || cd.startsWith(`${gd}/`))) continue
+      if (!matchedGroup || gd.length > (matchedGroup.dir || '').length) matchedGroup = g
+    }
 
     const groupDir = matchedGroup?.dir || parsed?.dir || ''
     const groupSegment = parsed?.group || groupDir.split('/').pop()?.toLowerCase() || ''

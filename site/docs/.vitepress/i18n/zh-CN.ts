@@ -577,7 +577,7 @@ export const zhCN = {
   'ai.notionSyncFailed': 'Notion 同步失败（{detail}）',
   'ai.lpcAdminFooterHint': '管理员模式 · 进度同步至 Notion',
   'ai.tempGroupBadge': '临时组',
-  'ai.tempGroupDbOnly': '临时组 · 进度仅记录在数据库（不同步 Notion）',
+  'ai.tempGroupDbOnly': '临时组 · 进度存入数据库并缓存在本地（不同步 Notion）',
   'ai.tempGroupLocalOnly': '临时组 · 进度仅保存在本地浏览器（不同步 Notion）',
   'ai.uploadNoFile': '未选择任何文件',
   'ai.uploadEmptyFile': '文件大小为 0 字节，无法上传空文件',
