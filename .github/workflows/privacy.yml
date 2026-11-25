@@ -27,7 +27,7 @@ jobs:
         name: no content/ in the engine repository
         run: test ! -e content
       - if: steps.gate.outputs.on == '1'
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
