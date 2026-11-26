@@ -447,7 +447,7 @@ export interface SearchPanelProps {
   activeIndex: number
   metaText: string
   loadState: SearchLoadState
-  emptyState: 'idle' | 'no-results' | 'loading' | 'error' | null
+  emptyState: 'idle' | 'no-results' | null
   labels: {
     dialogLabel: string
     placeholder: string

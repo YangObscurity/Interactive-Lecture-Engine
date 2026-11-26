@@ -165,7 +165,7 @@ for (const [theme, expectedImpl] of SKINS) {
     test('shows honest error and recovers on retry when search index requires session auth / fails', async ({ page, pageErrors }) => {
       await useTheme(page, theme, 'light')
       let blockSearch = true
-      await page.route('**/search/**', async (route) => {
+      await page.route('**/search/**/*.{json,sz}', async (route) => {
         if (blockSearch) {
           await route.fulfill({ status: 401, contentType: 'text/plain', body: 'auth required' })
           return
@@ -180,13 +180,16 @@ for (const [theme, expectedImpl] of SKINS) {
       await input.fill('误差')
       await expect(page.locator('.sp-empty--error')).toBeVisible({ timeout: 10_000 })
       await expect(page.locator('.sp-empty--error')).not.toContainText('未找到相关内容')
+      await expect(page.locator('#lec-search-listbox')).toHaveCount(0)
       await expect(page.locator('.sp-scope .meta')).toHaveCount(0)
+      await expect(page.locator('.sp-retry-btn')).toHaveCount(1)
 
       blockSearch = false
       await page.locator('.sp-retry-btn').click()
+      await expect(input).toBeFocused()
       await expect(page.locator('.sp-hit').first()).toBeVisible({ timeout: 15_000 })
       await expect(page.locator('.sp-scope .meta')).toContainText(/\d+\s*条/)
-      await page.unroute('**/search/**')
+      await page.unroute('**/search/**/*.{json,sz}')
       expect(pageErrors).toEqual([])
     })
 

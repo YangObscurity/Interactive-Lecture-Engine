@@ -63,6 +63,9 @@ export interface LocaleIndexState {
   locale: string
   titleLoaded: boolean
   titleLoading: Promise<void> | null
+  manifestLoaded: boolean
+  manifestLoading: Promise<void> | null
+  accessLoaded: boolean
   loadError: boolean
   groups: TitleIndexGroup[]
   groupOrder: Map<string, number>
@@ -190,6 +193,12 @@ export async function fetchCompressedShard(
   return JSON.parse(text) as ShardPayload
 }
 
+export type SearchLabelValue = string | (() => string)
+
+function resolveDynamicLabel(val?: SearchLabelValue): string {
+  return typeof val === 'function' ? val() : (val ?? '')
+}
+
 export interface SearchEngineOptions {
   base: string
   localeKeys: readonly string[]
@@ -203,8 +212,8 @@ export interface SearchEngineOptions {
     conceptBadge?: string
     loadingBar: (loadedMb: string, totalMb: string) => string
     loadingIdle: (loadedMb: string, totalMb: string) => string
-    loadingTitles?: string
-    loadError?: string
+    loadingTitles?: SearchLabelValue
+    loadError?: SearchLabelValue
     statusLabel: (status: ProgressStatus) => string
   }
   fetchFn?: typeof fetch
@@ -242,6 +251,9 @@ export class LectureSearchEngine {
         locale,
         titleLoaded: false,
         titleLoading: null,
+        manifestLoaded: false,
+        manifestLoading: null,
+        accessLoaded: false,
         loadError: false,
         groups: [],
         groupOrder: new Map(),
@@ -367,82 +379,140 @@ export class LectureSearchEngine {
     })
   }
 
-  async ensureLoaded(locale: string, preferGroupId: string | null, opts?: { forceRetry?: boolean }): Promise<void> {
-    const st = this.getOrCreateState(locale)
-    const basePrefix = this.opts.base.replace(/\/$/, '')
-    const forceRetry = Boolean(opts?.forceRetry)
+  private async loadAccessTiers(st: LocaleIndexState, basePrefix: string): Promise<void> {
+    if (st.accessLoaded) return
+    st.accessLoaded = true
+    const accessCfg = lectureAccessOf(this.opts.siteData())
+    if (!accessCfg || accessCfg.tiers.length === 0) return
 
-    if (forceRetry && st.loadError && !st.titleLoaded) {
-      st.loadError = false
-    }
-
-    if (!st.titleLoading && !st.titleLoaded && !st.loadError) {
-      st.titleLoading = (async () => {
-        const publicBase = `${basePrefix}/search/${locale}`
-        // Send same-origin cookies so gateway/forward-auth deployments (e.g. Authelia) authorize search JSON & shards,
-        // and prevent cross-origin login redirects from turning into unhandled CORS/CSP errors via `redirect: 'manual'`.
-        const [manifestRes, titleRes] = await Promise.all([
-          this.fetchImpl(`${publicBase}/manifest.json`, { credentials: 'same-origin', redirect: 'manual' }),
-          this.fetchImpl(`${publicBase}/titles.json`, { credentials: 'same-origin', redirect: 'manual' }),
-        ])
-        if (titleRes.status !== 200) {
-          throw new Error(`Search title index returned status ${titleRes.status}`)
+    const access = await getAccess().catch(() => null)
+    await Promise.all(
+      (access?.tiers ?? []).map(async (tier) => {
+        const tierBase = `${basePrefix}${tierBasePath(tier.id)}/search/${st.locale}`
+        try {
+          const [tManRes, tTitleRes] = await Promise.all([
+            this.fetchImpl(`${tierBase}/manifest.json`, { credentials: 'same-origin', redirect: 'manual', cache: 'no-store' }),
+            this.fetchImpl(`${tierBase}/titles.json`, { credentials: 'same-origin', redirect: 'manual', cache: 'no-store' }),
+          ])
+          if (tTitleRes.status === 200) {
+            const tTitleData = (await tTitleRes.json()) as TitleIndexFile
+            this.mergeTitleIndex(st, tTitleData, this.opts.base)
+          }
+          if (tManRes.status === 200) {
+            const tMan = (await tManRes.json()) as SearchManifestFile
+            this.enqueueShards(st, `tier:${tier.id}`, tMan, tierBase, 'same-origin', 'no-store')
+          }
+        } catch {
+          // Fail closed when tier endpoints do not resolve
         }
-        if (manifestRes.status !== 200) {
-          throw new Error(`Search manifest returned status ${manifestRes.status}`)
-        }
-        const [titleData, manifest] = await Promise.all([
-          titleRes.json() as Promise<TitleIndexFile>,
-          manifestRes.json() as Promise<SearchManifestFile>,
-        ])
-        this.mergeTitleIndex(st, titleData, this.opts.base)
-        this.enqueueShards(st, 'public', manifest, publicBase, 'same-origin', 'default')
-        st.titleLoaded = true
-        st.loadError = false
-        this.opts.onStateChange?.()
+      }),
+    )
+    this.opts.onStateChange?.()
+  }
 
-        // Only request /_access/<tier>/ when restricted tiers are configured on this build
-        const accessCfg = lectureAccessOf(this.opts.siteData())
-        if (accessCfg && accessCfg.tiers.length > 0) {
-          const access = await getAccess().catch(() => null)
-          await Promise.all(
-            (access?.tiers ?? []).map(async (tier) => {
-              const tierBase = `${basePrefix}${tierBasePath(tier.id)}/search/${locale}`
-              try {
-                const [tManRes, tTitleRes] = await Promise.all([
-                  this.fetchImpl(`${tierBase}/manifest.json`, { credentials: 'same-origin', redirect: 'manual', cache: 'no-store' }),
-                  this.fetchImpl(`${tierBase}/titles.json`, { credentials: 'same-origin', redirect: 'manual', cache: 'no-store' }),
-                ])
-                if (tTitleRes.status === 200) {
-                  const tTitleData = (await tTitleRes.json()) as TitleIndexFile
-                  this.mergeTitleIndex(st, tTitleData, this.opts.base)
-                }
-                if (tManRes.status === 200) {
-                  const tMan = (await tManRes.json()) as SearchManifestFile
-                  this.enqueueShards(st, `tier:${tier.id}`, tMan, tierBase, 'same-origin', 'no-store')
-                }
-              } catch {
-                // Fail closed when tier endpoints do not resolve
-              }
-            }),
-          )
+  private async fetchAndEnqueueManifest(
+    st: LocaleIndexState,
+    publicBase: string,
+    prefetched?: Promise<{ res?: Response; err?: unknown }>,
+  ): Promise<void> {
+    if (st.manifestLoaded) return
+    if (!st.manifestLoading) {
+      st.manifestLoading = (async () => {
+        try {
+          let manifestRes: Response
+          if (prefetched) {
+            const settled = await prefetched
+            if (!settled.res) throw (settled.err ?? new Error('Search manifest fetch failed'))
+            manifestRes = settled.res
+          } else {
+            manifestRes = await this.fetchImpl(`${publicBase}/manifest.json`, { credentials: 'same-origin', redirect: 'manual' })
+          }
+          if (manifestRes.status !== 200) {
+            throw new Error(`Search manifest returned status ${manifestRes.status}`)
+          }
+          const manifest = (await manifestRes.json()) as SearchManifestFile
+          this.enqueueShards(st, 'public', manifest, publicBase, 'same-origin', 'default')
+          st.manifestLoaded = true
+          st.loadError = false
+        } catch {
+          st.manifestLoaded = false
+          st.loadError = true
+        } finally {
+          st.manifestLoading = null
           this.opts.onStateChange?.()
         }
       })()
       this.opts.onStateChange?.()
     }
+    await st.manifestLoading
+  }
 
-    if (!st.titleLoading) return
+  async ensureLoaded(locale: string, preferGroupId: string | null, opts?: { forceRetry?: boolean }): Promise<void> {
+    const st = this.getOrCreateState(locale)
+    const basePrefix = this.opts.base.replace(/\/$/, '')
+    const publicBase = `${basePrefix}/search/${locale}`
+    const forceRetry = Boolean(opts?.forceRetry)
 
-    try {
-      await st.titleLoading
-    } catch (err) {
-      st.titleLoading = null
-      st.titleLoaded = false
-      st.loadError = true
-      this.opts.onStateChange?.()
-      throw err
+    if (forceRetry && st.loadError) {
+      st.loadError = false
     }
+
+    if (!st.titleLoading && !st.titleLoaded && !st.loadError) {
+      st.titleLoading = (async () => {
+        try {
+          // Send same-origin cookies so gateway/forward-auth deployments (e.g. Authelia) authorize search JSON & shards,
+          // and prevent cross-origin login redirects from turning into unhandled CORS/CSP errors via `redirect: 'manual'`.
+          // Attach settlement handler on manifest fetch immediately so a titles failure never leaks an unhandled rejection.
+          const manifestSettled = this.fetchImpl(`${publicBase}/manifest.json`, { credentials: 'same-origin', redirect: 'manual' }).then(
+            (res): { res?: Response; err?: unknown } => ({ res }),
+            (err): { res?: Response; err?: unknown } => ({ err }),
+          )
+          const titleRes = await this.fetchImpl(`${publicBase}/titles.json`, { credentials: 'same-origin', redirect: 'manual' })
+          if (titleRes.status !== 200) {
+            void manifestSettled
+            throw new Error(`Search title index returned status ${titleRes.status}`)
+          }
+          const titleData = (await titleRes.json()) as TitleIndexFile
+          this.mergeTitleIndex(st, titleData, this.opts.base)
+          st.titleLoaded = true
+          st.loadError = false
+          this.opts.onStateChange?.()
+
+          // Isolate manifest + access-tier loading so a manifest error never blocks already-loaded title search.
+          await Promise.all([
+            this.fetchAndEnqueueManifest(st, publicBase, manifestSettled),
+            this.loadAccessTiers(st, basePrefix),
+          ])
+        } finally {
+          st.titleLoading = null
+        }
+      })()
+      this.opts.onStateChange?.()
+    }
+
+    if (st.titleLoading) {
+      const pendingTitles = st.titleLoading
+      try {
+        await pendingTitles
+      } catch (err) {
+        st.titleLoaded = false
+        st.loadError = true
+        this.opts.onStateChange?.()
+        throw err
+      }
+    } else if (st.titleLoaded) {
+      if (forceRetry && !st.manifestLoaded) {
+        await this.fetchAndEnqueueManifest(st, publicBase)
+      } else if (!st.manifestLoaded && !st.manifestLoading) {
+        return
+      }
+      if (st.manifestLoading) {
+        await st.manifestLoading
+      }
+    } else {
+      return
+    }
+
     if (forceRetry) {
       this.requeueFailedShards(st)
     }
@@ -542,7 +612,7 @@ export class LectureSearchEngine {
           loadedBytes: 0,
           totalBytes: 0,
           percent: 0,
-          label: this.opts.labels.loadError ?? '',
+          label: resolveDynamicLabel(this.opts.labels.loadError),
           phase: 'error',
           error: true,
         }
@@ -553,11 +623,34 @@ export class LectureSearchEngine {
           loadedBytes: 0,
           totalBytes: 0,
           percent: 0,
-          label: this.opts.labels.loadingTitles ?? '',
+          label: resolveDynamicLabel(this.opts.labels.loadingTitles),
           phase: 'loading-titles',
         }
       }
       return { loading: false, loadedBytes: 0, totalBytes: 0, percent: 0, label: '', phase: 'idle' }
+    }
+    if (!st.manifestLoaded) {
+      if (st.manifestLoading) {
+        return {
+          loading: true,
+          loadedBytes: 0,
+          totalBytes: 0,
+          percent: 0,
+          label: resolveDynamicLabel(this.opts.labels.loadingTitles),
+          phase: 'loading-shards',
+        }
+      }
+      if (st.loadError) {
+        return {
+          loading: false,
+          loadedBytes: 0,
+          totalBytes: 0,
+          percent: 0,
+          label: resolveDynamicLabel(this.opts.labels.loadError),
+          phase: 'partial-error',
+          error: true,
+        }
+      }
     }
     const pending = st.pendingShards.length + st.inFlightBytes.size > 0
     let loaded = 0
@@ -571,7 +664,7 @@ export class LectureSearchEngine {
           loadedBytes: capped,
           totalBytes: st.totalShardBytes,
           percent: st.totalShardBytes > 0 ? Math.min(99, Math.round((capped / st.totalShardBytes) * 100)) : 0,
-          label: this.opts.labels.loadError ?? '',
+          label: resolveDynamicLabel(this.opts.labels.loadError),
           phase: 'partial-error',
           error: true,
           failedShards: st.failedShardKeys.size,

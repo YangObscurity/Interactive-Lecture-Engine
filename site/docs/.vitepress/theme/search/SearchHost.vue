@@ -74,8 +74,8 @@ const engine = new LectureSearchEngine({
     conceptBadge: t('search.conceptBadge'),
     loadingBar: (loaded, total) => t('search.loadingBar', { loaded, total }),
     loadingIdle: (loaded, total) => t('search.loadingIdle', { loaded, total }),
-    loadingTitles: t('search.loadingTitles'),
-    loadError: t('search.loadError'),
+    loadingTitles: () => t('search.loadingTitles'),
+    loadError: () => t('search.loadError'),
     statusLabel: (status) => {
       if (status === 'completed') return t('sidebar.status.completed')
       if (status === 'in_progress') return t('sidebar.status.inProgress')
@@ -147,7 +147,7 @@ function setScope(next: 'all' | 'group'): void {
   activeIndex.value = 0
   if (next === 'group') engine.prioritizeGroup(activeLocale.value, currentGroupId.value)
   const st = engine.getLoadState(activeLocale.value, query.value.trim().length > 0)
-  if (st.phase === 'error' || st.phase === 'partial-error' || st.phase === 'idle') {
+  if (st.phase === 'error' || st.phase === 'idle') {
     loadIndex(true)
   }
 }
@@ -229,20 +229,19 @@ const panelProps = computed<SearchPanelProps>(() => {
   const hasQuery = query.value.trim().length > 0
   const loadState = engine.getLoadState(activeLocale.value, hasQuery)
   const groups: readonly SearchGroupSectionView[] = searchResult.value.groups
-  const indexUnavailable = loadState.phase === 'loading-titles' || loadState.phase === 'error'
+  const suppressMeta =
+    loadState.phase === 'loading-titles' ||
+    loadState.phase === 'error' ||
+    (Boolean(loadState.error) && groups.length === 0)
   const metaText =
-    hasQuery && !indexUnavailable
+    hasQuery && !suppressMeta
       ? t('search.metaCountTime', { count: searchResult.value.totalHits, ms: searchResult.value.elapsedMs })
       : ''
   const emptyState: SearchPanelProps['emptyState'] = groups.length > 0
     ? null
-    : loadState.phase === 'error'
-      ? 'error'
-      : loadState.phase === 'loading-titles' && hasQuery
-        ? 'loading'
-        : hasQuery
-          ? 'no-results'
-          : 'idle'
+    : hasQuery
+      ? 'no-results'
+      : 'idle'
 
   return {
     query: query.value,
