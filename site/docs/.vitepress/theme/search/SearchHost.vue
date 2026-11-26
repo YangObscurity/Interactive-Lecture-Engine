@@ -74,6 +74,8 @@ const engine = new LectureSearchEngine({
     conceptBadge: t('search.conceptBadge'),
     loadingBar: (loaded, total) => t('search.loadingBar', { loaded, total }),
     loadingIdle: (loaded, total) => t('search.loadingIdle', { loaded, total }),
+    loadingTitles: t('search.loadingTitles'),
+    loadError: t('search.loadError'),
     statusLabel: (status) => {
       if (status === 'completed') return t('sidebar.status.completed')
       if (status === 'in_progress') return t('sidebar.status.inProgress')
@@ -110,12 +112,12 @@ function openSearch(): void {
   // spec board 04.2: on a group or lecture page the default scope is "this group"
   scope.value = currentGroupId.value ? 'group' : 'all'
   isOpen.value = true
-  loadIndex()
+  loadIndex(true)
 }
 
-function loadIndex(): void {
-  engine.ensureLoaded(activeLocale.value, currentGroupId.value).catch(() => {
-    // the title index could not be fetched: the panel stays usable (empty) and the next open retries
+function loadIndex(forceRetry = false): void {
+  engine.ensureLoaded(activeLocale.value, currentGroupId.value, { forceRetry }).catch(() => {
+    // Error status is surfaced cleanly via getLoadState / emptyState='error'; next open/retry will re-fetch
   })
 }
 
@@ -137,13 +139,17 @@ function openHit(hit: SearchHitView): void {
 function setQuery(next: string): void {
   query.value = next
   activeIndex.value = 0
-  if (isOpen.value) loadIndex()
+  if (isOpen.value) loadIndex(false)
 }
 
 function setScope(next: 'all' | 'group'): void {
   scope.value = next
   activeIndex.value = 0
   if (next === 'group') engine.prioritizeGroup(activeLocale.value, currentGroupId.value)
+  const st = engine.getLoadState(activeLocale.value, query.value.trim().length > 0)
+  if (st.phase === 'error' || st.phase === 'partial-error' || st.phase === 'idle') {
+    loadIndex(true)
+  }
 }
 
 function handleDialogKeyDown(ev: KeyboardEvent): void {
@@ -221,13 +227,22 @@ function handleGlobalKeyDown(ev: KeyboardEvent): void {
 const panelProps = computed<SearchPanelProps>(() => {
   void revision.value
   const hasQuery = query.value.trim().length > 0
+  const loadState = engine.getLoadState(activeLocale.value, hasQuery)
   const groups: readonly SearchGroupSectionView[] = searchResult.value.groups
-  const metaText = hasQuery
-    ? t('search.metaCountTime', { count: searchResult.value.totalHits, ms: searchResult.value.elapsedMs })
-    : ''
-  const emptyState = hasQuery
-    ? (groups.length === 0 ? 'no-results' : null)
-    : 'idle'
+  const indexUnavailable = loadState.phase === 'loading-titles' || loadState.phase === 'error'
+  const metaText =
+    hasQuery && !indexUnavailable
+      ? t('search.metaCountTime', { count: searchResult.value.totalHits, ms: searchResult.value.elapsedMs })
+      : ''
+  const emptyState: SearchPanelProps['emptyState'] = groups.length > 0
+    ? null
+    : loadState.phase === 'error'
+      ? 'error'
+      : loadState.phase === 'loading-titles' && hasQuery
+        ? 'loading'
+        : hasQuery
+          ? 'no-results'
+          : 'idle'
 
   return {
     query: query.value,
@@ -237,7 +252,7 @@ const panelProps = computed<SearchPanelProps>(() => {
     groups,
     activeIndex: activeIndex.value,
     metaText,
-    loadState: engine.getLoadState(activeLocale.value, hasQuery),
+    loadState,
     emptyState,
     labels: {
       dialogLabel: t('search.dialogLabel'),
@@ -249,6 +264,9 @@ const panelProps = computed<SearchPanelProps>(() => {
       scopeGroup: t('search.scopeGroup', { id: currentGroupId.value ?? '' }),
       noResults: t('search.noResults'),
       idleHint: t('search.idleHint'),
+      loadingTitles: t('search.loadingTitles'),
+      loadError: t('search.loadError'),
+      retry: t('search.retry'),
       footerSelect: t('search.footerSelect'),
       footerOpen: t('search.footerOpen'),
       footerClose: t('search.footerClose'),
@@ -261,6 +279,7 @@ const panelProps = computed<SearchPanelProps>(() => {
     },
     onOpen: openHit,
     onClose: closeSearch,
+    onRetry: () => loadIndex(true),
     onKeyDown: handleDialogKeyDown,
   }
 })

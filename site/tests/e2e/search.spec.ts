@@ -162,6 +162,34 @@ for (const [theme, expectedImpl] of SKINS) {
       expect(pageErrors).toEqual([])
     })
 
+    test('shows honest error and recovers on retry when search index requires session auth / fails', async ({ page, pageErrors }) => {
+      await useTheme(page, theme, 'light')
+      let blockSearch = true
+      await page.route('**/search/**', async (route) => {
+        if (blockSearch) {
+          await route.fulfill({ status: 401, contentType: 'text/plain', body: 'auth required' })
+          return
+        }
+        await route.continue()
+      })
+
+      await gotoAndSettle(page, '/mea/L03')
+      await page.keyboard.press('ControlOrMeta+k')
+
+      const input = page.locator('#lec-search-input')
+      await input.fill('误差')
+      await expect(page.locator('.sp-empty--error')).toBeVisible({ timeout: 10_000 })
+      await expect(page.locator('.sp-empty--error')).not.toContainText('未找到相关内容')
+      await expect(page.locator('.sp-scope .meta')).toHaveCount(0)
+
+      blockSearch = false
+      await page.locator('.sp-retry-btn').click()
+      await expect(page.locator('.sp-hit').first()).toBeVisible({ timeout: 15_000 })
+      await expect(page.locator('.sp-scope .meta')).toContainText(/\d+\s*条/)
+      await page.unroute('**/search/**')
+      expect(pageErrors).toEqual([])
+    })
+
     test('focus trap: Tab and Shift+Tab stay inside search dialog; Esc closes and returns focus to opener button', async ({ page, pageErrors }) => {
       await useTheme(page, theme, 'light')
       await gotoAndSettle(page, '/mea/L03')

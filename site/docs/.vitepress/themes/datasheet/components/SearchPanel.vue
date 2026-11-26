@@ -117,6 +117,17 @@ watch(
         <i :style="{ width: `${loadState.percent}%` }" />
       </div>
     </div>
+    <div
+      v-else-if="loadState.error && emptyState !== 'error'"
+      class="sp-load sp-load--error"
+      role="status"
+      aria-live="polite"
+    >
+      <span class="sp-load-text">{{ loadState.label }}</span>
+      <button v-if="onRetry && labels.retry" type="button" class="sp-retry-btn" @click="onRetry">
+        {{ labels.retry }}
+      </button>
+    </div>
 
     <div class="sp-scope">
       <span class="sp-scope-lbl">{{ labels.scopeLabel }}</span>
@@ -143,7 +154,16 @@ watch(
     </div>
 
     <div id="lec-search-listbox" class="sp-res" role="listbox" :aria-label="labels.resultsAria">
-      <div v-if="groups.length === 0 && emptyState === 'no-results'" class="sp-empty">
+      <div v-if="groups.length === 0 && emptyState === 'error'" class="sp-empty sp-empty--error" role="status" aria-live="polite">
+        <p class="sp-empty-msg">{{ labels.loadError || loadState.label }}</p>
+        <button v-if="onRetry && labels.retry" type="button" class="sp-retry-btn" @click="onRetry">
+          {{ labels.retry }}
+        </button>
+      </div>
+      <div v-else-if="groups.length === 0 && emptyState === 'loading'" class="sp-empty sp-empty--loading" role="status" aria-live="polite">
+        {{ labels.loadingTitles || loadState.label }}
+      </div>
+      <div v-else-if="groups.length === 0 && emptyState === 'no-results'" class="sp-empty">
         {{ labels.noResults }}
       </div>
       <div v-else-if="groups.length === 0 && emptyState === 'idle'" class="sp-empty sp-empty--idle">
@@ -370,6 +390,33 @@ watch(
   font-family: var(--lec-font-mono);
   font-size: 12.5px;
   color: var(--lec-text-muted);
+}
+
+.sp-load--error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--lec-space-2);
+}
+
+.sp-empty-msg {
+  margin: 0 0 var(--lec-space-2);
+}
+
+.sp-retry-btn {
+  border: var(--lec-line-hair) solid var(--lec-border);
+  border-radius: var(--lec-radius-1);
+  background: var(--lec-surface);
+  color: var(--lec-text);
+  font-family: var(--lec-font-mono);
+  font-size: 12px;
+  padding: 4px 12px;
+  cursor: pointer;
+}
+
+.sp-retry-btn:hover,
+.sp-retry-btn:focus-visible {
+  border-color: var(--lec-text);
 }
 
 .sp-grp h4 {

@@ -439,4 +439,81 @@ describe('client LectureSearchEngine: instant title results, progress, scope and
     expect(rows).toBeLessThan(5) // five matching sections, capped per lecture
     expect(res.totalHits).toBe(rows)
   })
+
+  it('sends same-origin credentials for gateway auth, enters error state on redirect/non-200 instead of false empty results, and recovers on retry', async () => {
+    const titlePayload: TitleIndexFile = {
+      v: 1,
+      locale: 'root',
+      groups: [{ id: 'LR', dir: 'lr', title: '文献精读', catSlot: 1 }],
+      pages: [[0, 6, 'LR-L06', '/lr/L06', '第6讲 · TEEN 协议解析', [[2, '协议核心思想']]]],
+    }
+    const shardRaw = Buffer.from(
+      JSON.stringify({
+        v: 1,
+        shardId: 'lr',
+        groupId: 'LR',
+        pages: ['/lr/L06'],
+        sections: [[0, 's1', ['协议核心思想'], '协议采用双阈值节能机制。']],
+      }),
+      'utf8',
+    )
+    const shard = zlib.deflateRawSync(shardRaw, { level: 9 })
+    const manifestPayload: SearchManifestFile = {
+      v: 1,
+      locale: 'root',
+      titleFile: 'titles.json',
+      titleBytes: Buffer.byteLength(JSON.stringify(titlePayload)),
+      totalShardBytes: shard.byteLength,
+      totalRawShardBytes: shardRaw.byteLength,
+      shards: [{ shardId: 'lr', groupId: 'LR', url: 'shards/lr.sz', bytes: shard.byteLength, rawBytes: shardRaw.byteLength, pageCount: 1 }],
+    }
+
+    let authed = false
+    const seenInits: Array<{ url: string; credentials?: RequestCredentials; redirect?: RequestRedirect }> = []
+    const fetchFn: typeof fetch = async (input, init) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url
+      seenInits.push({ url, credentials: init?.credentials, redirect: init?.redirect })
+      if (!authed) {
+        return { status: 0, ok: false, type: 'opaqueredirect' } as unknown as Response
+      }
+      if (url.endsWith('/manifest.json')) return new Response(JSON.stringify(manifestPayload), { status: 200 })
+      if (url.endsWith('/titles.json')) return new Response(JSON.stringify(titlePayload), { status: 200 })
+      if (url.endsWith('/shards/lr.sz')) return new Response(new Uint8Array(shard), { status: 200 })
+      return new Response('not found', { status: 404 })
+    }
+
+    const engine = new LectureSearchEngine({
+      base: '/',
+      localeKeys: ['en'],
+      siteData: () => ({ themeConfig: { lectureAccess: { inlineTier: 'public', tiers: [] } } }),
+      statusOf: () => 'not_started',
+      labels: {
+        lectureNo: (n) => `第${n}讲`,
+        groupCount: (n) => `${n} 条`,
+        groupSite: '站点页面',
+        loadingBar: (l, t) => `loading ${l}/${t}`,
+        loadingIdle: (l, t) => `idle ${l}/${t}`,
+        loadingTitles: 'loading titles',
+        loadError: 'index load failed',
+        statusLabel: (s) => s,
+      },
+      fetchFn,
+    })
+
+    await expect(engine.ensureLoaded('root', 'LR')).rejects.toThrow()
+    expect(seenInits.every((r) => r.credentials === 'same-origin' && r.redirect === 'manual')).toBe(true)
+    expect(engine.getLoadState('root', true)).toMatchObject({ loading: false, error: true, phase: 'error', label: 'index load failed' })
+    expect(engine.query('root', '协议', 'all', 'LR').totalHits).toBe(0)
+
+    // Without forceRetry, typing doesn't spam requests; reopening with forceRetry recovers cleanly
+    await engine.ensureLoaded('root', 'LR')
+    expect(engine.getLoadState('root', true).phase).toBe('error')
+
+    authed = true
+    await engine.ensureLoaded('root', 'LR', { forceRetry: true })
+    await vi.waitFor(() => expect(engine.getLoadState('root', true).loading).toBe(false), { timeout: 10_000, interval: 10 })
+    expect(seenInits.every((r) => r.credentials === 'same-origin' && r.redirect === 'manual')).toBe(true)
+    expect(engine.getLoadState('root', true)).toMatchObject({ loading: false, phase: 'ready', percent: 100 })
+    expect(engine.query('root', '协议', 'all', 'LR').totalHits).toBeGreaterThan(0)
+  })
 })

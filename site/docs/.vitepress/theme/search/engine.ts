@@ -56,18 +56,21 @@ interface ShardQueueItem {
   meta: ShardMeta
   url: string
   credentials: RequestCredentials
+  cache: RequestCache
 }
 
 export interface LocaleIndexState {
   locale: string
   titleLoaded: boolean
   titleLoading: Promise<void> | null
+  loadError: boolean
   groups: TitleIndexGroup[]
   groupOrder: Map<string, number>
   docsByUrl: Map<string, ClientTitleDoc>
   titleDocs: ClientTitleDoc[]
   sectionsByShard: Map<string, ClientBodySection[]>
   pendingShards: ShardQueueItem[]
+  failedShardsByKey: Map<string, ShardQueueItem>
   loadedShardKeys: Set<string>
   failedShardKeys: Set<string>
   inFlightBytes: Map<string, number>
@@ -142,11 +145,12 @@ export async function fetchCompressedShard(
   credentials: RequestCredentials,
   fetchFn: typeof fetch,
   onProgress: (bytesReceived: number) => void,
+  cache: RequestCache = 'default',
 ): Promise<ShardPayload | null> {
   const res = await fetchFn(url, {
     credentials,
     redirect: 'manual',
-    cache: credentials === 'same-origin' ? 'no-store' : 'default',
+    cache,
   })
   if (res.status !== 200) return null
 
@@ -199,6 +203,8 @@ export interface SearchEngineOptions {
     conceptBadge?: string
     loadingBar: (loadedMb: string, totalMb: string) => string
     loadingIdle: (loadedMb: string, totalMb: string) => string
+    loadingTitles?: string
+    loadError?: string
     statusLabel: (status: ProgressStatus) => string
   }
   fetchFn?: typeof fetch
@@ -236,12 +242,14 @@ export class LectureSearchEngine {
         locale,
         titleLoaded: false,
         titleLoading: null,
+        loadError: false,
         groups: [],
         groupOrder: new Map(),
         docsByUrl: new Map(),
         titleDocs: [],
         sectionsByShard: new Map(),
         pendingShards: [],
+        failedShardsByKey: new Map(),
         loadedShardKeys: new Set(),
         failedShardKeys: new Set(),
         inFlightBytes: new Map(),
@@ -321,6 +329,7 @@ export class LectureSearchEngine {
     manifest: SearchManifestFile,
     urlPrefix: string,
     credentials: RequestCredentials,
+    cache: RequestCache,
   ): void {
     for (const shard of manifest.shards) {
       const key = `${bucketKey}:${shard.shardId}`
@@ -332,9 +341,21 @@ export class LectureSearchEngine {
         meta: shard,
         url: `${urlPrefix}/${shard.url}`.replace(/\/{2,}/g, '/'),
         credentials,
+        cache,
       })
       st.totalShardBytes += shard.bytes
     }
+  }
+
+  private requeueFailedShards(st: LocaleIndexState): void {
+    if (st.failedShardsByKey.size === 0) return
+    for (const [key, item] of st.failedShardsByKey) {
+      st.failedShardKeys.delete(key)
+      if (!st.loadedShardKeys.has(key) && !st.pendingShards.some((p) => p.key === key)) {
+        st.pendingShards.push(item)
+      }
+    }
+    st.failedShardsByKey.clear()
   }
 
   private prioritizeShards(st: LocaleIndexState, preferGroupId: string | null): void {
@@ -346,26 +367,38 @@ export class LectureSearchEngine {
     })
   }
 
-  async ensureLoaded(locale: string, preferGroupId: string | null): Promise<void> {
+  async ensureLoaded(locale: string, preferGroupId: string | null, opts?: { forceRetry?: boolean }): Promise<void> {
     const st = this.getOrCreateState(locale)
     const basePrefix = this.opts.base.replace(/\/$/, '')
+    const forceRetry = Boolean(opts?.forceRetry)
 
-    if (!st.titleLoading) {
+    if (forceRetry && st.loadError && !st.titleLoaded) {
+      st.loadError = false
+    }
+
+    if (!st.titleLoading && !st.titleLoaded && !st.loadError) {
       st.titleLoading = (async () => {
         const publicBase = `${basePrefix}/search/${locale}`
+        // Send same-origin cookies so gateway/forward-auth deployments (e.g. Authelia) authorize search JSON & shards,
+        // and prevent cross-origin login redirects from turning into unhandled CORS/CSP errors via `redirect: 'manual'`.
         const [manifestRes, titleRes] = await Promise.all([
-          this.fetchImpl(`${publicBase}/manifest.json`, { credentials: 'omit' }),
-          this.fetchImpl(`${publicBase}/titles.json`, { credentials: 'omit' }),
+          this.fetchImpl(`${publicBase}/manifest.json`, { credentials: 'same-origin', redirect: 'manual' }),
+          this.fetchImpl(`${publicBase}/titles.json`, { credentials: 'same-origin', redirect: 'manual' }),
         ])
-        if (titleRes.ok) {
-          const titleData = (await titleRes.json()) as TitleIndexFile
-          this.mergeTitleIndex(st, titleData, this.opts.base)
+        if (titleRes.status !== 200) {
+          throw new Error(`Search title index returned status ${titleRes.status}`)
         }
-        if (manifestRes.ok) {
-          const manifest = (await manifestRes.json()) as SearchManifestFile
-          this.enqueueShards(st, 'public', manifest, publicBase, 'omit')
+        if (manifestRes.status !== 200) {
+          throw new Error(`Search manifest returned status ${manifestRes.status}`)
         }
+        const [titleData, manifest] = await Promise.all([
+          titleRes.json() as Promise<TitleIndexFile>,
+          manifestRes.json() as Promise<SearchManifestFile>,
+        ])
+        this.mergeTitleIndex(st, titleData, this.opts.base)
+        this.enqueueShards(st, 'public', manifest, publicBase, 'same-origin', 'default')
         st.titleLoaded = true
+        st.loadError = false
         this.opts.onStateChange?.()
 
         // Only request /_access/<tier>/ when restricted tiers are configured on this build
@@ -386,7 +419,7 @@ export class LectureSearchEngine {
                 }
                 if (tManRes.status === 200) {
                   const tMan = (await tManRes.json()) as SearchManifestFile
-                  this.enqueueShards(st, `tier:${tier.id}`, tMan, tierBase, 'same-origin')
+                  this.enqueueShards(st, `tier:${tier.id}`, tMan, tierBase, 'same-origin', 'no-store')
                 }
               } catch {
                 // Fail closed when tier endpoints do not resolve
@@ -396,14 +429,22 @@ export class LectureSearchEngine {
           this.opts.onStateChange?.()
         }
       })()
+      this.opts.onStateChange?.()
     }
+
+    if (!st.titleLoading) return
 
     try {
       await st.titleLoading
     } catch (err) {
       st.titleLoading = null
       st.titleLoaded = false
+      st.loadError = true
+      this.opts.onStateChange?.()
       throw err
+    }
+    if (forceRetry) {
+      this.requeueFailedShards(st)
     }
     this.prioritizeShards(st, preferGroupId)
     void this.pumpShards(st, preferGroupId)
@@ -434,6 +475,7 @@ export class LectureSearchEngine {
                 st.inFlightBytes.set(item.key, Math.min(bytes, item.meta.bytes))
                 this.opts.onStateChange?.()
               },
+              item.cache,
             )
             st.inFlightBytes.delete(item.key)
             if (payload) {
@@ -459,15 +501,17 @@ export class LectureSearchEngine {
               }
               st.sectionsByShard.set(item.key, parsedSections)
               st.loadedShardKeys.add(item.key)
+              st.failedShardKeys.delete(item.key)
+              st.failedShardsByKey.delete(item.key)
               st.finishedBytes.set(item.key, item.meta.bytes)
             } else {
               st.failedShardKeys.add(item.key)
-              st.finishedBytes.set(item.key, item.meta.bytes)
+              st.failedShardsByKey.set(item.key, item)
             }
           } catch {
             st.inFlightBytes.delete(item.key)
             st.failedShardKeys.add(item.key)
-            st.finishedBytes.set(item.key, item.meta.bytes)
+            st.failedShardsByKey.set(item.key, item)
           }
           this.opts.onStateChange?.()
         }
@@ -488,17 +532,60 @@ export class LectureSearchEngine {
 
   getLoadState(locale: string, hasQuery: boolean): SearchLoadState {
     const st = this.states.get(locale)
-    if (!st || !st.titleLoaded) {
-      return { loading: false, loadedBytes: 0, totalBytes: 0, percent: 0, label: '' }
+    if (!st) {
+      return { loading: false, loadedBytes: 0, totalBytes: 0, percent: 0, label: '', phase: 'idle' }
+    }
+    if (!st.titleLoaded) {
+      if (st.loadError) {
+        return {
+          loading: false,
+          loadedBytes: 0,
+          totalBytes: 0,
+          percent: 0,
+          label: this.opts.labels.loadError ?? '',
+          phase: 'error',
+          error: true,
+        }
+      }
+      if (st.titleLoading) {
+        return {
+          loading: true,
+          loadedBytes: 0,
+          totalBytes: 0,
+          percent: 0,
+          label: this.opts.labels.loadingTitles ?? '',
+          phase: 'loading-titles',
+        }
+      }
+      return { loading: false, loadedBytes: 0, totalBytes: 0, percent: 0, label: '', phase: 'idle' }
     }
     const pending = st.pendingShards.length + st.inFlightBytes.size > 0
-    if (!pending || st.totalShardBytes === 0) {
-      return { loading: false, loadedBytes: st.totalShardBytes, totalBytes: st.totalShardBytes, percent: 100, label: '' }
-    }
     let loaded = 0
     for (const v of st.finishedBytes.values()) loaded += v
     for (const v of st.inFlightBytes.values()) loaded += v
     const capped = Math.min(loaded, st.totalShardBytes)
+    if (!pending || st.totalShardBytes === 0) {
+      if (st.failedShardKeys.size > 0) {
+        return {
+          loading: false,
+          loadedBytes: capped,
+          totalBytes: st.totalShardBytes,
+          percent: st.totalShardBytes > 0 ? Math.min(99, Math.round((capped / st.totalShardBytes) * 100)) : 0,
+          label: this.opts.labels.loadError ?? '',
+          phase: 'partial-error',
+          error: true,
+          failedShards: st.failedShardKeys.size,
+        }
+      }
+      return {
+        loading: false,
+        loadedBytes: st.totalShardBytes,
+        totalBytes: st.totalShardBytes,
+        percent: 100,
+        label: '',
+        phase: 'ready',
+      }
+    }
     const percent = Math.min(99, Math.max(0, Math.round((capped / st.totalShardBytes) * 100)))
     const toMb = (b: number) => (b / (1024 * 1024)).toFixed(1)
     const label = hasQuery
@@ -510,6 +597,7 @@ export class LectureSearchEngine {
       totalBytes: st.totalShardBytes,
       percent,
       label,
+      phase: 'loading-shards',
     }
   }
 
@@ -637,7 +725,7 @@ export class LectureSearchEngine {
         const titleDoc = st.docsByUrl.get(sec.url)
         if (!matchesScope(titleDoc, sec.groupId)) continue
 
-        const combinedLower = `${sec.textLower} ${sec.crumb.toLowerCase()} ${sec.displayTitle.toLowerCase()} ${sec.code.toLowerCase()}`
+        const combinedLower = `${sec.textLower} ${sec.crumb.toLowerCase()} ${sec.displayTitle.toLowerCase()} ${titleDoc?.fullTitle.toLowerCase() ?? ''} ${sec.groupId.toLowerCase()} ${sec.groupTitle.toLowerCase()} ${sec.code.toLowerCase()}`
         let ok = true
         let inBodyCount = 0
         for (const t of termsLower) {
