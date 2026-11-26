@@ -30,6 +30,8 @@ export interface ReadableTier {
 export interface AccessResult {
   /** The tiers the gateway let through, in the order of `lectureAccess.tiers`. */
   tiers: ReadableTier[]
+  /** Tiers whose `site-data.json` check encountered a transient network/5xx fault (not normal 401/403 denial). */
+  failedTiers?: string[]
 }
 
 export const EMPTY_ACCESS: AccessResult = { tiers: [] }
@@ -39,31 +41,45 @@ export function tierUrl(deps: Pick<AccessDeps, 'withBase'>, tier: string, file: 
   return deps.withBase(`${tierBasePath(tier)}/${file}`)
 }
 
+async function fetchTierJsonWithStatus(
+  deps: Pick<AccessDeps, 'fetch'>,
+  url: string,
+): Promise<{ json: unknown | undefined; transientError: boolean }> {
+  try {
+    const res = await deps.fetch(url, { redirect: 'manual', credentials: 'same-origin', cache: 'no-store' })
+    if (res.status >= 500) return { json: undefined, transientError: true }
+    if (res.status !== 200) return { json: undefined, transientError: false }
+    return { json: (await res.json()) as unknown, transientError: false }
+  } catch (err) {
+    // Only treat network/fetch rejections as transient errors (syntax/HTML parse failure is an auth redirect body).
+    const isSyntax = err instanceof SyntaxError
+    return { json: undefined, transientError: !isSyntax }
+  }
+}
+
 /**
  * GET a file of a tier. The answer counts only on a 200 whose body is JSON: a redirect (`redirect: 'manual'` gives an
  * opaque redirect with status 0), 401 / 403, any other status, a network error and a body that is not JSON all give
  * `undefined`.
  */
 export async function fetchTierJson(deps: Pick<AccessDeps, 'fetch'>, url: string): Promise<unknown | undefined> {
-  try {
-    const res = await deps.fetch(url, { redirect: 'manual', credentials: 'same-origin', cache: 'no-store' })
-    if (res.status !== 200) return undefined
-    return (await res.json()) as unknown
-  } catch {
-    return undefined
-  }
+  return (await fetchTierJsonWithStatus(deps, url)).json
 }
 
 /** Ask the gateway which restricted tiers the reader may read. No restricted tier configured: no request at all. */
 export async function resolveAccess(lectureAccess: LectureAccess | undefined, deps: AccessDeps): Promise<AccessResult> {
   const ids = lectureAccess?.tiers ?? []
   if (ids.length === 0) return EMPTY_ACCESS
-  const slices = await Promise.all(ids.map(async (id) => ({ id, json: await fetchTierJson(deps, tierUrl(deps, id, 'site-data.json')) })))
+  const slices = await Promise.all(
+    ids.map(async (id) => ({ id, ...(await fetchTierJsonWithStatus(deps, tierUrl(deps, id, 'site-data.json'))) })),
+  )
   const tiers: ReadableTier[] = []
-  for (const { id, json } of slices) {
+  const failedTiers: string[] = []
+  for (const { id, json, transientError } of slices) {
     if (isTierSlice(json) && json.tier === id) tiers.push({ id, slice: json })
+    else if (transientError) failedTiers.push(id)
   }
-  return { tiers }
+  return failedTiers.length > 0 ? { tiers, failedTiers } : { tiers }
 }
 
 /** The nodes of the `graph.json` of each readable tier (a tier whose file does not arrive or is not an array adds nothing). */

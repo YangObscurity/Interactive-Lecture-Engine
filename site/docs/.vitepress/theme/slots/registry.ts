@@ -433,6 +433,9 @@ export interface SearchLoadState {
   totalBytes: number
   percent: number
   label: string
+  phase?: 'idle' | 'loading-titles' | 'loading-shards' | 'ready' | 'partial-error' | 'error'
+  error?: boolean
+  failedShards?: number
 }
 
 export interface SearchPanelProps {
@@ -455,6 +458,9 @@ export interface SearchPanelProps {
     scopeGroup: string
     noResults: string
     idleHint: string
+    loadingTitles?: string
+    loadError?: string
+    retry?: string
     footerSelect: string
     footerOpen: string
     footerClose: string
@@ -465,6 +471,7 @@ export interface SearchPanelProps {
   onHighlight: (index: number) => void
   onOpen: (hit: SearchHitView) => void
   onClose: () => void
+  onRetry?: () => void
   onKeyDown: (ev: KeyboardEvent) => void
 }
 

@@ -7,12 +7,13 @@
  */
 import { inflateTitleHeadings, stripLectureTitlePrefix, type SearchManifestFile, type ShardMeta, type ShardPayload, type TitleIndexFile, type TitleIndexGroup } from '../../search/format.ts'
 import { tierBasePath } from '../../access/tiers.ts'
-import { lectureAccessOf, getAccess } from '../access/store.ts'
+import { lectureAccessOf, getAccess, invalidateAccess, accessVersion, currentAccess } from '../access/store.ts'
 import { parseLecture } from '../core/route.ts'
 import type { ProgressStatus } from '../progress/types.ts'
 import type { SearchGroupSectionView, SearchHighlightPart, SearchHitView, SearchLoadState } from '../slots/registry.ts'
 
 export interface ClientTitleDoc {
+  tierId?: string
   groupId: string
   groupTitle: string
   catSlot: number
@@ -52,26 +53,41 @@ export interface ClientBodySection {
 
 interface ShardQueueItem {
   key: string
+  tierId?: string
+  tierEpoch: number
   locale: string
   meta: ShardMeta
   url: string
   credentials: RequestCredentials
+  cache: RequestCache
 }
 
 export interface LocaleIndexState {
   locale: string
   titleLoaded: boolean
   titleLoading: Promise<void> | null
+  manifestLoaded: boolean
+  manifestLoading: Promise<void> | null
+  accessLoading: Promise<void> | null
+  accessFetchError: boolean
+  lastAccessVersion: number
+  tierEpoch: Map<string, number>
+  tierTitlesLoaded: Set<string>
+  tierManifestsLoaded: Set<string>
+  failedTierIds: Set<string>
+  loadError: boolean
   groups: TitleIndexGroup[]
   groupOrder: Map<string, number>
   docsByUrl: Map<string, ClientTitleDoc>
   titleDocs: ClientTitleDoc[]
   sectionsByShard: Map<string, ClientBodySection[]>
   pendingShards: ShardQueueItem[]
+  failedShardsByKey: Map<string, ShardQueueItem>
   loadedShardKeys: Set<string>
   failedShardKeys: Set<string>
   inFlightBytes: Map<string, number>
   finishedBytes: Map<string, number>
+  shardBytesByKey: Map<string, number>
   totalShardBytes: number
   shardsPumpPromise: Promise<void> | null
 }
@@ -142,11 +158,12 @@ export async function fetchCompressedShard(
   credentials: RequestCredentials,
   fetchFn: typeof fetch,
   onProgress: (bytesReceived: number) => void,
+  cache: RequestCache = 'default',
 ): Promise<ShardPayload | null> {
   const res = await fetchFn(url, {
     credentials,
     redirect: 'manual',
-    cache: credentials === 'same-origin' ? 'no-store' : 'default',
+    cache,
   })
   if (res.status !== 200) return null
 
@@ -186,6 +203,12 @@ export async function fetchCompressedShard(
   return JSON.parse(text) as ShardPayload
 }
 
+export type SearchLabelValue = string | (() => string)
+
+function resolveDynamicLabel(val?: SearchLabelValue): string {
+  return typeof val === 'function' ? val() : (val ?? '')
+}
+
 export interface SearchEngineOptions {
   base: string
   localeKeys: readonly string[]
@@ -199,6 +222,8 @@ export interface SearchEngineOptions {
     conceptBadge?: string
     loadingBar: (loadedMb: string, totalMb: string) => string
     loadingIdle: (loadedMb: string, totalMb: string) => string
+    loadingTitles?: SearchLabelValue
+    loadError?: SearchLabelValue
     statusLabel: (status: ProgressStatus) => string
   }
   fetchFn?: typeof fetch
@@ -236,16 +261,28 @@ export class LectureSearchEngine {
         locale,
         titleLoaded: false,
         titleLoading: null,
+        manifestLoaded: false,
+        manifestLoading: null,
+        accessLoading: null,
+        accessFetchError: false,
+        lastAccessVersion: -1,
+        tierEpoch: new Map(),
+        tierTitlesLoaded: new Set(),
+        tierManifestsLoaded: new Set(),
+        failedTierIds: new Set(),
+        loadError: false,
         groups: [],
         groupOrder: new Map(),
         docsByUrl: new Map(),
         titleDocs: [],
         sectionsByShard: new Map(),
         pendingShards: [],
+        failedShardsByKey: new Map(),
         loadedShardKeys: new Set(),
         failedShardKeys: new Set(),
         inFlightBytes: new Map(),
         finishedBytes: new Map(),
+        shardBytesByKey: new Map(),
         totalShardBytes: 0,
         shardsPumpPromise: null,
       }
@@ -254,7 +291,7 @@ export class LectureSearchEngine {
     return st
   }
 
-  private mergeTitleIndex(st: LocaleIndexState, payload: TitleIndexFile, base: string): void {
+  private mergeTitleIndex(st: LocaleIndexState, payload: TitleIndexFile, base: string, tierId = 'public'): void {
     const localGroups = payload.groups
     for (const g of localGroups) {
       if (!st.groupOrder.has(g.id)) {
@@ -288,6 +325,7 @@ export class LectureSearchEngine {
       })
 
       const doc: ClientTitleDoc = {
+        tierId,
         groupId: grp.id,
         groupTitle: this.resolveGroupTitle(grp),
         catSlot: grp.catSlot,
@@ -321,20 +359,69 @@ export class LectureSearchEngine {
     manifest: SearchManifestFile,
     urlPrefix: string,
     credentials: RequestCredentials,
+    cache: RequestCache,
   ): void {
+    const tierId = bucketKey.startsWith('tier:') ? bucketKey.slice('tier:'.length) : undefined
+    const tierEpoch = tierId ? (st.tierEpoch.get(tierId) ?? 0) : 0
     for (const shard of manifest.shards) {
       const key = `${bucketKey}:${shard.shardId}`
       if (st.loadedShardKeys.has(key) || st.failedShardKeys.has(key)) continue
       if (st.pendingShards.some((p) => p.key === key)) continue
       st.pendingShards.push({
         key,
+        tierId,
+        tierEpoch,
         locale: st.locale,
         meta: shard,
         url: `${urlPrefix}/${shard.url}`.replace(/\/{2,}/g, '/'),
         credentials,
+        cache,
       })
+      st.shardBytesByKey.set(key, shard.bytes)
       st.totalShardBytes += shard.bytes
     }
+  }
+
+  private isStaleShard(st: LocaleIndexState, item: ShardQueueItem): boolean {
+    return Boolean(item.tierId && (st.tierEpoch.get(item.tierId) ?? 0) !== item.tierEpoch)
+  }
+
+  private evictTierData(st: LocaleIndexState, tierId: string): void {
+    st.tierEpoch.set(tierId, (st.tierEpoch.get(tierId) ?? 0) + 1)
+    st.failedTierIds.delete(tierId)
+    st.tierTitlesLoaded.delete(tierId)
+    st.tierManifestsLoaded.delete(tierId)
+    st.titleDocs = st.titleDocs.filter((doc) => {
+      if (doc.tierId === tierId) {
+        st.docsByUrl.delete(doc.url)
+        return false
+      }
+      return true
+    })
+    const prefix = `tier:${tierId}:`
+    st.pendingShards = st.pendingShards.filter((item) => !item.key.startsWith(prefix))
+    for (const [key, bytes] of st.shardBytesByKey) {
+      if (!key.startsWith(prefix)) continue
+      st.totalShardBytes = Math.max(0, st.totalShardBytes - bytes)
+      st.shardBytesByKey.delete(key)
+      st.sectionsByShard.delete(key)
+      st.loadedShardKeys.delete(key)
+      st.failedShardKeys.delete(key)
+      st.failedShardsByKey.delete(key)
+      st.inFlightBytes.delete(key)
+      st.finishedBytes.delete(key)
+    }
+  }
+
+  private requeueFailedShards(st: LocaleIndexState): void {
+    if (st.failedShardsByKey.size === 0) return
+    for (const [key, item] of st.failedShardsByKey) {
+      st.failedShardKeys.delete(key)
+      if (!st.loadedShardKeys.has(key) && !st.pendingShards.some((p) => p.key === key)) {
+        st.pendingShards.push(item)
+      }
+    }
+    st.failedShardsByKey.clear()
   }
 
   private prioritizeShards(st: LocaleIndexState, preferGroupId: string | null): void {
@@ -346,64 +433,235 @@ export class LectureSearchEngine {
     })
   }
 
-  async ensureLoaded(locale: string, preferGroupId: string | null): Promise<void> {
-    const st = this.getOrCreateState(locale)
-    const basePrefix = this.opts.base.replace(/\/$/, '')
+  private async loadAccessTiers(st: LocaleIndexState, basePrefix: string, forceRetry = false): Promise<void> {
+    const accessCfg = lectureAccessOf(this.opts.siteData())
+    if (!accessCfg || accessCfg.tiers.length === 0) return
 
-    if (!st.titleLoading) {
-      st.titleLoading = (async () => {
-        const publicBase = `${basePrefix}/search/${locale}`
-        const [manifestRes, titleRes] = await Promise.all([
-          this.fetchImpl(`${publicBase}/manifest.json`, { credentials: 'omit' }),
-          this.fetchImpl(`${publicBase}/titles.json`, { credentials: 'omit' }),
-        ])
-        if (titleRes.ok) {
-          const titleData = (await titleRes.json()) as TitleIndexFile
-          this.mergeTitleIndex(st, titleData, this.opts.base)
-        }
-        if (manifestRes.ok) {
-          const manifest = (await manifestRes.json()) as SearchManifestFile
-          this.enqueueShards(st, 'public', manifest, publicBase, 'omit')
-        }
-        st.titleLoaded = true
-        this.opts.onStateChange?.()
+    if (st.accessLoading) {
+      await st.accessLoading
+      return
+    }
 
-        // Only request /_access/<tier>/ when restricted tiers are configured on this build
-        const accessCfg = lectureAccessOf(this.opts.siteData())
-        if (accessCfg && accessCfg.tiers.length > 0) {
-          const access = await getAccess().catch(() => null)
-          await Promise.all(
-            (access?.tiers ?? []).map(async (tier) => {
-              const tierBase = `${basePrefix}${tierBasePath(tier.id)}/search/${locale}`
+    st.accessLoading = (async () => {
+      try {
+        let access: Awaited<ReturnType<typeof getAccess>>
+        let resolvedVersion = -1
+        try {
+          access = await getAccess()
+          if (forceRetry && (st.accessFetchError || st.failedTierIds.size > 0 || (access.failedTiers?.length ?? 0) > 0)) {
+            invalidateAccess()
+            access = await getAccess()
+          }
+          // Ensure `access` and `accessVersion()` belong to the same non-superseded resolution across session swaps.
+          for (let attempt = 0; attempt < 4 && access !== currentAccess(); attempt++) {
+            access = await getAccess()
+          }
+          if (access !== currentAccess()) {
+            st.lastAccessVersion = -1
+            st.accessFetchError = true
+            return
+          }
+          resolvedVersion = accessVersion()
+          st.accessFetchError = (access.failedTiers?.length ?? 0) > 0
+          st.lastAccessVersion = resolvedVersion
+        } catch {
+          st.lastAccessVersion = -1
+          st.accessFetchError = true
+          return
+        }
+
+        const tiers = access?.tiers ?? []
+        const readableIds = new Set(tiers.map((t) => t.id))
+        const knownTiers = new Set([...st.tierTitlesLoaded, ...st.tierManifestsLoaded, ...st.failedTierIds])
+        for (const oldId of knownTiers) {
+          if (!readableIds.has(oldId)) this.evictTierData(st, oldId)
+        }
+
+        await Promise.all(
+          tiers.map(async (tier) => {
+            const needTitle = !st.tierTitlesLoaded.has(tier.id)
+            const needManifest = !st.tierManifestsLoaded.has(tier.id)
+            if (!needTitle && !needManifest) {
+              st.failedTierIds.delete(tier.id)
+              return
+            }
+
+            const tierBase = `${basePrefix}${tierBasePath(tier.id)}/search/${st.locale}`
+            let tierFailed = false
+            const [tManSettled, tTitleSettled] = await Promise.all([
+              needManifest
+                ? this.fetchImpl(`${tierBase}/manifest.json`, { credentials: 'same-origin', redirect: 'manual', cache: 'no-store' }).then(
+                    (res): { res?: Response; err?: unknown } => ({ res }),
+                    (err): { res?: Response; err?: unknown } => ({ err }),
+                  )
+                : Promise.resolve(null),
+              needTitle
+                ? this.fetchImpl(`${tierBase}/titles.json`, { credentials: 'same-origin', redirect: 'manual', cache: 'no-store' }).then(
+                    (res): { res?: Response; err?: unknown } => ({ res }),
+                    (err): { res?: Response; err?: unknown } => ({ err }),
+                  )
+                : Promise.resolve(null),
+            ])
+
+            if (needTitle) {
               try {
-                const [tManRes, tTitleRes] = await Promise.all([
-                  this.fetchImpl(`${tierBase}/manifest.json`, { credentials: 'same-origin', redirect: 'manual', cache: 'no-store' }),
-                  this.fetchImpl(`${tierBase}/titles.json`, { credentials: 'same-origin', redirect: 'manual', cache: 'no-store' }),
-                ])
-                if (tTitleRes.status === 200) {
-                  const tTitleData = (await tTitleRes.json()) as TitleIndexFile
-                  this.mergeTitleIndex(st, tTitleData, this.opts.base)
-                }
-                if (tManRes.status === 200) {
-                  const tMan = (await tManRes.json()) as SearchManifestFile
-                  this.enqueueShards(st, `tier:${tier.id}`, tMan, tierBase, 'same-origin')
+                if (!tTitleSettled || !tTitleSettled.res || tTitleSettled.res.status !== 200) {
+                  tierFailed = true
+                } else {
+                  const tTitleData = (await tTitleSettled.res.json()) as TitleIndexFile
+                  this.mergeTitleIndex(st, tTitleData, this.opts.base, tier.id)
+                  st.tierTitlesLoaded.add(tier.id)
                 }
               } catch {
-                // Fail closed when tier endpoints do not resolve
+                tierFailed = true
               }
-            }),
-          )
+            }
+
+            // Never mark manifest/shards loaded while this tier's titles failed, or pumpShards skips all sections without docs.
+            if (needManifest) {
+              if (!st.tierTitlesLoaded.has(tier.id)) {
+                tierFailed = true
+              } else {
+                try {
+                  if (!tManSettled || !tManSettled.res || tManSettled.res.status !== 200) {
+                    tierFailed = true
+                  } else {
+                    const tMan = (await tManSettled.res.json()) as SearchManifestFile
+                    this.enqueueShards(st, `tier:${tier.id}`, tMan, tierBase, 'same-origin', 'no-store')
+                    st.tierManifestsLoaded.add(tier.id)
+                  }
+                } catch {
+                  tierFailed = true
+                }
+              }
+            }
+
+            if (tierFailed) st.failedTierIds.add(tier.id)
+            else st.failedTierIds.delete(tier.id)
+          }),
+        )
+      } finally {
+        st.accessLoading = null
+        this.opts.onStateChange?.()
+      }
+    })()
+    this.opts.onStateChange?.()
+    await st.accessLoading
+  }
+
+  private async fetchAndEnqueueManifest(
+    st: LocaleIndexState,
+    publicBase: string,
+    prefetched?: Promise<{ res?: Response; err?: unknown }>,
+  ): Promise<void> {
+    if (st.manifestLoaded) return
+    if (!st.manifestLoading) {
+      st.manifestLoading = (async () => {
+        try {
+          let manifestRes: Response
+          if (prefetched) {
+            const settled = await prefetched
+            if (!settled.res) throw (settled.err ?? new Error('Search manifest fetch failed'))
+            manifestRes = settled.res
+          } else {
+            manifestRes = await this.fetchImpl(`${publicBase}/manifest.json`, { credentials: 'same-origin', redirect: 'manual' })
+          }
+          if (manifestRes.status !== 200) {
+            throw new Error(`Search manifest returned status ${manifestRes.status}`)
+          }
+          const manifest = (await manifestRes.json()) as SearchManifestFile
+          this.enqueueShards(st, 'public', manifest, publicBase, 'same-origin', 'default')
+          st.manifestLoaded = true
+          st.loadError = false
+        } catch {
+          st.manifestLoaded = false
+          st.loadError = true
+        } finally {
+          st.manifestLoading = null
           this.opts.onStateChange?.()
         }
       })()
+      this.opts.onStateChange?.()
+    }
+    await st.manifestLoading
+  }
+
+  async ensureLoaded(locale: string, preferGroupId: string | null, opts?: { forceRetry?: boolean }): Promise<void> {
+    const st = this.getOrCreateState(locale)
+    const basePrefix = this.opts.base.replace(/\/$/, '')
+    const publicBase = `${basePrefix}/search/${locale}`
+    const forceRetry = Boolean(opts?.forceRetry)
+
+    if (forceRetry && st.loadError) {
+      st.loadError = false
     }
 
-    try {
-      await st.titleLoading
-    } catch (err) {
-      st.titleLoading = null
-      st.titleLoaded = false
-      throw err
+    if (!st.titleLoading && !st.titleLoaded && !st.loadError) {
+      st.titleLoading = (async () => {
+        try {
+          // Send same-origin cookies so gateway/forward-auth deployments (e.g. Authelia) authorize search JSON & shards,
+          // and prevent cross-origin login redirects from turning into unhandled CORS/CSP errors via `redirect: 'manual'`.
+          // Attach settlement handler on manifest fetch immediately so a titles failure never leaks an unhandled rejection.
+          const manifestSettled = this.fetchImpl(`${publicBase}/manifest.json`, { credentials: 'same-origin', redirect: 'manual' }).then(
+            (res): { res?: Response; err?: unknown } => ({ res }),
+            (err): { res?: Response; err?: unknown } => ({ err }),
+          )
+          const titleRes = await this.fetchImpl(`${publicBase}/titles.json`, { credentials: 'same-origin', redirect: 'manual' })
+          if (titleRes.status !== 200) {
+            void manifestSettled
+            throw new Error(`Search title index returned status ${titleRes.status}`)
+          }
+          const titleData = (await titleRes.json()) as TitleIndexFile
+          this.mergeTitleIndex(st, titleData, this.opts.base)
+          st.titleLoaded = true
+          st.loadError = false
+          this.opts.onStateChange?.()
+
+          // Isolate manifest + access-tier loading so a manifest error never blocks already-loaded title search.
+          await Promise.all([
+            this.fetchAndEnqueueManifest(st, publicBase, manifestSettled),
+            this.loadAccessTiers(st, basePrefix, forceRetry),
+          ])
+        } finally {
+          st.titleLoading = null
+        }
+      })()
+      this.opts.onStateChange?.()
+    }
+
+    if (st.titleLoading) {
+      const pendingTitles = st.titleLoading
+      try {
+        await pendingTitles
+      } catch (err) {
+        st.titleLoaded = false
+        st.loadError = true
+        this.opts.onStateChange?.()
+        throw err
+      }
+    } else if (st.titleLoaded) {
+      const retryTasks: Array<Promise<void>> = []
+      if (forceRetry && !st.manifestLoaded) {
+        retryTasks.push(this.fetchAndEnqueueManifest(st, publicBase))
+      } else if (st.manifestLoading) {
+        retryTasks.push(st.manifestLoading)
+      }
+      if (forceRetry || st.lastAccessVersion !== accessVersion()) {
+        retryTasks.push(this.loadAccessTiers(st, basePrefix, forceRetry))
+      } else if (st.accessLoading) {
+        retryTasks.push(st.accessLoading)
+      }
+      if (retryTasks.length > 0) {
+        await Promise.all(retryTasks)
+      } else if (!st.manifestLoaded && !st.manifestLoading && st.failedTierIds.size === 0 && !st.accessFetchError) {
+        return
+      }
+    } else {
+      return
+    }
+
+    if (forceRetry) {
+      this.requeueFailedShards(st)
     }
     this.prioritizeShards(st, preferGroupId)
     void this.pumpShards(st, preferGroupId)
@@ -431,11 +689,17 @@ export class LectureSearchEngine {
               item.credentials,
               this.fetchImpl,
               (bytes) => {
+                if (this.isStaleShard(st, item)) return
                 st.inFlightBytes.set(item.key, Math.min(bytes, item.meta.bytes))
                 this.opts.onStateChange?.()
               },
+              item.cache,
             )
             st.inFlightBytes.delete(item.key)
+            if (this.isStaleShard(st, item)) {
+              this.opts.onStateChange?.()
+              continue
+            }
             if (payload) {
               const parsedSections: ClientBodySection[] = []
               for (const [pIdx, anchor, pathSegs, text] of payload.sections) {
@@ -459,15 +723,19 @@ export class LectureSearchEngine {
               }
               st.sectionsByShard.set(item.key, parsedSections)
               st.loadedShardKeys.add(item.key)
+              st.failedShardKeys.delete(item.key)
+              st.failedShardsByKey.delete(item.key)
               st.finishedBytes.set(item.key, item.meta.bytes)
             } else {
               st.failedShardKeys.add(item.key)
-              st.finishedBytes.set(item.key, item.meta.bytes)
+              st.failedShardsByKey.set(item.key, item)
             }
           } catch {
             st.inFlightBytes.delete(item.key)
-            st.failedShardKeys.add(item.key)
-            st.finishedBytes.set(item.key, item.meta.bytes)
+            if (!this.isStaleShard(st, item)) {
+              st.failedShardKeys.add(item.key)
+              st.failedShardsByKey.set(item.key, item)
+            }
           }
           this.opts.onStateChange?.()
         }
@@ -488,28 +756,101 @@ export class LectureSearchEngine {
 
   getLoadState(locale: string, hasQuery: boolean): SearchLoadState {
     const st = this.states.get(locale)
-    if (!st || !st.titleLoaded) {
-      return { loading: false, loadedBytes: 0, totalBytes: 0, percent: 0, label: '' }
+    if (!st) {
+      return { loading: false, loadedBytes: 0, totalBytes: 0, percent: 0, label: '', phase: 'idle' }
+    }
+    if (!st.titleLoaded) {
+      if (st.loadError) {
+        return {
+          loading: false,
+          loadedBytes: 0,
+          totalBytes: 0,
+          percent: 0,
+          label: resolveDynamicLabel(this.opts.labels.loadError),
+          phase: 'error',
+          error: true,
+        }
+      }
+      if (st.titleLoading) {
+        return {
+          loading: true,
+          loadedBytes: 0,
+          totalBytes: 0,
+          percent: 0,
+          label: resolveDynamicLabel(this.opts.labels.loadingTitles),
+          phase: 'loading-titles',
+        }
+      }
+      return { loading: false, loadedBytes: 0, totalBytes: 0, percent: 0, label: '', phase: 'idle' }
+    }
+    if (!st.manifestLoaded) {
+      if (st.manifestLoading) {
+        return {
+          loading: true,
+          loadedBytes: 0,
+          totalBytes: 0,
+          percent: 0,
+          label: resolveDynamicLabel(this.opts.labels.loadingTitles),
+          phase: 'loading-shards',
+        }
+      }
+      if (st.loadError) {
+        return {
+          loading: false,
+          loadedBytes: 0,
+          totalBytes: 0,
+          percent: 0,
+          label: resolveDynamicLabel(this.opts.labels.loadError),
+          phase: 'partial-error',
+          error: true,
+        }
+      }
     }
     const pending = st.pendingShards.length + st.inFlightBytes.size > 0
-    if (!pending || st.totalShardBytes === 0) {
-      return { loading: false, loadedBytes: st.totalShardBytes, totalBytes: st.totalShardBytes, percent: 100, label: '' }
-    }
+    const failedTierCount = st.failedTierIds.size + (st.accessFetchError ? 1 : 0)
     let loaded = 0
     for (const v of st.finishedBytes.values()) loaded += v
     for (const v of st.inFlightBytes.values()) loaded += v
     const capped = Math.min(loaded, st.totalShardBytes)
-    const percent = Math.min(99, Math.max(0, Math.round((capped / st.totalShardBytes) * 100)))
+    if ((!pending && !st.accessLoading && !st.manifestLoading) || (st.totalShardBytes === 0 && !st.accessLoading && !st.manifestLoading)) {
+      if (st.failedShardKeys.size > 0 || failedTierCount > 0) {
+        return {
+          loading: false,
+          loadedBytes: capped,
+          totalBytes: st.totalShardBytes,
+          percent: st.totalShardBytes > 0 ? Math.min(99, Math.round((capped / st.totalShardBytes) * 100)) : 0,
+          label: resolveDynamicLabel(this.opts.labels.loadError),
+          phase: 'partial-error',
+          error: true,
+          failedShards: st.failedShardKeys.size + failedTierCount,
+        }
+      }
+      return {
+        loading: false,
+        loadedBytes: st.totalShardBytes,
+        totalBytes: st.totalShardBytes,
+        percent: 100,
+        label: '',
+        phase: 'ready',
+      }
+    }
+    const percent =
+      st.totalShardBytes > 0 ? Math.min(99, Math.max(0, Math.round((capped / st.totalShardBytes) * 100))) : 0
     const toMb = (b: number) => (b / (1024 * 1024)).toFixed(1)
-    const label = hasQuery
-      ? this.opts.labels.loadingBar(toMb(capped), toMb(st.totalShardBytes))
-      : this.opts.labels.loadingIdle(toMb(capped), toMb(st.totalShardBytes))
+    const label =
+      st.totalShardBytes === 0
+        ? resolveDynamicLabel(this.opts.labels.loadingTitles) ||
+          (hasQuery ? this.opts.labels.loadingBar(toMb(capped), toMb(st.totalShardBytes)) : this.opts.labels.loadingIdle(toMb(capped), toMb(st.totalShardBytes)))
+        : hasQuery
+          ? this.opts.labels.loadingBar(toMb(capped), toMb(st.totalShardBytes))
+          : this.opts.labels.loadingIdle(toMb(capped), toMb(st.totalShardBytes))
     return {
       loading: true,
       loadedBytes: capped,
       totalBytes: st.totalShardBytes,
       percent,
       label,
+      phase: 'loading-shards',
     }
   }
 
@@ -637,7 +978,7 @@ export class LectureSearchEngine {
         const titleDoc = st.docsByUrl.get(sec.url)
         if (!matchesScope(titleDoc, sec.groupId)) continue
 
-        const combinedLower = `${sec.textLower} ${sec.crumb.toLowerCase()} ${sec.displayTitle.toLowerCase()} ${sec.code.toLowerCase()}`
+        const combinedLower = `${sec.textLower} ${sec.crumb.toLowerCase()} ${sec.displayTitle.toLowerCase()} ${titleDoc?.fullTitle.toLowerCase() ?? ''} ${sec.groupId.toLowerCase()} ${sec.groupTitle.toLowerCase()} ${sec.code.toLowerCase()}`
         let ok = true
         let inBodyCount = 0
         for (const t of termsLower) {

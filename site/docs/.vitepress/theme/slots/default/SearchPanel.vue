@@ -4,13 +4,28 @@
  *
  * Pure drawing & event forwarding component: all state, index loading, filtering and navigation live in `theme/search/`.
  */
-import { nextTick, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import type { SearchGroupSectionView, SearchHitView, SearchPanelProps } from '../registry.ts'
 
 const props = defineProps<SearchPanelProps>()
 
 const inputRef = ref<HTMLInputElement | null>(null)
 const optionRefs = ref<Map<number, HTMLElement>>(new Map())
+
+const isIndexError = computed(
+  () => props.loadState.phase === 'error' || props.loadState.phase === 'partial-error' || Boolean(props.loadState.error),
+)
+const showErrorEmpty = computed(() => props.groups.length === 0 && isIndexError.value)
+const showLoadingEmpty = computed(
+  () => !showErrorEmpty.value && props.groups.length === 0 && props.loadState.loading && props.query.trim().length > 0,
+)
+
+function handleRetry(): void {
+  props.onRetry?.()
+  void nextTick(() => {
+    inputRef.value?.focus()
+  })
+}
 
 function setOptionRef(index: number, el: unknown): void {
   if (el instanceof HTMLElement) optionRefs.value.set(index, el)
@@ -86,8 +101,8 @@ watch(
         spellcheck="false"
         role="combobox"
         aria-autocomplete="list"
-        aria-expanded="true"
-        aria-controls="lec-search-listbox"
+        :aria-expanded="groups.length > 0"
+        :aria-controls="groups.length > 0 ? 'lec-search-listbox' : undefined"
         :aria-activedescendant="activeIndex >= 0 ? optionId(activeIndex) : undefined"
         :aria-label="labels.placeholder"
         :placeholder="labels.placeholder"
@@ -122,6 +137,17 @@ watch(
         <i :style="{ width: `${loadState.percent}%` }" />
       </div>
     </div>
+    <div
+      v-else-if="loadState.error && !showErrorEmpty"
+      class="sp-load sp-load--error"
+      role="status"
+      aria-live="polite"
+    >
+      <span class="sp-load-text">{{ loadState.label }}</span>
+      <button v-if="onRetry && labels.retry" type="button" class="sp-retry-btn" @click="handleRetry">
+        {{ labels.retry }}
+      </button>
+    </div>
 
     <div class="sp-scope">
       <span class="sp-scope-lbl">{{ labels.scopeLabel }}</span>
@@ -147,15 +173,25 @@ watch(
       <span v-if="metaText" class="meta" role="status" aria-live="polite">{{ metaText }}</span>
     </div>
 
-    <div id="lec-search-listbox" class="sp-res" role="listbox" :aria-label="labels.resultsAria">
-      <div v-if="groups.length === 0 && emptyState === 'no-results'" class="sp-empty">
+    <div class="sp-res">
+      <div v-if="showErrorEmpty" class="sp-empty sp-empty--error" role="status" aria-live="polite">
+        <p class="sp-empty-msg">{{ labels.loadError || loadState.label }}</p>
+        <button v-if="onRetry && labels.retry" type="button" class="sp-retry-btn" @click="handleRetry">
+          {{ labels.retry }}
+        </button>
+      </div>
+      <div v-else-if="showLoadingEmpty" class="sp-empty sp-empty--loading" role="status" aria-live="polite">
+        {{ loadState.phase === 'loading-shards' ? (loadState.label || labels.loadingTitles) : (labels.loadingTitles || loadState.label) }}
+      </div>
+      <div v-else-if="groups.length === 0 && emptyState === 'no-results'" class="sp-empty">
         {{ labels.noResults }}
       </div>
       <div v-else-if="groups.length === 0 && emptyState === 'idle'" class="sp-empty sp-empty--idle">
         {{ labels.idleHint }}
       </div>
 
-      <section v-for="(grp, gi) in groups" :key="grp.groupId" class="sp-grp" role="group" :aria-labelledby="`lec-sp-grp-${gi}`">
+      <div v-if="groups.length > 0" id="lec-search-listbox" role="listbox" :aria-label="labels.resultsAria">
+        <section v-for="(grp, gi) in groups" :key="grp.groupId" class="sp-grp" role="group" :aria-labelledby="`lec-sp-grp-${gi}`">
         <h4 :id="`lec-sp-grp-${gi}`" role="presentation">
           <span>{{ groupHeading(grp) }}</span>
           <em>{{ grp.countLabel }}</em>
@@ -195,7 +231,8 @@ watch(
             </template>
           </span>
         </a>
-      </section>
+        </section>
+      </div>
     </div>
 
     <div class="sp-foot">
@@ -372,6 +409,34 @@ watch(
   text-align: center;
   font-size: 13px;
   color: var(--lec-text-muted);
+}
+
+.sp-load--error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--lec-space-2);
+}
+
+.sp-empty-msg {
+  margin: 0 0 var(--lec-space-2);
+}
+
+.sp-retry-btn {
+  border: var(--lec-line-hair) solid var(--lec-border);
+  border-radius: var(--lec-radius-1);
+  background: var(--lec-bg);
+  color: var(--lec-text);
+  font: inherit;
+  font-size: 12px;
+  padding: 4px 12px;
+  cursor: pointer;
+}
+
+.sp-retry-btn:hover,
+.sp-retry-btn:focus-visible {
+  border-color: var(--lec-accent);
+  color: var(--lec-accent);
 }
 
 .sp-grp h4 {
