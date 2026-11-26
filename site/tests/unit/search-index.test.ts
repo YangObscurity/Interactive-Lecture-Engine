@@ -21,7 +21,7 @@ import {
 } from '../../docs/.vitepress/search/format.ts'
 import { buildSearchArtifacts, SearchBudgetError, writeSearchArtifacts } from '../../docs/.vitepress/search/indexBuilder.ts'
 import { extractSearchablePage } from '../../docs/.vitepress/search/markdown.ts'
-import { configureAccess } from '../../docs/.vitepress/theme/access/store.ts'
+import { configureAccess, getAccess, invalidateAccess } from '../../docs/.vitepress/theme/access/store.ts'
 import { LectureSearchEngine, buildSnippet, splitHighlightParts, type LocaleIndexState } from '../../docs/.vitepress/theme/search/engine.ts'
 
 const tmpDirs: string[] = []
@@ -976,6 +976,89 @@ describe('client LectureSearchEngine: instant title results, progress, scope and
       await engine.ensureLoaded('root', null, { forceRetry: true })
       await vi.waitFor(() => expect(engine.getLoadState('root', true).loading).toBe(false), { timeout: 5_000, interval: 5 })
       expect(engine.query('root', '竞态恢复内容', 'all', null).totalHits).toBe(1)
+    } finally {
+      configureAccess({ siteData: { value: {} }, withBase: (p) => p })
+    }
+  })
+
+  it('discards superseded getAccess() results on concurrent session switch and pairs lastAccessVersion with currentAccess', async () => {
+    const publicTitles: TitleIndexFile = {
+      v: 1,
+      locale: 'root',
+      groups: [{ id: 'G01', dir: 'g01', title: '公开组', catSlot: 1 }],
+      pages: [[0, 1, 'G01-L01', '/g01/L01', '第1讲 · 公开导论', []]],
+    }
+    const emptyManifest: SearchManifestFile = {
+      v: 1,
+      locale: 'root',
+      titleFile: 'titles.json',
+      titleBytes: 10,
+      totalShardBytes: 0,
+      totalRawShardBytes: 0,
+      shards: [],
+    }
+    const vipTitles: TitleIndexFile = {
+      v: 1,
+      locale: 'root',
+      groups: [{ id: 'VIP', dir: 'vip', title: '进阶组', catSlot: 2 }],
+      pages: [[0, 1, 'VIP-L01', '/vip/L01', '第1讲 · 越权旧结果', []]],
+    }
+
+    let releaseFirstSiteData!: () => void
+    const firstSiteDataGate = new Promise<void>((r) => {
+      releaseFirstSiteData = r
+    })
+    let siteDataCalls = 0
+    const siteObj = { themeConfig: { lectureAccess: { inlineTier: 'public', tiers: ['vip'] } } }
+    const fetchFn: typeof fetch = async (input) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url
+      if (url.endsWith('/_access/vip/site-data.json')) {
+        const call = ++siteDataCalls
+        if (call === 1) {
+          await firstSiteDataGate
+          return new Response(JSON.stringify({ version: 1, tier: 'vip', groups: [], totals: { lectures: 1, charts: 0 }, locales: {} }), { status: 200 })
+        }
+        return new Response('denied', { status: 403 })
+      }
+      if (url.endsWith('/_access/vip/search/root/titles.json')) return new Response(JSON.stringify(vipTitles), { status: 200 })
+      if (url.endsWith('/_access/vip/search/root/manifest.json')) return new Response(JSON.stringify(emptyManifest), { status: 200 })
+      if (url.endsWith('/search/root/titles.json')) return new Response(JSON.stringify(publicTitles), { status: 200 })
+      if (url.endsWith('/search/root/manifest.json')) return new Response(JSON.stringify(emptyManifest), { status: 200 })
+      return new Response('not found', { status: 404 })
+    }
+
+    configureAccess({ siteData: { value: siteObj }, withBase: (p) => p, fetch: fetchFn })
+    try {
+      const engine = new LectureSearchEngine({
+        base: '/',
+        localeKeys: ['en'],
+        siteData: () => siteObj,
+        statusOf: () => 'not_started',
+        labels: {
+          lectureNo: (n) => `第${n}讲`,
+          groupCount: (n) => `${n} 条`,
+          groupSite: '概览',
+          loadingBar: (l, t) => `loading ${l}/${t}`,
+          loadingIdle: (l, t) => `idle ${l}/${t}`,
+          loadingTitles: '正在加载搜索索引…',
+          statusLabel: (s) => s,
+        },
+        fetchFn,
+      })
+
+      const p = engine.ensureLoaded('root', null)
+      await vi.waitFor(() => expect(siteDataCalls).toBe(1), { timeout: 5_000, interval: 5 })
+
+      // Mid-flight session downgrade: newer getAccess() starts and resolves 403 BEFORE call #1 resolves 200
+      invalidateAccess()
+      await getAccess()
+      expect(siteDataCalls).toBe(2)
+
+      releaseFirstSiteData()
+      await p
+      expect(engine.query('root', '越权旧结果', 'all', null).totalHits).toBe(0)
+      expect(engine.query('root', '公开导论', 'all', null).totalHits).toBe(1)
+      expect(engine.getLoadState('root', true).phase).toBe('ready')
     } finally {
       configureAccess({ siteData: { value: {} }, withBase: (p) => p })
     }

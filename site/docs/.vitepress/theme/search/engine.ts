@@ -7,7 +7,7 @@
  */
 import { inflateTitleHeadings, stripLectureTitlePrefix, type SearchManifestFile, type ShardMeta, type ShardPayload, type TitleIndexFile, type TitleIndexGroup } from '../../search/format.ts'
 import { tierBasePath } from '../../access/tiers.ts'
-import { lectureAccessOf, getAccess, invalidateAccess, accessVersion } from '../access/store.ts'
+import { lectureAccessOf, getAccess, invalidateAccess, accessVersion, currentAccess } from '../access/store.ts'
 import { parseLecture } from '../core/route.ts'
 import type { ProgressStatus } from '../progress/types.ts'
 import type { SearchGroupSectionView, SearchHighlightPart, SearchHitView, SearchLoadState } from '../slots/registry.ts'
@@ -445,15 +445,27 @@ export class LectureSearchEngine {
     st.accessLoading = (async () => {
       try {
         let access: Awaited<ReturnType<typeof getAccess>>
+        let resolvedVersion = -1
         try {
           access = await getAccess()
           if (forceRetry && (st.accessFetchError || st.failedTierIds.size > 0 || (access.failedTiers?.length ?? 0) > 0)) {
             invalidateAccess()
             access = await getAccess()
           }
+          // Ensure `access` and `accessVersion()` belong to the same non-superseded resolution across session swaps.
+          for (let attempt = 0; attempt < 4 && access !== currentAccess(); attempt++) {
+            access = await getAccess()
+          }
+          if (access !== currentAccess()) {
+            st.lastAccessVersion = -1
+            st.accessFetchError = true
+            return
+          }
+          resolvedVersion = accessVersion()
           st.accessFetchError = (access.failedTiers?.length ?? 0) > 0
-          st.lastAccessVersion = accessVersion()
+          st.lastAccessVersion = resolvedVersion
         } catch {
+          st.lastAccessVersion = -1
           st.accessFetchError = true
           return
         }
