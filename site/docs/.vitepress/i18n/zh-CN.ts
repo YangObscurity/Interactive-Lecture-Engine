@@ -74,6 +74,7 @@ export const zhCN = {
   // ---- shared -------------------------------------------------------------------------------
   'lecture.fallbackTitle': '第 {n} 讲',
   'group.temp': '临时',
+  'group.tempHint': '临时组 · 进度仅存数据库或本地，不同步 Notion',
 
   // ---- home page (HomeBody) -----------------------------------------------------------------
   'home.startFrom': '开始学习 {id} {title}',
@@ -575,6 +576,9 @@ export const zhCN = {
   'ai.notionSyncRetry': '重试同步',
   'ai.notionSyncFailed': 'Notion 同步失败（{detail}）',
   'ai.lpcAdminFooterHint': '管理员模式 · 进度同步至 Notion',
+  'ai.tempGroupBadge': '临时组',
+  'ai.tempGroupDbOnly': '临时组 · 进度存入数据库并缓存在本地（不同步 Notion）',
+  'ai.tempGroupLocalOnly': '临时组 · 进度仅保存在本地浏览器（不同步 Notion）',
   'ai.uploadNoFile': '未选择任何文件',
   'ai.uploadEmptyFile': '文件大小为 0 字节，无法上传空文件',
   'ai.uploadTooLarge': '文件大小超过 50MB 限制 (当前大小: {size})',

@@ -307,7 +307,7 @@ async function dispatchSyncRequest(task: NotionSyncItem): Promise<{ ok: boolean;
 }
 
 function isNonRetryableStatus(status: number): boolean {
-  return status === 400 || status === 401 || status === 403 || status === 404 || status === 422
+  return status === 400 || status === 401 || status === 403 || status === 404 || status === 422 || status === 501
 }
 
 let lastFailureDetail: string | null = null

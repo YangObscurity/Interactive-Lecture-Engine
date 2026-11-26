@@ -66,6 +66,8 @@ export interface CurriculumGroup {
   category: string
   /** Colour slot 1-8 of the category (`--lec-cat-<slot>`), assigned over ALL groups of the site, so it does not move when a group is left out. */
   catSlot: number
+  /** Formal temporary group flag (`groups.ts` `temp: true`): sorted last, badged, DB/local progress only. */
+  temp?: true
   /** P4b: false when omitted from the dependency canvas (`groups.mts` `map: false`); stays in atlas and cards. */
   map?: false
   lectures: CurriculumLecture[]
@@ -224,6 +226,7 @@ export interface SourceGroup {
   dir: string
   title: string
   category?: string
+  temp?: boolean
   map?: false
   i18n?: GroupI18n
   lectures: readonly SourceLecture[]
@@ -415,6 +418,7 @@ export function buildCurriculum(input: BuildInput): CurriculumBuild {
       title: pickLocalized(g, loc.lang, 'title'),
       category: pickLocalized(g, loc.lang, 'category'),
       catSlot: input.slotOf(g.id),
+      ...(g.temp === true ? { temp: true as const } : {}),
       ...(g.map === false ? { map: false as const } : {}),
       lectures: [...g.lectures]
         .sort((a, b) => a.n - b.n)
@@ -463,6 +467,7 @@ export function isGroup(g: unknown): g is CurriculumGroup {
     typeof g.title === 'string' &&
     typeof g.category === 'string' &&
     typeof g.catSlot === 'number' &&
+    (g.temp === undefined || typeof g.temp === 'boolean') &&
     (g.map === undefined || g.map === false) &&
     Array.isArray(g.lectures) &&
     g.lectures.every(isLecture) &&

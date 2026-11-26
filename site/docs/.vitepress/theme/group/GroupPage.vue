@@ -418,6 +418,7 @@ onBeforeUnmount(() => {
       :prefix="prefix"
       :cta="cta"
       :notion-lang="notionLang"
+      :temp="Boolean(group.temp)"
     />
 
     <section class="gp-sec" :aria-label="t('group.map.title')" data-gp-section="map">

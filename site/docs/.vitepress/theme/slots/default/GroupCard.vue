@@ -17,6 +17,7 @@ const marks = computed(() => Array.from(props.ticks).map((c) => (c === 'r' ? 're
     <div class="gcard-top">
       <b>{{ id }}</b>
       <span>{{ category }}</span>
+      <span v-if="temp && tempLabel" class="hc-temp" data-temp-badge>{{ tempLabel }}</span>
       <span class="cnt">{{ labels.lectures }}</span>
     </div>
     <h3>{{ title }}</h3>
@@ -54,6 +55,7 @@ const marks = computed(() => Array.from(props.ticks).map((c) => (c === 'r' ? 're
 .gcard p { margin: 0; }
 .gcard-top { display: flex; align-items: baseline; gap: var(--lec-space-2); font-size: 12.5px; color: var(--lec-text-muted); }
 .gcard-top b { font: 700 13px var(--lec-font-heading); color: var(--lec-text); }
+.gcard-top .hc-temp { font-size: 11px; line-height: 1.45; padding: 0 6px; border: 1px dashed var(--lec-border); border-radius: var(--lec-radius-1); background: var(--lec-bg); color: var(--lec-text-muted); white-space: nowrap; }
 .gcard-top .cnt { margin-left: auto; font: 400 12px var(--lec-font-mono); }
 .gcard h3 { margin: 0; padding: 0; border: 0; font-size: 18px; font-weight: var(--lec-heading-weight); line-height: 1.4; }
 .tagl { margin-top: -6px; font-size: 13px; font-weight: 500; color: var(--lec-text-muted); }

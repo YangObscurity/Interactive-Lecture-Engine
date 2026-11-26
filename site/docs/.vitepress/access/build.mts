@@ -346,7 +346,10 @@ export function applyAccess<C extends UserConfig>(cfg: C, input: ApplyAccessInpu
         const tier = plan.tierOfGroup[owner.groupId] ?? plan.inlineTier
         fm.accessTier = tier
         const isIndex = rel === `${owner.locale ? `${owner.locale}/` : ''}${owner.dir}/index.md`
-        if (tier !== plan.inlineTier && isIndex) fm.groupMeta = metaOf.get(owner.groupId)
+        if (tier !== plan.inlineTier) {
+          if (isIndex) fm.groupMeta = metaOf.get(owner.groupId)
+          else if (metaOf.get(owner.groupId)?.temp === true) fm.groupTemp = true
+        }
       }
       return prior
     }

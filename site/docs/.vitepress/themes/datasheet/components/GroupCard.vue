@@ -22,6 +22,8 @@ const props = defineProps<{
   ticks: string
   pkg: string
   next: { kind: 'reading' | 'start' | 'done' | 'next'; heading: string; title: string }
+  temp?: boolean
+  tempLabel?: string
   labels: { lectures: string; read: string; readHeading: string; lecturesHeading: string; tagsHeading: string; tagsSeparator: string; enter: string }
 }>()
 
@@ -70,7 +72,11 @@ const geo = computed(() => {
   <a class="dcard" :href="href" :data-group="id" :style="{ '--c': `var(--lec-cat-${slot})` }">
     <div class="dcard-top">
       <span class="grp"><i />{{ category }}</span>
-      <span>{{ id }}</span>
+      <span v-if="temp && tempLabel" class="dcard-top-r">
+        <span class="dcard-temp" data-temp-badge>{{ tempLabel }}</span>
+        <span class="dcard-id">{{ id }}</span>
+      </span>
+      <span v-else>{{ id }}</span>
     </div>
     <h3>{{ title }}</h3>
     <p class="tagl">{{ tagline }}</p>
@@ -118,7 +124,9 @@ const geo = computed(() => {
 .dcard-top { display: flex; justify-content: space-between; gap: var(--lec-space-3); font-size: 12.5px; color: var(--lec-text-muted); }
 .grp { display: inline-flex; align-items: center; gap: var(--lec-space-2); color: var(--lec-text); font-weight: 500; }
 .grp i { width: 10px; height: 10px; background: var(--c); border-radius: 2px; }
-.dcard-top span:last-child { font-family: var(--lec-font-mono); }
+.dcard-top-r { display: inline-flex; align-items: center; gap: 6px; }
+.dcard-temp { font-size: 11px; line-height: 1.45; padding: 0 5px; border: 1px dashed var(--lec-border); border-radius: var(--lec-radius-1); color: var(--lec-text-muted); background: var(--lec-bg); white-space: nowrap; }
+.dcard-top > span:last-child, .dcard-id { font-family: var(--lec-font-mono); }
 .dcard h3 { margin: 0; padding: 0; border: 0; font-size: 19px; font-weight: var(--lec-heading-weight); line-height: 1.35; }
 .tagl { margin-top: -6px; font-size: 13px; color: var(--lec-text-muted); }
 .pkg { max-width: 100%; height: auto; margin: var(--lec-space-1) 0; display: block; }

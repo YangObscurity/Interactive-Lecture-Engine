@@ -665,7 +665,11 @@ const accessFileRelPath = computed(() => effectiveAccess.value?.accessFile?.path
                   />
                 </label>
               </td>
-              <td :data-l="t('dsh.ac.colGroup')" class="nl"><span class="db-id">{{ g.id }}</span> {{ g.title }}</td>
+              <td :data-l="t('dsh.ac.colGroup')" class="nl">
+                <span class="db-id">{{ g.id }}</span>
+                <span v-if="g.temp" class="db-temp" data-temp-badge>{{ t('dsh.common.temp') }}</span>
+                {{ g.title }}
+              </td>
               <td :data-l="t('dsh.ac.colLectures')" class="n">{{ g.lectureCount ?? 0 }}</td>
               <td :data-l="t('dsh.ac.colCharts')" class="n">{{ g.chartCount ?? 0 }}</td>
               <td :data-l="t('dsh.ac.colTier')">

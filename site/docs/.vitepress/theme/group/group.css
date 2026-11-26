@@ -131,8 +131,28 @@
   border-radius: 2px;
   background: var(--c);
 }
+.gp-tb-top .gp-tb-right {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--lec-space-2);
+}
+.gp-tb-top .gid-temp {
+  font-size: 11px;
+  line-height: 1.45;
+  padding: 0 6px;
+  border: 1px dashed var(--lec-border);
+  border-radius: var(--lec-radius-1);
+  background: var(--lec-bg);
+  color: var(--lec-text-muted);
+  white-space: nowrap;
+}
 .gp-tb-top .gid {
   font-family: var(--lec-font-mono);
+}
+.gp .gp-tb .gp-temp-note {
+  margin-top: calc(-1 * var(--lec-space-1));
+  font-size: 13px;
+  color: var(--lec-text-muted);
 }
 .gp .gp-tb h1 {
   font-size: 36px;

@@ -46,5 +46,6 @@ export interface PageGroup {
   chartCount: number
   category?: string
   catSlot?: number
+  temp?: boolean
   i18n?: GroupI18n
 }

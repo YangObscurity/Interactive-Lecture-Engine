@@ -214,7 +214,11 @@ onBeforeUnmount(() => skinObserver?.disconnect())
           <tbody>
             <template v-for="(g, i) in groups" :key="g.id">
               <tr :class="{ cur: open === g.id }" :style="{ '--c': `var(--lec-cat-${(i % 8) + 1})` }" :data-overview-group="g.id">
-                <td :data-l="t('dsh.ov.colGroup')"><b>{{ g.id }}</b> {{ g.title }}</td>
+                <td :data-l="t('dsh.ov.colGroup')">
+                  <b>{{ g.id }}</b>
+                  <span v-if="g.temp" class="db-temp" data-temp-badge>{{ t('dsh.common.temp') }}</span>
+                  {{ g.title }}
+                </td>
                 <td :data-l="t('dsh.ov.colLectures')" class="n">{{ g.lectureCount ?? 0 }}</td>
                 <td :data-l="t('dsh.ov.colCheck')"><span class="db-stat"><span class="dm" :data-k="badgeOf(g).k" aria-hidden="true"></span>{{ badgeOf(g).text }}</span></td>
                 <td :data-l="t('dsh.ov.colTier')"><span v-if="tierOf(g)" class="db-tag" data-overview-tier>{{ tierOf(g) }}</span><span v-else class="db-muted">—</span></td>
@@ -232,7 +236,11 @@ onBeforeUnmount(() => skinObserver?.disconnect())
       <ul v-else class="db-groups">
         <li v-for="(g, i) in groups" :key="g.id" :style="{ '--c': `var(--lec-cat-${(i % 8) + 1})` }" :data-overview-group="g.id">
           <button type="button" class="db-gt" :aria-expanded="open === g.id" @click="toggle(g.id)">
-            <span class="db-gh"><b>{{ g.id }}</b><span class="db-gn">{{ g.title }}</span></span>
+            <span class="db-gh">
+              <b>{{ g.id }}</b>
+              <span v-if="g.temp" class="db-temp" data-temp-badge>{{ t('dsh.common.temp') }}</span>
+              <span class="db-gn">{{ g.title }}</span>
+            </span>
             <span class="db-gm">
               <span>{{ t('dsh.ov.nLectures', { n: g.lectureCount ?? 0 }) }}</span>
               <span class="db-stat"><span class="dm" :data-k="badgeOf(g).k" aria-hidden="true"></span>{{ badgeOf(g).text }}</span>

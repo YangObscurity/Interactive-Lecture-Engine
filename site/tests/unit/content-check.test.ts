@@ -243,6 +243,14 @@ describe('check:content --only <category> (the Dashboard reruns one check)', () 
       const graph = await runContentCheck({ paths, only: ['graph'] })
       expect(graph.issues).toEqual([])
       expect(graph.ok).toBe(true)
+
+      fs.writeFileSync(
+        paths.groups,
+        `export const GROUPS = [{ id: 'DC', dir: 'digital', title: 'D', temp: 'yes' }]\n`,
+      )
+      const badTemp = await runContentCheck({ paths, only: ['group'] })
+      expect(badTemp.ok).toBe(false)
+      expect(codes(badTemp.issues, 'fail')).toContain('group.invalid_temp')
     } finally {
       if (prev === undefined) delete process.env.LECTURE_CONTENT_DIR
       else process.env.LECTURE_CONTENT_DIR = prev

@@ -8,7 +8,7 @@
  *   title     course name; tagline: one line; summary: what the group covers
  *   accent    card colour (hex); tags: keywords
  *   category  optional category name (groups with one category share a colour slot)
- *   temp      optional: sorted last and marked as temporary;  map: false keeps it off the home map
+ *   temp      optional: formal temporary group (sorted last, marked Temp, DB/local progress only — no Notion sync);  map: false keeps it off the home map
  *   i18n      optional translations: { en: { title, tagline, summary, category } }
  * Lecture and chart counts are never written here: the engine counts the files.
  */

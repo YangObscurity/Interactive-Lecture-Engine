@@ -17,7 +17,7 @@ export default defineLectureConfig({
 | 不写 / `adapter: 'local'` | 进度只存浏览器（`localStorage`），不发任何请求。读取仍有图谱种子打底。适合演示站、没有后端的站点 |
 | `adapter: 'rest'` | 进度读写同源 `{endpoint}/progress`（默认 `/api/db/progress`）。必须有符合 `API_CONTRACT.md` 的后端（旧后端见 §5 的兼容说明） |
 | `endpoint: '/svc/db'` | 改 `rest` 的基础路径，其下是 `/progress`、`/progress/batch` |
-| `notionSync: true` | 读者在本页做的修改，经现有 Notion 同步代理（`/api/progress/notion-sync`，失败退到 `/api/notion/sync-status`）回写 Notion。只转发读者自己的修改：加载、另一个标签页的写入、服务端回包都不会触发 |
+| `notionSync: true` | 读者在本页做的修改，经现有 Notion 同步代理（`/api/progress/notion-sync`，失败退到 `/api/notion/sync-status`）回写 Notion。只转发读者自己的修改：加载、另一个标签页的写入、服务端回包都不会触发；带 `temp: true` 的**临时组**会自动跳过 Notion 同步，仅保存至数据库或浏览器本地 |
 
 本站（私有站）用 `rest` + `notionSync`，`auth` 保持默认 `none`（后端提供 `/api/auth/session` 之后再改）。改完重新 `npm run build`；`npm run config:check` 校验选项名与类型。客户端从 `themeConfig.lectureModules` 读到这些设置，接线在 `theme/index.ts`：页面挂载后 `configureProgress` -> 注册调试面板 -> 需要时启动 `notionBridge` -> `progressStore.load()`，整页只做一次，SSR 不碰。
 

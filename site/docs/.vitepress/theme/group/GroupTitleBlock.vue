@@ -45,6 +45,8 @@ defineProps<{
   cta: TitleBlockCta
   /** Language of the category name when it is not the page's ('' otherwise). */
   notionLang: string
+  /** True when the group is a temporary group (`temp: true`). */
+  temp?: boolean
 }>()
 
 const { t } = useT()
@@ -54,7 +56,11 @@ const { t } = useT()
   <header class="gp-tb" :style="{ '--c': `var(--lec-cat-${catSlot})` }" data-gp-tb>
     <div class="gp-tb-top lec-tb-top">
       <span class="grp"><i aria-hidden="true" /><span :lang="notionLang || undefined">{{ category }}</span></span>
-      <span class="gid">{{ id }}</span>
+      <span v-if="temp" class="gp-tb-right">
+        <span class="gid-temp" data-temp-badge :title="t('group.tempHint')">{{ t('group.temp') }}</span>
+        <span class="gid">{{ id }}</span>
+      </span>
+      <span v-else class="gid">{{ id }}</span>
     </div>
     <h1>
       <small>{{ t('group.tb.crumb', { id }) }}</small
@@ -62,6 +68,7 @@ const { t } = useT()
     </h1>
     <p class="tagline">{{ tagline }}</p>
     <p class="sum">{{ summary }}</p>
+    <p v-if="temp" class="gp-temp-note" data-gp-temp-note>{{ t('group.tempHint') }}</p>
     <table class="gp-spec lec-tb-spec">
       <tbody>
         <tr>

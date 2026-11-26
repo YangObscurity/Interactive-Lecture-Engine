@@ -154,6 +154,8 @@
 .lec-dashboard .db-grip { width: 10px; height: 14px; background: radial-gradient(circle, currentColor 1.2px, transparent 1.4px) 0 0 / 5px 5px; color: var(--lec-text-muted); }
 .lec-dashboard .db-handle { cursor: grab; }
 .lec-dashboard .db-tag { display: inline-flex; align-items: center; font-size: 12px; line-height: 1.6; padding: 0 8px; border-radius: var(--db-pill); border: 1px solid var(--lec-border); color: var(--lec-text-muted); white-space: nowrap; }
+.lec-dashboard .db-temp { display: inline-flex; align-items: center; margin-right: 6px; padding: 0 6px; font-size: 11px; line-height: 1.5; font-weight: 500; border: 1px dashed var(--lec-border); border-radius: var(--db-pill); background: var(--lec-bg); color: var(--lec-text-muted); white-space: nowrap; vertical-align: 1px; }
+[data-lec-theme='datasheet'] .lec-dashboard .db-temp { border-radius: var(--db-r-sm); font-family: var(--lec-font-mono); }
 .lec-dashboard .db-tok { font-size: 12px; }
 .lec-dashboard .db-id { font-family: var(--lec-font-mono); font-weight: 600; margin-right: 4px; }
 

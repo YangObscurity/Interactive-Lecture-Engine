@@ -19,6 +19,7 @@ export interface LectureMeta {
   groupId: string
   groupDir: string
   groupTitle: string
+  isTemp: boolean
   currentSection: string
   selectedText: string
 }
@@ -27,6 +28,7 @@ interface GroupThemeItem {
   id?: string
   dir?: string
   title?: string
+  temp?: boolean
 }
 
 interface CustomThemeConfig {
@@ -105,7 +107,7 @@ export function __getLectureContextListenerCountForTests(): number {
 }
 
 export function useLectureContext() {
-  const { page, theme, site } = useData()
+  const { page, frontmatter, theme, site } = useData()
   const route = useRoute()
 
   const lectureInfo = computed<LectureMeta>(() => {
@@ -125,16 +127,23 @@ export function useLectureContext() {
       candidateDir = stripped
     }
 
-    const matchedGroup = allGroups.find((g) => {
+    const cd = candidateDir.toLowerCase()
+    let matchedGroup: (typeof allGroups)[number] | undefined
+    for (const g of allGroups) {
       const gd = (g.dir || '').toLowerCase()
-      const cd = candidateDir.toLowerCase()
-      return gd !== '' && (gd === cd || cd.startsWith(`${gd}/`))
-    })
+      if (gd === '' || !(gd === cd || cd.startsWith(`${gd}/`))) continue
+      if (!matchedGroup || gd.length > (matchedGroup.dir || '').length) matchedGroup = g
+    }
 
     const groupDir = matchedGroup?.dir || parsed?.dir || ''
     const groupSegment = parsed?.group || groupDir.split('/').pop()?.toLowerCase() || ''
     const lectureNum = parsed ? parsed.lectureNo : 0
     const lectureId = parsed ? parsed.lectureId : ''
+    const fm = (frontmatter?.value ?? page.value?.frontmatter) as
+      | { groupMeta?: { temp?: unknown }; groupTemp?: unknown }
+      | undefined
+    const frontmatterGroupTemp = fm?.groupMeta?.temp === true || fm?.groupTemp === true
+    const isTemp = matchedGroup?.temp === true || frontmatterGroupTemp
 
     const fallbackTitle =
       lectureNum > 0
@@ -148,6 +157,7 @@ export function useLectureContext() {
       groupId: matchedGroup?.id || groupSegment.toUpperCase(),
       groupDir,
       groupTitle: matchedGroup?.title || groupSegment.toUpperCase(),
+      isTemp,
       currentSection: sharedCurrentSection.value,
       selectedText: sharedSelectedText.value,
     }

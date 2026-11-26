@@ -8,7 +8,7 @@ import { EMPTY_SEED, buildSeed, seedIndex } from '../../docs/.vitepress/theme/pr
 import seedLoader from '../../docs/.vitepress/theme/progress/seed.data.mts'
 import { resolveContent } from '../../docs/.vitepress/content/paths.mts'
 import { startNotionBridge } from '../../docs/.vitepress/theme/progress/notionBridge'
-import { configureProgress, createProgressStore, parseProgressRuntime, progressRuntime } from '../../docs/.vitepress/theme/progress/progressStore'
+import { configureProgress, createProgressStore, isTempGroupId, matchesTempGroupContext, parseProgressRuntime, parseTempGroupIds, progressRuntime, setTempGroupResolver } from '../../docs/.vitepress/theme/progress/progressStore'
 import { useProgress } from '../../docs/.vitepress/theme/progress/useProgress'
 import type { UseProgress } from '../../docs/.vitepress/theme/progress/useProgress'
 import type { ProgressStore } from '../../docs/.vitepress/theme/progress/progressStore'
@@ -138,16 +138,144 @@ describe('notion bridge', () => {
     expect(() => store.set('g01-l01', 'completed')).not.toThrow()
     expect(store.statusOf('g01-l01')).toBe('completed')
   })
+
+  it('skips temporary groups in single and batch updates without touching Notion, while still updating store', async () => {
+    const clock = new FakeClock()
+    const store = createProgressStore({
+      backend: new ScriptedBackend('local'),
+      storage: new MemoryStorage(),
+      now: clock.now,
+      locks: null,
+      scheduler: new FakeScheduler(),
+      target: null,
+      loadSeed: async () => ({
+        version: 's',
+        records: [rec('g01-l01', 'not_started', { notionNodeId: 'node-1', notionPageId: 'page-1' })],
+      }),
+    })
+    const single: Array<[string, string, string | undefined, string | undefined]> = []
+    const batches: NotionItem[][] = []
+    startNotionBridge({
+      store,
+      sync: (id, status, node, page) => single.push([id, status, node, page]),
+      batch: (items) => batches.push(items),
+      isTempGroup: (groupId) => groupId === 'tmp' || groupId === 'tmp2',
+    })
+    await store.load()
+
+    // Pure temporary group single write -> DB/store updated, Notion skipped
+    store.set('tmp-l06', 'completed')
+    expect(store.statusOf('tmp-l06')).toBe('completed')
+    expect(single).toEqual([])
+    expect(batches).toEqual([])
+
+    // Pure temporary group batch -> DB/store updated, Notion skipped
+    store.setMany([
+      { lectureId: 'tmp-l01', status: 'completed' },
+      { lectureId: 'tmp2-l02', status: 'in_progress' },
+    ])
+    expect(store.statusOf('tmp-l01')).toBe('completed')
+    expect(store.statusOf('tmp2-l02')).toBe('in_progress')
+    expect(single).toEqual([])
+    expect(batches).toEqual([])
+
+    // Mixed batch -> only permanent group lectures are forwarded to Notion
+    store.setMany([
+      { lectureId: 'g01-l01', status: 'completed' },
+      { lectureId: 'tmp-l02', status: 'completed' },
+    ])
+    expect(store.statusOf('tmp-l02')).toBe('completed')
+    expect(single).toEqual([['g01-l01', W.completed, 'node-1', 'page-1']])
+    expect(batches).toEqual([])
+  })
+
+  it('uses runtime tempGroupIds and live resolver when no custom isTempGroup option is passed', async () => {
+    const clock = new FakeClock()
+    const store = createProgressStore({ backend: new ScriptedBackend('local'), storage: new MemoryStorage(), now: clock.now, locks: null, scheduler: new FakeScheduler(), target: null })
+    const single: Array<[string, string]> = []
+    configureProgress({
+      groups: [
+        { id: 'G01', dir: 'g01' },
+        { id: 'TMP', dir: 'tmp', temp: true },
+      ],
+    })
+    startNotionBridge({
+      store,
+      sync: (id, status) => single.push([id, status]),
+      batch: () => undefined,
+    })
+    await store.load()
+    store.set('tmp-l06', 'completed')
+    expect(single).toEqual([])
+
+    // Simulate a dynamically loaded restricted temporary tier added after configureProgress()
+    setTempGroupResolver((groupId) => groupId === 'dyn-tmp')
+    expect(isTempGroupId('dyn-tmp', 'dyn-tmp-l01')).toBe(true)
+    store.set('dyn-tmp-l01', 'in_progress')
+    expect(single).toEqual([])
+
+    store.set('g01-l01', 'completed')
+    expect(single).toEqual([['g01-l01', W.completed]])
+
+    // Restricted temporary lecture pre-merge context (`fm.groupTemp`): scopes Notion skip to current route group
+    setTempGroupResolver((groupId, lectureId) =>
+      matchesTempGroupContext({
+        groupId,
+        lectureId,
+        groups: [{ id: 'G01', dir: 'g01' }],
+        frontmatter: { groupTemp: true },
+        routeGroup: 'rtmp',
+      }),
+    )
+    single.length = 0
+    store.setMany([
+      { lectureId: 'rtmp-l02', status: 'completed' },
+      { lectureId: 'g01-l01', status: 'in_progress' },
+    ])
+    expect(store.statusOf('rtmp-l02')).toBe('completed')
+    expect(single).toEqual([['g01-l01', W.in_progress]])
+
+    setTempGroupResolver(null)
+    configureProgress(undefined)
+  })
 })
 
 describe('site runtime settings', () => {
   it('parses lectureModules and the group list out of themeConfig, with defaults for anything missing', () => {
-    expect(parseProgressRuntime(undefined)).toEqual({ adapter: 'local', endpoint: '/api/db', notionSync: false, authAdapter: 'none', sessionEndpoint: undefined, groupIds: [] })
+    expect(parseProgressRuntime(undefined)).toEqual({ adapter: 'local', endpoint: '/api/db', notionSync: false, authAdapter: 'none', sessionEndpoint: undefined, groupIds: [], tempGroupIds: [] })
     const rt = parseProgressRuntime({
       lectureModules: { progress: { adapter: 'rest', endpoint: '/svc', notionSync: true }, auth: { adapter: 'trusted-header', sessionEndpoint: '/svc/session' } },
-      groups: [{ dir: 'courses/G01' }, { dir: 'xr' }, { id: 'no-dir' }, null],
+      groups: [{ dir: 'courses/G01' }, { dir: 'xr', id: 'XR', temp: true }, { id: 'no-dir' }, null],
     })
-    expect(rt).toEqual({ adapter: 'rest', endpoint: '/svc', notionSync: true, authAdapter: 'trusted-header', sessionEndpoint: '/svc/session', groupIds: ['g01', 'xr'] })
+    expect(rt).toEqual({ adapter: 'rest', endpoint: '/svc', notionSync: true, authAdapter: 'trusted-header', sessionEndpoint: '/svc/session', groupIds: ['g01', 'xr'], tempGroupIds: ['xr'] })
+    expect(parseTempGroupIds({ groups: [{ id: 'TMP1', dir: 'courses/tmp-one', temp: true }, { id: 'G02', dir: 'g02' }, { id: 'NO_DIR', temp: true }] })).toEqual(['tmp-one', 'no_dir'])
+  })
+
+  it('keeps id and dir namespaces separate so temp id never blocks another permanent dir', async () => {
+    const clock = new FakeClock()
+    const store = createProgressStore({ backend: new ScriptedBackend('local'), storage: new MemoryStorage(), now: clock.now, locks: null, scheduler: new FakeScheduler(), target: null })
+    const single: Array<[string, string]> = []
+    const groups = [
+      { id: 'G01', dir: 'scratch', temp: true },
+      { id: 'G02', dir: 'g01' },
+    ]
+    configureProgress({ groups })
+    setTempGroupResolver((groupId, lectureId) => matchesTempGroupContext({ groupId, lectureId, groups }))
+    startNotionBridge({ store, sync: (id, status) => single.push([id, status]), batch: () => undefined })
+    await store.load()
+
+    store.set('scratch-l01', 'completed')
+    expect(single).toEqual([])
+
+    store.set('g01-l01', 'completed')
+    expect(single).toEqual([['g01-l01', W.completed]])
+
+    expect(isTempGroupId('G01')).toBe(true)
+    expect(isTempGroupId('g01', 'g01-l01')).toBe(false)
+    expect(isTempGroupId('scratch', 'scratch-l01')).toBe(true)
+
+    setTempGroupResolver(null)
+    configureProgress(undefined)
   })
 
   it('configureProgress sets the runtime the singleton uses', () => {

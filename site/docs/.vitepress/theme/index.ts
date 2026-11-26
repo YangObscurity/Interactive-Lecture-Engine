@@ -70,9 +70,10 @@ import { currentSession, getSession, subscribeSession } from './auth/session'
 import { exposeDebug, registerDebugPanel } from './debug/registry'
 import { registerThemeDebugPanel } from './tokens/debugPanel'
 import { setLocaleKeys, localeKeysOf } from './core/locales'
+import { parseLecture } from './core/route'
 import { setReaderLang } from './core/readerLang'
 import { getRootLang, normalizeLang, setRootLang } from '../i18n/index.ts'
-import { configureProgress, progressRuntime, progressStore, registerProgressDebugPanel } from './progress/progressStore'
+import { configureProgress, matchesTempGroupContext, progressRuntime, progressStore, registerProgressDebugPanel, setTempGroupResolver } from './progress/progressStore'
 import { startNotionBridge } from './progress/notionBridge'
 import { buildSeed } from './progress/seed'
 import { setPageTier } from './access/paths'
@@ -140,7 +141,7 @@ export default {
    */
   setup() {
     const route = useRoute()
-    const { isDark, lang: pageLang, theme, frontmatter } = useData()
+    const { isDark, lang: pageLang, site, theme, frontmatter } = useData()
     // P3b: charts and exports of a restricted lecture live under /_access/<tier>/ (access/paths.ts)
     if (typeof window !== 'undefined') watch(() => frontmatter.value.accessTier, setPageTier, { immediate: true, flush: 'sync' })
     let stopAccess: (() => void) | null = null
@@ -174,6 +175,17 @@ export default {
       // P3: the order matters, `configureProgress` must run before anything touches the store
       if (!progressStarted) {
         progressStarted = true
+        setTempGroupResolver((groupId, lectureId) => {
+          const t = theme.value as { groups?: unknown } | undefined
+          const routeGroup = parseLecture(route.path, site.value.base || '/', localeKeysOf(site.value.locales))?.group
+          return matchesTempGroupContext({
+            groupId,
+            lectureId,
+            groups: t?.groups,
+            frontmatter: route.data.frontmatter,
+            routeGroup,
+          })
+        })
         configureProgress(theme.value)
         registerProgressDebugPanel()
         if (progressRuntime().notionSync) {
