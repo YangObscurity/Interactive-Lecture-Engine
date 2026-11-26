@@ -7,7 +7,7 @@
  */
 import { inflateTitleHeadings, stripLectureTitlePrefix, type SearchManifestFile, type ShardMeta, type ShardPayload, type TitleIndexFile, type TitleIndexGroup } from '../../search/format.ts'
 import { tierBasePath } from '../../access/tiers.ts'
-import { lectureAccessOf, getAccess } from '../access/store.ts'
+import { lectureAccessOf, getAccess, invalidateAccess } from '../access/store.ts'
 import { parseLecture } from '../core/route.ts'
 import type { ProgressStatus } from '../progress/types.ts'
 import type { SearchGroupSectionView, SearchHighlightPart, SearchHitView, SearchLoadState } from '../slots/registry.ts'
@@ -387,7 +387,7 @@ export class LectureSearchEngine {
     })
   }
 
-  private async loadAccessTiers(st: LocaleIndexState, basePrefix: string): Promise<void> {
+  private async loadAccessTiers(st: LocaleIndexState, basePrefix: string, forceRetry = false): Promise<void> {
     const accessCfg = lectureAccessOf(this.opts.siteData())
     if (!accessCfg || accessCfg.tiers.length === 0) return
 
@@ -401,14 +401,24 @@ export class LectureSearchEngine {
         let access: Awaited<ReturnType<typeof getAccess>>
         try {
           access = await getAccess()
-          st.accessFetchError = false
+          if (forceRetry && (st.accessFetchError || (access.failedTiers?.length ?? 0) > 0)) {
+            invalidateAccess()
+            access = await getAccess()
+          }
+          st.accessFetchError = (access.failedTiers?.length ?? 0) > 0
         } catch {
           st.accessFetchError = true
           return
         }
 
+        const tiers = access?.tiers ?? []
+        const readableIds = new Set(tiers.map((t) => t.id))
+        for (const oldId of st.failedTierIds) {
+          if (!readableIds.has(oldId)) st.failedTierIds.delete(oldId)
+        }
+
         await Promise.all(
-          (access?.tiers ?? []).map(async (tier) => {
+          tiers.map(async (tier) => {
             const needTitle = !st.tierTitlesLoaded.has(tier.id)
             const needManifest = !st.tierManifestsLoaded.has(tier.id)
             if (!needTitle && !needManifest) {
@@ -447,17 +457,22 @@ export class LectureSearchEngine {
               }
             }
 
+            // Never mark manifest/shards loaded while this tier's titles failed, or pumpShards skips all sections without docs.
             if (needManifest) {
-              try {
-                if (!tManSettled || !tManSettled.res || tManSettled.res.status !== 200) {
-                  tierFailed = true
-                } else {
-                  const tMan = (await tManSettled.res.json()) as SearchManifestFile
-                  this.enqueueShards(st, `tier:${tier.id}`, tMan, tierBase, 'same-origin', 'no-store')
-                  st.tierManifestsLoaded.add(tier.id)
-                }
-              } catch {
+              if (!st.tierTitlesLoaded.has(tier.id)) {
                 tierFailed = true
+              } else {
+                try {
+                  if (!tManSettled || !tManSettled.res || tManSettled.res.status !== 200) {
+                    tierFailed = true
+                  } else {
+                    const tMan = (await tManSettled.res.json()) as SearchManifestFile
+                    this.enqueueShards(st, `tier:${tier.id}`, tMan, tierBase, 'same-origin', 'no-store')
+                    st.tierManifestsLoaded.add(tier.id)
+                  }
+                } catch {
+                  tierFailed = true
+                }
               }
             }
 
@@ -545,7 +560,7 @@ export class LectureSearchEngine {
           // Isolate manifest + access-tier loading so a manifest error never blocks already-loaded title search.
           await Promise.all([
             this.fetchAndEnqueueManifest(st, publicBase, manifestSettled),
-            this.loadAccessTiers(st, basePrefix),
+            this.loadAccessTiers(st, basePrefix, forceRetry),
           ])
         } finally {
           st.titleLoading = null
@@ -572,7 +587,7 @@ export class LectureSearchEngine {
         retryTasks.push(st.manifestLoading)
       }
       if (forceRetry && (st.failedTierIds.size > 0 || st.accessFetchError)) {
-        retryTasks.push(this.loadAccessTiers(st, basePrefix))
+        retryTasks.push(this.loadAccessTiers(st, basePrefix, true))
       } else if (st.accessLoading) {
         retryTasks.push(st.accessLoading)
       }

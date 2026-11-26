@@ -21,7 +21,7 @@ import {
 } from '../../docs/.vitepress/search/format.ts'
 import { buildSearchArtifacts, SearchBudgetError, writeSearchArtifacts } from '../../docs/.vitepress/search/indexBuilder.ts'
 import { extractSearchablePage } from '../../docs/.vitepress/search/markdown.ts'
-import { configureAccess } from '../../docs/.vitepress/theme/access/store.ts'
+import { configureAccess, invalidateAccess } from '../../docs/.vitepress/theme/access/store.ts'
 import { LectureSearchEngine, buildSnippet, splitHighlightParts } from '../../docs/.vitepress/theme/search/engine.ts'
 
 const tmpDirs: string[] = []
@@ -708,6 +708,142 @@ describe('client LectureSearchEngine: instant title results, progress, scope and
       expect(engine.getLoadState('root', true)).toMatchObject({ loading: false, phase: 'ready', percent: 100 })
       expect(engine.query('root', '高阶技巧', 'all', null).totalHits).toBeGreaterThanOrEqual(1)
       expect(engine.query('root', '隐藏正文关键字', 'all', null).totalHits).toBe(1)
+    } finally {
+      configureAccess({ siteData: { value: {} }, withBase: (p) => p })
+    }
+  })
+
+  it('defers tier shards when tier titles fail, clears stale tier errors on downgrade, and retries site-data 503 via forceRetry', async () => {
+    const publicTitles: TitleIndexFile = {
+      v: 1,
+      locale: 'root',
+      groups: [{ id: 'G01', dir: 'g01', title: '公开组', catSlot: 1 }],
+      pages: [[0, 1, 'G01-L01', '/g01/L01', '第1讲 · 公开导论', [[2, '公开概述']]]],
+    }
+    const vipTitles: TitleIndexFile = {
+      v: 1,
+      locale: 'root',
+      groups: [{ id: 'VIP', dir: 'vip', title: '进阶组', catSlot: 2 }],
+      pages: [[0, 1, 'VIP-L01', '/vip/L01', '第1讲 · VIP 专题', [[2, '高阶技巧']]]],
+    }
+    const pubShardRaw = Buffer.from(JSON.stringify({ v: 1, shardId: 'g01', groupId: 'G01', pages: ['/g01/L01'], sections: [] }), 'utf8')
+    const pubShard = zlib.deflateRawSync(pubShardRaw, { level: 9 })
+    const vipShardRaw = Buffer.from(
+      JSON.stringify({
+        v: 1,
+        shardId: 'vip',
+        groupId: 'VIP',
+        pages: ['/vip/L01'],
+        sections: [[0, 's1', ['高阶技巧'], '仅 VIP 分片独有正文字段。']],
+      }),
+      'utf8',
+    )
+    const vipShard = zlib.deflateRawSync(vipShardRaw, { level: 9 })
+
+    const pubManifest: SearchManifestFile = {
+      v: 1,
+      locale: 'root',
+      titleFile: 'titles.json',
+      titleBytes: 10,
+      totalShardBytes: pubShard.byteLength,
+      totalRawShardBytes: pubShardRaw.byteLength,
+      shards: [{ shardId: 'g01', groupId: 'G01', url: 'shards/g01.sz', bytes: pubShard.byteLength, rawBytes: pubShardRaw.byteLength, pageCount: 1 }],
+    }
+    const vipManifest: SearchManifestFile = {
+      v: 1,
+      locale: 'root',
+      titleFile: 'titles.json',
+      titleBytes: 10,
+      totalShardBytes: vipShard.byteLength,
+      totalRawShardBytes: vipShardRaw.byteLength,
+      shards: [{ shardId: 'vip', groupId: 'VIP', url: 'shards/vip.sz', bytes: vipShard.byteLength, rawBytes: vipShardRaw.byteLength, pageCount: 1 }],
+    }
+
+    let siteDataStatus = 503
+    let vipTitlesStatus = 503
+    const siteObj = { themeConfig: { lectureAccess: { inlineTier: 'public', tiers: ['vip'] } } }
+    const fetchFn: typeof fetch = async (input) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url
+      if (url.endsWith('/_access/vip/site-data.json')) {
+        if (siteDataStatus !== 200) return new Response('err', { status: siteDataStatus })
+        return new Response(JSON.stringify({ version: 1, tier: 'vip', groups: [], totals: { lectures: 1, charts: 0 }, locales: {} }), { status: 200 })
+      }
+      if (url.endsWith('/_access/vip/search/root/titles.json')) {
+        return vipTitlesStatus === 200 ? new Response(JSON.stringify(vipTitles), { status: 200 }) : new Response('err', { status: vipTitlesStatus })
+      }
+      if (url.endsWith('/_access/vip/search/root/manifest.json')) return new Response(JSON.stringify(vipManifest), { status: 200 })
+      if (url.endsWith('/_access/vip/search/root/shards/vip.sz')) return new Response(new Uint8Array(vipShard), { status: 200 })
+      if (url.endsWith('/search/root/titles.json')) return new Response(JSON.stringify(publicTitles), { status: 200 })
+      if (url.endsWith('/search/root/manifest.json')) return new Response(JSON.stringify(pubManifest), { status: 200 })
+      if (url.endsWith('/shards/g01.sz')) return new Response(new Uint8Array(pubShard), { status: 200 })
+      return new Response('not found', { status: 404 })
+    }
+
+    configureAccess({ siteData: { value: siteObj }, withBase: (p) => p, fetch: fetchFn })
+    try {
+      const engine = new LectureSearchEngine({
+        base: '/',
+        localeKeys: ['en'],
+        siteData: () => siteObj,
+        statusOf: () => 'not_started',
+        labels: {
+          lectureNo: (n) => `第${n}讲`,
+          groupCount: (n) => `${n} 条`,
+          groupSite: '概览',
+          loadingBar: (l, t) => `loading ${l}/${t}`,
+          loadingIdle: (l, t) => `idle ${l}/${t}`,
+          loadError: '部分索引加载失败',
+          statusLabel: (s) => s,
+        },
+        fetchFn,
+      })
+
+      // 1. Transient 503 on site-data.json must surface partial-error (not ready)
+      await engine.ensureLoaded('root', null)
+      await vi.waitFor(() => expect(engine.getLoadState('root', true).loading).toBe(false), { timeout: 10_000, interval: 10 })
+      expect(engine.getLoadState('root', true)).toMatchObject({ loading: false, error: true, phase: 'partial-error' })
+
+      // 2. Retry resolves site-data.json -> 200, while vip titles.json still 503 & manifest 200:
+      //    shards must NOT be consumed/marked loaded without titles!
+      siteDataStatus = 200
+      await engine.ensureLoaded('root', null, { forceRetry: true })
+      await vi.waitFor(() => expect(engine.getLoadState('root', true).loading).toBe(false), { timeout: 10_000, interval: 10 })
+      expect(engine.getLoadState('root', true)).toMatchObject({ loading: false, error: true, phase: 'partial-error' })
+      expect(engine.query('root', '独有正文字段', 'all', null).totalHits).toBe(0)
+
+      // 3. When vip titles.json recovers -> deferred manifest & shards enqueue and index vip body cleanly!
+      vipTitlesStatus = 200
+      await engine.ensureLoaded('root', null, { forceRetry: true })
+      await vi.waitFor(() => expect(engine.getLoadState('root', true).loading).toBe(false), { timeout: 10_000, interval: 10 })
+      expect(engine.getLoadState('root', true)).toMatchObject({ loading: false, phase: 'ready', percent: 100 })
+      expect(engine.query('root', '独有正文字段', 'all', null).totalHits).toBe(1)
+
+      // 4. Separate instance: failed tier cleared cleanly if user later loses access (403)
+      vipTitlesStatus = 503
+      const engine2 = new LectureSearchEngine({
+        base: '/',
+        localeKeys: ['en'],
+        siteData: () => siteObj,
+        statusOf: () => 'not_started',
+        labels: {
+          lectureNo: (n) => `第${n}讲`,
+          groupCount: (n) => `${n} 条`,
+          groupSite: '概览',
+          loadingBar: (l, t) => `loading ${l}/${t}`,
+          loadingIdle: (l, t) => `idle ${l}/${t}`,
+          loadError: '部分索引加载失败',
+          statusLabel: (s) => s,
+        },
+        fetchFn,
+      })
+      await engine2.ensureLoaded('root', null)
+      await vi.waitFor(() => expect(engine2.getLoadState('root', true).loading).toBe(false), { timeout: 10_000, interval: 10 })
+      expect(engine2.getLoadState('root', true)).toMatchObject({ loading: false, error: true, phase: 'partial-error' })
+      siteDataStatus = 403
+      invalidateAccess()
+      await engine2.ensureLoaded('root', null, { forceRetry: true })
+      await vi.waitFor(() => expect(engine2.getLoadState('root', true).loading).toBe(false), { timeout: 10_000, interval: 10 })
+      expect(engine2.getLoadState('root', true)).toMatchObject({ loading: false, phase: 'ready', percent: 100 })
     } finally {
       configureAccess({ siteData: { value: {} }, withBase: (p) => p })
     }
