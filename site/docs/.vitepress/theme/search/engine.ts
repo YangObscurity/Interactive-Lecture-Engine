@@ -13,6 +13,7 @@ import type { ProgressStatus } from '../progress/types.ts'
 import type { SearchGroupSectionView, SearchHighlightPart, SearchHitView, SearchLoadState } from '../slots/registry.ts'
 
 export interface ClientTitleDoc {
+  tierId?: string
   groupId: string
   groupTitle: string
   catSlot: number
@@ -82,6 +83,7 @@ export interface LocaleIndexState {
   failedShardKeys: Set<string>
   inFlightBytes: Map<string, number>
   finishedBytes: Map<string, number>
+  shardBytesByKey: Map<string, number>
   totalShardBytes: number
   shardsPumpPromise: Promise<void> | null
 }
@@ -274,6 +276,7 @@ export class LectureSearchEngine {
         failedShardKeys: new Set(),
         inFlightBytes: new Map(),
         finishedBytes: new Map(),
+        shardBytesByKey: new Map(),
         totalShardBytes: 0,
         shardsPumpPromise: null,
       }
@@ -282,7 +285,7 @@ export class LectureSearchEngine {
     return st
   }
 
-  private mergeTitleIndex(st: LocaleIndexState, payload: TitleIndexFile, base: string): void {
+  private mergeTitleIndex(st: LocaleIndexState, payload: TitleIndexFile, base: string, tierId = 'public'): void {
     const localGroups = payload.groups
     for (const g of localGroups) {
       if (!st.groupOrder.has(g.id)) {
@@ -316,6 +319,7 @@ export class LectureSearchEngine {
       })
 
       const doc: ClientTitleDoc = {
+        tierId,
         groupId: grp.id,
         groupTitle: this.resolveGroupTitle(grp),
         catSlot: grp.catSlot,
@@ -363,7 +367,34 @@ export class LectureSearchEngine {
         credentials,
         cache,
       })
+      st.shardBytesByKey.set(key, shard.bytes)
       st.totalShardBytes += shard.bytes
+    }
+  }
+
+  private evictTierData(st: LocaleIndexState, tierId: string): void {
+    st.failedTierIds.delete(tierId)
+    st.tierTitlesLoaded.delete(tierId)
+    st.tierManifestsLoaded.delete(tierId)
+    st.titleDocs = st.titleDocs.filter((doc) => {
+      if (doc.tierId === tierId) {
+        st.docsByUrl.delete(doc.url)
+        return false
+      }
+      return true
+    })
+    const prefix = `tier:${tierId}:`
+    st.pendingShards = st.pendingShards.filter((item) => !item.key.startsWith(prefix))
+    for (const [key, bytes] of st.shardBytesByKey) {
+      if (!key.startsWith(prefix)) continue
+      st.totalShardBytes = Math.max(0, st.totalShardBytes - bytes)
+      st.shardBytesByKey.delete(key)
+      st.sectionsByShard.delete(key)
+      st.loadedShardKeys.delete(key)
+      st.failedShardKeys.delete(key)
+      st.failedShardsByKey.delete(key)
+      st.inFlightBytes.delete(key)
+      st.finishedBytes.delete(key)
     }
   }
 
@@ -401,7 +432,7 @@ export class LectureSearchEngine {
         let access: Awaited<ReturnType<typeof getAccess>>
         try {
           access = await getAccess()
-          if (forceRetry && (st.accessFetchError || (access.failedTiers?.length ?? 0) > 0)) {
+          if (forceRetry && (st.accessFetchError || st.failedTierIds.size > 0 || (access.failedTiers?.length ?? 0) > 0)) {
             invalidateAccess()
             access = await getAccess()
           }
@@ -413,8 +444,9 @@ export class LectureSearchEngine {
 
         const tiers = access?.tiers ?? []
         const readableIds = new Set(tiers.map((t) => t.id))
-        for (const oldId of st.failedTierIds) {
-          if (!readableIds.has(oldId)) st.failedTierIds.delete(oldId)
+        const knownTiers = new Set([...st.tierTitlesLoaded, ...st.tierManifestsLoaded, ...st.failedTierIds])
+        for (const oldId of knownTiers) {
+          if (!readableIds.has(oldId)) this.evictTierData(st, oldId)
         }
 
         await Promise.all(
@@ -449,7 +481,7 @@ export class LectureSearchEngine {
                   tierFailed = true
                 } else {
                   const tTitleData = (await tTitleSettled.res.json()) as TitleIndexFile
-                  this.mergeTitleIndex(st, tTitleData, this.opts.base)
+                  this.mergeTitleIndex(st, tTitleData, this.opts.base, tier.id)
                   st.tierTitlesLoaded.add(tier.id)
                 }
               } catch {

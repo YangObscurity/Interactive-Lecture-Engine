@@ -21,7 +21,7 @@ import {
 } from '../../docs/.vitepress/search/format.ts'
 import { buildSearchArtifacts, SearchBudgetError, writeSearchArtifacts } from '../../docs/.vitepress/search/indexBuilder.ts'
 import { extractSearchablePage } from '../../docs/.vitepress/search/markdown.ts'
-import { configureAccess, invalidateAccess } from '../../docs/.vitepress/theme/access/store.ts'
+import { configureAccess } from '../../docs/.vitepress/theme/access/store.ts'
 import { LectureSearchEngine, buildSnippet, splitHighlightParts } from '../../docs/.vitepress/theme/search/engine.ts'
 
 const tmpDirs: string[] = []
@@ -818,8 +818,19 @@ describe('client LectureSearchEngine: instant title results, progress, scope and
       expect(engine.getLoadState('root', true)).toMatchObject({ loading: false, phase: 'ready', percent: 100 })
       expect(engine.query('root', '独有正文字段', 'all', null).totalHits).toBe(1)
 
-      // 4. Separate instance: failed tier cleared cleanly if user later loses access (403)
-      vipTitlesStatus = 503
+      // 4. Separate instance: already-loaded tier titles must be evicted and access cache re-validated when
+      //    user later loses access (403) without manual invalidateAccess().
+      vipTitlesStatus = 200
+      let vipManifestStatus = 503
+      siteDataStatus = 200
+      const fetchFnRevoke: typeof fetch = async (input) => {
+        const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url
+        if (url.endsWith('/_access/vip/search/root/manifest.json') && vipManifestStatus !== 200) {
+          return new Response('err', { status: vipManifestStatus })
+        }
+        return fetchFn(input)
+      }
+      configureAccess({ siteData: { value: siteObj }, withBase: (p) => p, fetch: fetchFnRevoke })
       const engine2 = new LectureSearchEngine({
         base: '/',
         localeKeys: ['en'],
@@ -834,16 +845,21 @@ describe('client LectureSearchEngine: instant title results, progress, scope and
           loadError: '部分索引加载失败',
           statusLabel: (s) => s,
         },
-        fetchFn,
+        fetchFn: fetchFnRevoke,
       })
       await engine2.ensureLoaded('root', null)
       await vi.waitFor(() => expect(engine2.getLoadState('root', true).loading).toBe(false), { timeout: 10_000, interval: 10 })
       expect(engine2.getLoadState('root', true)).toMatchObject({ loading: false, error: true, phase: 'partial-error' })
+      expect(engine2.query('root', 'VIP', 'all', null).totalHits).toBe(1)
+
+      // Gateway now denies vip (403); forceRetry automatically invalidates cached access, clears error, AND evicts cached vip titles!
       siteDataStatus = 403
-      invalidateAccess()
+      vipManifestStatus = 403
       await engine2.ensureLoaded('root', null, { forceRetry: true })
       await vi.waitFor(() => expect(engine2.getLoadState('root', true).loading).toBe(false), { timeout: 10_000, interval: 10 })
       expect(engine2.getLoadState('root', true)).toMatchObject({ loading: false, phase: 'ready', percent: 100 })
+      expect(engine2.query('root', 'VIP', 'all', null).totalHits).toBe(0)
+      expect(engine2.query('root', '公开导论', 'all', null).totalHits).toBe(1)
     } finally {
       configureAccess({ siteData: { value: {} }, withBase: (p) => p })
     }
