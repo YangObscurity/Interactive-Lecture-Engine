@@ -232,7 +232,7 @@ const panelProps = computed<SearchPanelProps>(() => {
   const suppressMeta =
     loadState.phase === 'loading-titles' ||
     loadState.phase === 'error' ||
-    (Boolean(loadState.error) && groups.length === 0)
+    (groups.length === 0 && (Boolean(loadState.error) || loadState.loading))
   const metaText =
     hasQuery && !suppressMeta
       ? t('search.metaCountTime', { count: searchResult.value.totalHits, ms: searchResult.value.elapsedMs })

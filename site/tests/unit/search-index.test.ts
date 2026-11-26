@@ -21,6 +21,7 @@ import {
 } from '../../docs/.vitepress/search/format.ts'
 import { buildSearchArtifacts, SearchBudgetError, writeSearchArtifacts } from '../../docs/.vitepress/search/indexBuilder.ts'
 import { extractSearchablePage } from '../../docs/.vitepress/search/markdown.ts'
+import { configureAccess } from '../../docs/.vitepress/theme/access/store.ts'
 import { LectureSearchEngine, buildSnippet, splitHighlightParts } from '../../docs/.vitepress/theme/search/engine.ts'
 
 const tmpDirs: string[] = []
@@ -599,5 +600,116 @@ describe('client LectureSearchEngine: instant title results, progress, scope and
     await vi.waitFor(() => expect(engine.getLoadState('root', true).loading).toBe(false), { timeout: 10_000, interval: 10 })
     expect(engine.getLoadState('root', true)).toMatchObject({ loading: false, phase: 'ready', percent: 100 })
     expect(engine.query('root', '双阈值', 'all', 'LR').totalHits).toBe(1)
+  })
+
+  it('tracks authorized restricted tier failures and retries only missing tier metadata on forceRetry', async () => {
+    const publicTitles: TitleIndexFile = {
+      v: 1,
+      locale: 'root',
+      groups: [{ id: 'G01', dir: 'g01', title: '公开组', catSlot: 1 }],
+      pages: [[0, 1, 'G01-L01', '/g01/L01', '第1讲 · 公开导论', [[2, '公开概述']]]],
+    }
+    const vipTitles: TitleIndexFile = {
+      v: 1,
+      locale: 'root',
+      groups: [{ id: 'VIP', dir: 'vip', title: '进阶组', catSlot: 2 }],
+      pages: [[0, 1, 'VIP-L01', '/vip/L01', '第1讲 · VIP 专题', [[2, '高阶技巧']]]],
+    }
+    const pubShardRaw = Buffer.from(JSON.stringify({ v: 1, shardId: 'g01', groupId: 'G01', pages: ['/g01/L01'], sections: [] }), 'utf8')
+    const pubShard = zlib.deflateRawSync(pubShardRaw, { level: 9 })
+    const vipShardRaw = Buffer.from(
+      JSON.stringify({
+        v: 1,
+        shardId: 'vip',
+        groupId: 'VIP',
+        pages: ['/vip/L01'],
+        sections: [[0, 's1', ['高阶技巧'], '隐藏正文关键字只存在于 VIP 分片。']],
+      }),
+      'utf8',
+    )
+    const vipShard = zlib.deflateRawSync(vipShardRaw, { level: 9 })
+
+    const pubManifest: SearchManifestFile = {
+      v: 1,
+      locale: 'root',
+      titleFile: 'titles.json',
+      titleBytes: 10,
+      totalShardBytes: pubShard.byteLength,
+      totalRawShardBytes: pubShardRaw.byteLength,
+      shards: [{ shardId: 'g01', groupId: 'G01', url: 'shards/g01.sz', bytes: pubShard.byteLength, rawBytes: pubShardRaw.byteLength, pageCount: 1 }],
+    }
+    const vipManifest: SearchManifestFile = {
+      v: 1,
+      locale: 'root',
+      titleFile: 'titles.json',
+      titleBytes: 10,
+      totalShardBytes: vipShard.byteLength,
+      totalRawShardBytes: vipShardRaw.byteLength,
+      shards: [{ shardId: 'vip', groupId: 'VIP', url: 'shards/vip.sz', bytes: vipShard.byteLength, rawBytes: vipShardRaw.byteLength, pageCount: 1 }],
+    }
+
+    let vipSearchOk = false
+    let vipRequests = 0
+    const siteObj = { themeConfig: { lectureAccess: { inlineTier: 'public', tiers: ['vip'] } } }
+    const fetchFn: typeof fetch = async (input) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url
+      if (url.endsWith('/_access/vip/site-data.json')) {
+        return new Response(
+          JSON.stringify({ version: 1, tier: 'vip', groups: [], totals: { lectures: 1, charts: 0 }, locales: {} }),
+          { status: 200 },
+        )
+      }
+      if (url.includes('/_access/vip/search/')) {
+        vipRequests++
+        if (!vipSearchOk) return new Response('unavailable', { status: 503 })
+        if (url.endsWith('/titles.json')) return new Response(JSON.stringify(vipTitles), { status: 200 })
+        if (url.endsWith('/manifest.json')) return new Response(JSON.stringify(vipManifest), { status: 200 })
+        if (url.endsWith('/shards/vip.sz')) return new Response(new Uint8Array(vipShard), { status: 200 })
+      }
+      if (url.endsWith('/search/root/titles.json')) return new Response(JSON.stringify(publicTitles), { status: 200 })
+      if (url.endsWith('/search/root/manifest.json')) return new Response(JSON.stringify(pubManifest), { status: 200 })
+      if (url.endsWith('/shards/g01.sz')) return new Response(new Uint8Array(pubShard), { status: 200 })
+      return new Response('not found', { status: 404 })
+    }
+
+    configureAccess({ siteData: { value: siteObj }, withBase: (p) => p, fetch: fetchFn })
+    try {
+      const engine = new LectureSearchEngine({
+        base: '/',
+        localeKeys: ['en'],
+        siteData: () => siteObj,
+        statusOf: () => 'not_started',
+        labels: {
+          lectureNo: (n) => `第${n}讲`,
+          groupCount: (n) => `${n} 条`,
+          groupSite: '概览',
+          loadingBar: (l, t) => `loading ${l}/${t}`,
+          loadingIdle: (l, t) => `idle ${l}/${t}`,
+          loadError: '部分索引加载失败',
+          statusLabel: (s) => s,
+        },
+        fetchFn,
+      })
+
+      await engine.ensureLoaded('root', null)
+      await vi.waitFor(() => expect(engine.getLoadState('root', true).loading).toBe(false), { timeout: 10_000, interval: 10 })
+      expect(engine.query('root', '公开导论', 'all', null).totalHits).toBe(1)
+      expect(engine.query('root', 'VIP', 'all', null).totalHits).toBe(0)
+      expect(engine.getLoadState('root', true)).toMatchObject({ loading: false, error: true, phase: 'partial-error' })
+
+      const callsAfterFail = vipRequests
+      // Typing / normal ensureLoaded does not spam failed tier
+      await engine.ensureLoaded('root', null)
+      expect(vipRequests).toBe(callsAfterFail)
+
+      vipSearchOk = true
+      await engine.ensureLoaded('root', null, { forceRetry: true })
+      await vi.waitFor(() => expect(engine.getLoadState('root', true).loading).toBe(false), { timeout: 10_000, interval: 10 })
+      expect(engine.getLoadState('root', true)).toMatchObject({ loading: false, phase: 'ready', percent: 100 })
+      expect(engine.query('root', '高阶技巧', 'all', null).totalHits).toBeGreaterThanOrEqual(1)
+      expect(engine.query('root', '隐藏正文关键字', 'all', null).totalHits).toBe(1)
+    } finally {
+      configureAccess({ siteData: { value: {} }, withBase: (p) => p })
+    }
   })
 })

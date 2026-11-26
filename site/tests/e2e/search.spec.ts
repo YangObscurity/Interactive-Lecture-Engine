@@ -151,9 +151,15 @@ for (const [theme, expectedImpl] of SKINS) {
       expect(panelBox!.x + panelBox!.width).toBeLessThanOrEqual(390.5)
       await page.setViewportSize({ width: 1280, height: 800 })
 
-      // Release shards -> progress bar clears and body snippets hydrate
+      // Typing a query with 0 title hits while shards are still delayed must show loading state instead of false "no results"
+      await input.fill('仅等待分片完成_loading_check')
+      await expect(page.locator('.sp-empty--loading')).toBeVisible()
+      await expect(page.locator('.sp-res')).not.toContainText('未找到相关内容')
+
+      // Release shards -> progress bar clears, no-results shows after loading finishes, and body snippets hydrate
       releaseShards()
       await expect(loadBar).toBeHidden({ timeout: 20_000 })
+      await expect(page.locator('.sp-res .sp-empty')).toContainText('未找到相关内容')
       await input.fill('标准差')
       await expect(page.locator('.sp-hit .snip').first()).toBeVisible({ timeout: 10_000 })
       await expect(page.locator('.sp-hit mark').first()).toBeVisible()

@@ -21,7 +21,7 @@ const isIndexError = computed(
 )
 const showErrorEmpty = computed(() => props.groups.length === 0 && isIndexError.value)
 const showLoadingEmpty = computed(
-  () => !showErrorEmpty.value && props.groups.length === 0 && props.loadState.phase === 'loading-titles' && props.query.trim().length > 0,
+  () => !showErrorEmpty.value && props.groups.length === 0 && props.loadState.loading && props.query.trim().length > 0,
 )
 
 function handleRetry(): void {
@@ -176,7 +176,7 @@ watch(
         </button>
       </div>
       <div v-else-if="showLoadingEmpty" class="sp-empty sp-empty--loading" role="status" aria-live="polite">
-        {{ labels.loadingTitles || loadState.label }}
+        {{ loadState.phase === 'loading-shards' ? (loadState.label || labels.loadingTitles) : (labels.loadingTitles || loadState.label) }}
       </div>
       <div v-else-if="groups.length === 0 && emptyState === 'no-results'" class="sp-empty">
         {{ labels.noResults }}
