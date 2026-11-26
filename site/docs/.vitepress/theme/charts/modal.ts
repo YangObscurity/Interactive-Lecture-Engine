@@ -665,6 +665,9 @@ function mountVectorFigureIntoSlide(viewer: ActiveViewer, slideIndex: number, co
 
 export function closeModal(): void {
   openSeq++
+  if (typeof document !== 'undefined') {
+    document.documentElement.classList.remove('chart-modal-open')
+  }
   const cur = active
   if (!cur) return
   try {
@@ -859,12 +862,24 @@ export function openUnifiedViewer(
   const firstOrigin = slides[startIndex]?.originEl ?? null
   const restoreTo = opener ?? (activeEl && activeEl !== document.body && firstOrigin?.contains(activeEl) ? activeEl : null)
 
+  const cancelPending = new AbortController()
+  if (typeof window !== 'undefined') {
+    const abortOpen = () => {
+      if (seq === openSeq) ++openSeq
+      closeModal()
+    }
+    window.addEventListener('popstate', abortOpen, { signal: cancelPending.signal })
+    window.addEventListener('pagehide', abortOpen, { signal: cancelPending.signal })
+  }
+
   void loadPhotoSwipe().then(
     (Ctor) => {
+      cancelPending.abort()
       if (seq !== openSeq) return
       startViewer(Ctor, slides, startIndex, restoreTo)
     },
     () => {
+      cancelPending.abort()
       /* library chunk failed to load (offline): the inline figure stays as it is */
     },
   )
@@ -1171,6 +1186,12 @@ function startViewer(
   pswp.on('destroy', () => {
     cleanupViewer(viewer)
   })
+
+  if (typeof window !== 'undefined') {
+    const closeOnNavigation = () => closeModal()
+    window.addEventListener('popstate', closeOnNavigation, { signal: listeners.signal })
+    window.addEventListener('pagehide', closeOnNavigation, { signal: listeners.signal })
+  }
 
   pswp.init()
 }

@@ -420,29 +420,26 @@ html::-webkit-scrollbar {
   height: 8px;
   background: transparent;
 }
+html::-webkit-scrollbar-button {
+  display: none;
+  width: 0;
+  height: 0;
+}
 html::-webkit-scrollbar-track {
   background: transparent;
 }
 html::-webkit-scrollbar-thumb {
   background-color: transparent;
   border-radius: 4px;
-  transition: background-color 0.4s ease 0s;
 }
 html[data-lec-theme='datasheet']::-webkit-scrollbar-thumb {
   border-radius: 1px;
 }
 html[data-lec-scrollbar='on']::-webkit-scrollbar-thumb {
   background-color: var(--lec-border);
-  transition-duration: 0.1s;
 }
 html[data-lec-scrollbar='on']::-webkit-scrollbar-thumb:hover {
   background-color: var(--lec-text-muted);
-}
-@media (prefers-reduced-motion: reduce) {
-  html::-webkit-scrollbar-thumb,
-  html[data-lec-scrollbar='on']::-webkit-scrollbar-thumb {
-    transition: none;
-  }
 }
 /* Firefox has no ::-webkit-scrollbar: the standard properties give the same thin, themed bar (no auto-hide there) */
 @supports not selector(::-webkit-scrollbar) {
