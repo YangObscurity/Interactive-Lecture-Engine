@@ -40,17 +40,21 @@ function adjustPosition(): void {
 }
 
 watch(
-  () => props.isOpen,
-  (open) => {
-    if (open) {
-      void nextTick(() => {
-        adjustPosition()
+  () => [props.isOpen, props.openMode] as const,
+  ([open, mode], prev) => {
+    if (!open) return
+    const wasOpen = prev?.[0] ?? false
+    const wasHover = prev?.[1] === 'hover'
+    const shouldFocus = mode !== 'hover' && (!wasOpen || wasHover)
+    void nextTick(() => {
+      if (!wasOpen) adjustPosition()
+      if (shouldFocus) {
         const target =
           groupRefs.value.get(props.activeGroupId) ??
           groupRefs.value.get(props.groups[0]?.id ?? '')
-        target?.focus()
-      })
-    }
+        target?.focus({ preventScroll: true })
+      }
+    })
   },
 )
 
@@ -58,14 +62,18 @@ watch(
   () => [props.activeColumn, props.activeLectureIndex, props.activeGroupId],
   ([col, idx]) => {
     if (!props.isOpen) return
+    const focusInsideDialog =
+      props.openMode !== 'hover' ||
+      (typeof document !== 'undefined' && Boolean(dialogRef.value?.contains(document.activeElement)))
+    if (!focusInsideDialog) return
     void nextTick(() => {
       if (col === 'lectures' && typeof idx === 'number' && idx >= 0) {
         const el = lectureRefs.value.get(idx)
-        el?.focus()
+        el?.focus({ preventScroll: true })
         el?.scrollIntoView({ block: 'nearest' })
       } else if (col === 'groups') {
         const el = groupRefs.value.get(props.activeGroupId)
-        el?.focus()
+        el?.focus({ preventScroll: true })
         el?.scrollIntoView({ block: 'nearest' })
       }
     })
@@ -74,7 +82,13 @@ watch(
 </script>
 
 <template>
-  <div class="cm-wrap cm-wrap--ds" :class="{ 'is-open': isOpen, 'is-mobile': isMobile }">
+  <div
+    class="cm-wrap cm-wrap--ds"
+    :class="{ 'is-open': isOpen, 'is-mobile': isMobile }"
+    @pointerenter="!isMobile && onHoverEnter?.($event)"
+    @mouseenter="!isMobile && onHoverEnter?.($event)"
+    @mouseleave="!isMobile && onHoverLeave?.($event)"
+  >
     <!-- Desktop topbar trigger and panel -->
     <template v-if="!isMobile">
       <button
