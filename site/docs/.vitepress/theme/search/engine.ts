@@ -7,7 +7,7 @@
  */
 import { inflateTitleHeadings, stripLectureTitlePrefix, type SearchManifestFile, type ShardMeta, type ShardPayload, type TitleIndexFile, type TitleIndexGroup } from '../../search/format.ts'
 import { tierBasePath } from '../../access/tiers.ts'
-import { lectureAccessOf, getAccess, invalidateAccess } from '../access/store.ts'
+import { lectureAccessOf, getAccess, invalidateAccess, accessVersion } from '../access/store.ts'
 import { parseLecture } from '../core/route.ts'
 import type { ProgressStatus } from '../progress/types.ts'
 import type { SearchGroupSectionView, SearchHighlightPart, SearchHitView, SearchLoadState } from '../slots/registry.ts'
@@ -53,6 +53,8 @@ export interface ClientBodySection {
 
 interface ShardQueueItem {
   key: string
+  tierId?: string
+  tierEpoch: number
   locale: string
   meta: ShardMeta
   url: string
@@ -68,6 +70,8 @@ export interface LocaleIndexState {
   manifestLoading: Promise<void> | null
   accessLoading: Promise<void> | null
   accessFetchError: boolean
+  lastAccessVersion: number
+  tierEpoch: Map<string, number>
   tierTitlesLoaded: Set<string>
   tierManifestsLoaded: Set<string>
   failedTierIds: Set<string>
@@ -261,6 +265,8 @@ export class LectureSearchEngine {
         manifestLoading: null,
         accessLoading: null,
         accessFetchError: false,
+        lastAccessVersion: -1,
+        tierEpoch: new Map(),
         tierTitlesLoaded: new Set(),
         tierManifestsLoaded: new Set(),
         failedTierIds: new Set(),
@@ -355,12 +361,16 @@ export class LectureSearchEngine {
     credentials: RequestCredentials,
     cache: RequestCache,
   ): void {
+    const tierId = bucketKey.startsWith('tier:') ? bucketKey.slice('tier:'.length) : undefined
+    const tierEpoch = tierId ? (st.tierEpoch.get(tierId) ?? 0) : 0
     for (const shard of manifest.shards) {
       const key = `${bucketKey}:${shard.shardId}`
       if (st.loadedShardKeys.has(key) || st.failedShardKeys.has(key)) continue
       if (st.pendingShards.some((p) => p.key === key)) continue
       st.pendingShards.push({
         key,
+        tierId,
+        tierEpoch,
         locale: st.locale,
         meta: shard,
         url: `${urlPrefix}/${shard.url}`.replace(/\/{2,}/g, '/'),
@@ -372,7 +382,12 @@ export class LectureSearchEngine {
     }
   }
 
+  private isStaleShard(st: LocaleIndexState, item: ShardQueueItem): boolean {
+    return Boolean(item.tierId && (st.tierEpoch.get(item.tierId) ?? 0) !== item.tierEpoch)
+  }
+
   private evictTierData(st: LocaleIndexState, tierId: string): void {
+    st.tierEpoch.set(tierId, (st.tierEpoch.get(tierId) ?? 0) + 1)
     st.failedTierIds.delete(tierId)
     st.tierTitlesLoaded.delete(tierId)
     st.tierManifestsLoaded.delete(tierId)
@@ -437,6 +452,7 @@ export class LectureSearchEngine {
             access = await getAccess()
           }
           st.accessFetchError = (access.failedTiers?.length ?? 0) > 0
+          st.lastAccessVersion = accessVersion()
         } catch {
           st.accessFetchError = true
           return
@@ -618,8 +634,8 @@ export class LectureSearchEngine {
       } else if (st.manifestLoading) {
         retryTasks.push(st.manifestLoading)
       }
-      if (forceRetry && (st.failedTierIds.size > 0 || st.accessFetchError)) {
-        retryTasks.push(this.loadAccessTiers(st, basePrefix, true))
+      if (forceRetry || st.lastAccessVersion !== accessVersion()) {
+        retryTasks.push(this.loadAccessTiers(st, basePrefix, forceRetry))
       } else if (st.accessLoading) {
         retryTasks.push(st.accessLoading)
       }
@@ -661,12 +677,17 @@ export class LectureSearchEngine {
               item.credentials,
               this.fetchImpl,
               (bytes) => {
+                if (this.isStaleShard(st, item)) return
                 st.inFlightBytes.set(item.key, Math.min(bytes, item.meta.bytes))
                 this.opts.onStateChange?.()
               },
               item.cache,
             )
             st.inFlightBytes.delete(item.key)
+            if (this.isStaleShard(st, item)) {
+              this.opts.onStateChange?.()
+              continue
+            }
             if (payload) {
               const parsedSections: ClientBodySection[] = []
               for (const [pIdx, anchor, pathSegs, text] of payload.sections) {
@@ -699,8 +720,10 @@ export class LectureSearchEngine {
             }
           } catch {
             st.inFlightBytes.delete(item.key)
-            st.failedShardKeys.add(item.key)
-            st.failedShardsByKey.set(item.key, item)
+            if (!this.isStaleShard(st, item)) {
+              st.failedShardKeys.add(item.key)
+              st.failedShardsByKey.set(item.key, item)
+            }
           }
           this.opts.onStateChange?.()
         }
@@ -799,11 +822,16 @@ export class LectureSearchEngine {
         phase: 'ready',
       }
     }
-    const percent = Math.min(99, Math.max(0, Math.round((capped / st.totalShardBytes) * 100)))
+    const percent =
+      st.totalShardBytes > 0 ? Math.min(99, Math.max(0, Math.round((capped / st.totalShardBytes) * 100))) : 0
     const toMb = (b: number) => (b / (1024 * 1024)).toFixed(1)
-    const label = hasQuery
-      ? this.opts.labels.loadingBar(toMb(capped), toMb(st.totalShardBytes))
-      : this.opts.labels.loadingIdle(toMb(capped), toMb(st.totalShardBytes))
+    const label =
+      st.totalShardBytes === 0
+        ? resolveDynamicLabel(this.opts.labels.loadingTitles) ||
+          (hasQuery ? this.opts.labels.loadingBar(toMb(capped), toMb(st.totalShardBytes)) : this.opts.labels.loadingIdle(toMb(capped), toMb(st.totalShardBytes)))
+        : hasQuery
+          ? this.opts.labels.loadingBar(toMb(capped), toMb(st.totalShardBytes))
+          : this.opts.labels.loadingIdle(toMb(capped), toMb(st.totalShardBytes))
     return {
       loading: true,
       loadedBytes: capped,

@@ -22,7 +22,7 @@ import {
 import { buildSearchArtifacts, SearchBudgetError, writeSearchArtifacts } from '../../docs/.vitepress/search/indexBuilder.ts'
 import { extractSearchablePage } from '../../docs/.vitepress/search/markdown.ts'
 import { configureAccess } from '../../docs/.vitepress/theme/access/store.ts'
-import { LectureSearchEngine, buildSnippet, splitHighlightParts } from '../../docs/.vitepress/theme/search/engine.ts'
+import { LectureSearchEngine, buildSnippet, splitHighlightParts, type LocaleIndexState } from '../../docs/.vitepress/theme/search/engine.ts'
 
 const tmpDirs: string[] = []
 
@@ -860,6 +860,122 @@ describe('client LectureSearchEngine: instant title results, progress, scope and
       expect(engine2.getLoadState('root', true)).toMatchObject({ loading: false, phase: 'ready', percent: 100 })
       expect(engine2.query('root', 'VIP', 'all', null).totalHits).toBe(0)
       expect(engine2.query('root', '公开导论', 'all', null).totalHits).toBe(1)
+    } finally {
+      configureAccess({ siteData: { value: {} }, withBase: (p) => p })
+    }
+  })
+
+  it('returns finite percent=0 when public manifest is empty while access tiers are loading, and ignores in-flight evicted shards', async () => {
+    const publicTitles: TitleIndexFile = {
+      v: 1,
+      locale: 'root',
+      groups: [{ id: 'G01', dir: 'g01', title: '公开组', catSlot: 1 }],
+      pages: [[0, 1, 'G01-L01', '/g01/L01', '第1讲 · 公开导论', []]],
+    }
+    const emptyManifest: SearchManifestFile = {
+      v: 1,
+      locale: 'root',
+      titleFile: 'titles.json',
+      titleBytes: 10,
+      totalShardBytes: 0,
+      totalRawShardBytes: 0,
+      shards: [],
+    }
+    const vipTitles: TitleIndexFile = {
+      v: 1,
+      locale: 'root',
+      groups: [{ id: 'VIP', dir: 'vip', title: '进阶组', catSlot: 2 }],
+      pages: [[0, 1, 'VIP-L01', '/vip/L01', '第1讲 · 竞态测试', []]],
+    }
+    const vipShardRaw = Buffer.from(
+      JSON.stringify({ v: 1, shardId: 'vip', groupId: 'VIP', pages: ['/vip/L01'], sections: [[0, 's1', ['节'], '竞态恢复内容']] }),
+      'utf8',
+    )
+    const vipShard = zlib.deflateRawSync(vipShardRaw, { level: 9 })
+    const vipManifest: SearchManifestFile = {
+      v: 1,
+      locale: 'root',
+      titleFile: 'titles.json',
+      titleBytes: 10,
+      totalShardBytes: vipShard.byteLength,
+      totalRawShardBytes: vipShardRaw.byteLength,
+      shards: [{ shardId: 'vip', groupId: 'VIP', url: 'shards/vip.sz', bytes: vipShard.byteLength, rawBytes: vipShardRaw.byteLength, pageCount: 1 }],
+    }
+
+    let releaseSiteData!: () => void
+    const siteDataGate = new Promise<void>((r) => {
+      releaseSiteData = r
+    })
+    let releaseShard!: () => void
+    const shardGate = new Promise<void>((r) => {
+      releaseShard = r
+    })
+    let shardCalls = 0
+    const siteObj = { themeConfig: { lectureAccess: { inlineTier: 'public', tiers: ['vip'] } } }
+    const fetchFn: typeof fetch = async (input) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url
+      if (url.endsWith('/_access/vip/site-data.json')) {
+        await siteDataGate
+        return new Response(JSON.stringify({ version: 1, tier: 'vip', groups: [], totals: { lectures: 1, charts: 0 }, locales: {} }), { status: 200 })
+      }
+      if (url.endsWith('/_access/vip/search/root/titles.json')) return new Response(JSON.stringify(vipTitles), { status: 200 })
+      if (url.endsWith('/_access/vip/search/root/manifest.json')) return new Response(JSON.stringify(vipManifest), { status: 200 })
+      if (url.endsWith('/_access/vip/search/root/shards/vip.sz')) {
+        shardCalls++
+        if (shardCalls === 1) {
+          await shardGate
+          return new Response('revoked', { status: 403 })
+        }
+        return new Response(new Uint8Array(vipShard), { status: 200 })
+      }
+      if (url.endsWith('/search/root/titles.json')) return new Response(JSON.stringify(publicTitles), { status: 200 })
+      if (url.endsWith('/search/root/manifest.json')) return new Response(JSON.stringify(emptyManifest), { status: 200 })
+      return new Response('not found', { status: 404 })
+    }
+
+    configureAccess({ siteData: { value: siteObj }, withBase: (p) => p, fetch: fetchFn })
+    try {
+      const engine = new LectureSearchEngine({
+        base: '/',
+        localeKeys: ['en'],
+        siteData: () => siteObj,
+        statusOf: () => 'not_started',
+        labels: {
+          lectureNo: (n) => `第${n}讲`,
+          groupCount: (n) => `${n} 条`,
+          groupSite: '概览',
+          loadingBar: (l, t) => `loading ${l}/${t}`,
+          loadingIdle: (l, t) => `idle ${l}/${t}`,
+          loadingTitles: '正在加载搜索索引…',
+          statusLabel: (s) => s,
+        },
+        fetchFn,
+      })
+
+      const p = engine.ensureLoaded('root', null)
+      await vi.waitFor(() => expect(engine.getLoadState('root', true).phase).toBe('loading-shards'), { timeout: 5_000, interval: 5 })
+      const loadingWithEmptyManifest = engine.getLoadState('root', true)
+      expect(Number.isNaN(loadingWithEmptyManifest.percent)).toBe(false)
+      expect(loadingWithEmptyManifest.percent).toBe(0)
+
+      releaseSiteData()
+      await p
+      // Wait for first shard request to enter flight
+      await vi.waitFor(() => expect(shardCalls).toBe(1), { timeout: 5_000, interval: 5 })
+      // Evict vip while shard #1 is still in flight
+      const st = (engine as unknown as { states: Map<string, LocaleIndexState> }).states.get('root')!
+      ;(engine as unknown as { evictTierData(s: LocaleIndexState, id: string): void }).evictTierData(st, 'vip')
+
+      releaseShard()
+      await vi.waitFor(() => expect(st.shardsPumpPromise).toBeNull(), { timeout: 5_000, interval: 5 })
+      // Stale failure from evicted epoch must NOT pollute failedShardKeys or loadedShardKeys
+      expect(st.failedShardKeys.has('tier:vip:vip')).toBe(false)
+      expect(st.loadedShardKeys.has('tier:vip:vip')).toBe(false)
+
+      // Re-loading vip after eviction works cleanly without stale key skip or poison
+      await engine.ensureLoaded('root', null, { forceRetry: true })
+      await vi.waitFor(() => expect(engine.getLoadState('root', true).loading).toBe(false), { timeout: 5_000, interval: 5 })
+      expect(engine.query('root', '竞态恢复内容', 'all', null).totalHits).toBe(1)
     } finally {
       configureAccess({ siteData: { value: {} }, withBase: (p) => p })
     }
